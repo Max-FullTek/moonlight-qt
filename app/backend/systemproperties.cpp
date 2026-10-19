@@ -67,14 +67,7 @@ SystemProperties::SystemProperties()
     isLinux = false;
 #endif
 
-#if defined(Q_OS_WIN32) || defined(Q_OS_DARWIN) || defined(Q_OS_LINUX)
-    // Windows attaches to an external usbipd-win server; macOS ships the
-    // moonlight-usbd helper (usbipdcpp) inside the app bundle; Linux wraps
-    // the standard usbip-host kernel stack (usbip + usbipd daemon).
-    // The Android service is future work; see the platform table in
-    // docs/remote-usb-reverse-tunnel.md.
-    usbForwardingAvailable = false;
-#endif
+
 
     QString nativeArch = QSysInfo::currentCpuArchitecture();
 

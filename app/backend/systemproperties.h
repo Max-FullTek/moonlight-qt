@@ -29,7 +29,6 @@ public:
     Q_PROPERTY(bool usesMaterial3Theme MEMBER usesMaterial3Theme CONSTANT)
     Q_PROPERTY(bool usesFluentTheme MEMBER usesFluentTheme CONSTANT)
     Q_PROPERTY(QString versionString MEMBER versionString CONSTANT)
-    Q_PROPERTY(bool usbForwardingAvailable MEMBER usbForwardingAvailable CONSTANT)
 
     // Properties queried asynchronously (startAsyncLoad() must be called!)
     Q_PROPERTY(bool hasHardwareAcceleration MEMBER hasHardwareAcceleration NOTIFY hasHardwareAccelerationChanged)
@@ -77,7 +76,6 @@ private:
     bool usesFluentTheme;
     bool isDarwin;
     bool isLinux;
-    bool usbForwardingAvailable = false;
 
     // Properties only set if startAsyncLoad() is called
     bool hasHardwareAcceleration;
