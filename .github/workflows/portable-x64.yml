@@ -1,0 +1,55 @@
+name: Traceable Windows x64 portable
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/self-build-v6.5.0]
+
+permissions:
+  contents: read
+
+jobs:
+  portable:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      QT_VERSION: 6.12.0
+      NAQT_COMMIT: 43da90f1464edd4cf39cb001a02022117070640f
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+          clean: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+      # Use the Node action directly: its wrapper uses a floating setup-python ref.
+      - name: Install pinned Qt SDK
+        uses: jdpurcell/install-qt-action/action@d715fb7cdd4e5661191a794764231398e2c952f2 # v5
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtmultimedia qtimageformats
+          use-naqt: true
+          naqtsource: git+https://github.com/jdpurcell/naqt.git@${{ env.NAQT_COMMIT }}
+          cache: false
+      - name: Verify and unpack x64 dependencies
+        shell: pwsh
+        run: ./scripts/prepare-portable-deps.ps1
+      - name: Compile, test and package
+        shell: pwsh
+        run: ./scripts/build-portable-x64.ps1
+      - name: Upload portable and provenance
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: moonlight-vplus-x64-${{ github.sha }}
+          path: build/portable-ci/artifacts/*
+          if-no-files-found: error
+          retention-days: 30
