@@ -2417,67 +2417,67 @@
     <message>
         <location filename="../gui/ScreenCombinationModeSelector.qml" line="21"/>
         <source>Follow host</source>
-        <translation type="unfinished"></translation>
+        <translation>依主機設定</translation>
     </message>
     <message>
         <location filename="../gui/ScreenCombinationModeSelector.qml" line="22"/>
         <source>Use the Sunshine host setting without overriding it.</source>
-        <translation type="unfinished"></translation>
+        <translation>使用 Sunshine 主機設定，不另行覆寫。</translation>
     </message>
     <message>
         <location filename="../gui/ScreenCombinationModeSelector.qml" line="26"/>
         <source>No operation mode</source>
-        <translation type="unfinished"></translation>
+        <translation>維持目前排列</translation>
     </message>
     <message>
         <location filename="../gui/ScreenCombinationModeSelector.qml" line="27"/>
         <source>Send no-operation mode and keep the current display layout.</source>
-        <translation type="unfinished"></translation>
+        <translation>通知主機不調整顯示器，保留目前的螢幕排列。</translation>
     </message>
     <message>
         <location filename="../gui/ScreenCombinationModeSelector.qml" line="31"/>
         <source>Activate mode</source>
-        <translation type="unfinished"></translation>
+        <translation>啟用串流螢幕</translation>
     </message>
     <message>
         <location filename="../gui/ScreenCombinationModeSelector.qml" line="32"/>
         <source>Activate the selected display for streaming.</source>
-        <translation type="unfinished"></translation>
+        <translation>啟用所選螢幕來進行串流。</translation>
     </message>
     <message>
         <location filename="../gui/ScreenCombinationModeSelector.qml" line="36"/>
         <source>Primary streaming mode</source>
-        <translation type="unfinished"></translation>
+        <translation>設為主螢幕</translation>
     </message>
     <message>
         <location filename="../gui/ScreenCombinationModeSelector.qml" line="37"/>
         <source>Activate the selected display and set it as primary.</source>
-        <translation type="unfinished"></translation>
+        <translation>啟用所選螢幕，並設為主螢幕。</translation>
     </message>
     <message>
         <location filename="../gui/ScreenCombinationModeSelector.qml" line="41"/>
         <source>Secondary streaming mode</source>
-        <translation type="unfinished"></translation>
+        <translation>設為次要螢幕</translation>
     </message>
     <message>
         <location filename="../gui/ScreenCombinationModeSelector.qml" line="42"/>
         <source>Keep the current primary display and use the selected display as secondary.</source>
-        <translation type="unfinished"></translation>
+        <translation>保留目前主螢幕，將所選螢幕作為次要螢幕。</translation>
     </message>
     <message>
         <location filename="../gui/ScreenCombinationModeSelector.qml" line="46"/>
         <source>Exclusive display streaming mode</source>
-        <translation type="unfinished"></translation>
+        <translation>僅使用串流螢幕</translation>
     </message>
     <message>
         <location filename="../gui/ScreenCombinationModeSelector.qml" line="47"/>
         <source>Use only the selected display and disable other displays.</source>
-        <translation type="unfinished"></translation>
+        <translation>只啟用所選螢幕，停用其他螢幕。</translation>
     </message>
     <message>
         <location filename="../gui/ScreenCombinationModeSelector.qml" line="166"/>
         <source>Selected</source>
-        <translation type="unfinished"></translation>
+        <translation>已選取</translation>
     </message>
 </context>
 <context>

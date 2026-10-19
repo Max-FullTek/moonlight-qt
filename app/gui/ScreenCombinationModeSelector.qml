@@ -13,7 +13,7 @@ Item {
     property bool saveOnSelection: false
     property Item navUpItem: null
     property Item navDownItem: null
-    readonly property int columns: compact ? 3 : 2
+    readonly property int columns: compact ? 3 : (width < 600 ? 1 : 2)
     readonly property Item firstItem: optionRepeater.count > 0 ? optionRepeater.itemAt(0) : null
     readonly property int optionCount: modes.length
     readonly property var modes: [
@@ -77,7 +77,11 @@ Item {
 
                 Layout.fillWidth: true
                 Layout.preferredWidth: (selector.width - optionGrid.columnSpacing * (selector.columns - 1)) / selector.columns
-                Layout.preferredHeight: selector.compact ? 78 : 112
+                Layout.preferredHeight: Math.max(selector.compact ? 78 : 112,
+                                                optionText.implicitHeight + Theme.spaceMd * 2)
+
+                Accessible.name: modelData.title
+                Accessible.description: modelData.description
 
                 activeFocusOnTab: true
                 hoverEnabled: true
@@ -128,6 +132,7 @@ Item {
                     }
 
                     Column {
+                        id: optionText
                         anchors {
                             left: optionPreview.right
                             leftMargin: selector.compact ? Theme.spaceXs : Theme.spaceMd
