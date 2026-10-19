@@ -4,7 +4,7 @@ $outDir = Join-Path $repoRoot 'build/gpui-package'
 New-Item -ItemType Directory -Force $outDir | Out-Null
 $exe = Join-Path $env:CARGO_TARGET_DIR 'release/moonlight-lite-gpui-prototype.exe'
 Copy-Item -LiteralPath $exe -Destination $outDir
-Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE.txt') -Destination $outDir
+Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination $outDir
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Cargo.lock') -Destination $outDir
 $commit = (git -C $repoRoot rev-parse HEAD).Trim()
 $rust = (rustc +1.99.1 --version).Trim()

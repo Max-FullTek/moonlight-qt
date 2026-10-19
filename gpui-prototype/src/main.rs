@@ -75,6 +75,8 @@ struct Prototype {
     paired: bool,
     slider_bounds: Rc<Cell<Bounds<Pixels>>>,
     dragging: bool,
+    root_focus: FocusHandle,
+    modal_focus: FocusHandle,
 }
 const HOSTS: &[(&str, &str, &str)] = &[
     ("工作電腦", "100.64.0.10", "已配對 · 在線"),
@@ -82,7 +84,7 @@ const HOSTS: &[(&str, &str, &str)] = &[
     ("客廳電腦", "192.168.1.30", "離線"),
 ];
 impl Prototype {
-    fn new() -> Self {
+    fn new(cx: &mut Context<Self>) -> Self {
         let (saved, notice) = settings::load();
         Self {
             page: Page::Devices,
@@ -93,9 +95,12 @@ impl Prototype {
             paired: false,
             slider_bounds: Rc::new(Cell::new(Bounds::default())),
             dragging: false,
+            root_focus: cx.focus_handle(),
+            modal_focus: cx.focus_handle(),
         }
     }
-    fn act(&mut self, action: Action, _: &mut Window, cx: &mut Context<Self>) {
+    fn act(&mut self, action: Action, window: &mut Window, cx: &mut Context<Self>) {
+        let had_modal = self.modal.is_some();
         match action {
             Action::Devices => self.page = Page::Devices,
             Action::Settings => self.page = Page::Settings,
@@ -178,6 +183,11 @@ impl Prototype {
                 Err(err) => self.notice = format!("無法儲存：{err}"),
             },
         }
+        if self.modal.is_some() {
+            window.focus(&self.modal_focus);
+        } else if had_modal {
+            window.focus(&self.root_focus);
+        }
         cx.notify();
     }
     fn set_bitrate_at(&mut self, x: Pixels) {
@@ -193,6 +203,26 @@ impl Render for Prototype {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let narrow = window.viewport_size().width < px(760.);
         div()
+            .id("prototype-root")
+            .track_focus(&self.root_focus)
+            .tab_group()
+            .tab_stop(false)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if event.keystroke.key == "tab" {
+                    if event.keystroke.modifiers.shift {
+                        window.focus_prev();
+                    } else {
+                        window.focus_next();
+                    }
+                    cx.stop_propagation();
+                }
+                if event.keystroke.key == "escape" && this.modal.is_some() {
+                    this.modal = None;
+                    window.focus(&this.root_focus);
+                    cx.notify();
+                    cx.stop_propagation();
+                }
+            }))
             .size_full()
             .relative()
             .flex()
@@ -282,7 +312,11 @@ fn main() {
                 }),
                 ..Default::default()
             },
-            |_, cx| cx.new(|_| Prototype::new()),
+            |window, cx| {
+                let view = cx.new(Prototype::new);
+                window.focus(&view.read(cx).root_focus);
+                view
+            },
         )
         .expect("Cannot open GPUI prototype window");
         cx.on_window_closed(|cx| {

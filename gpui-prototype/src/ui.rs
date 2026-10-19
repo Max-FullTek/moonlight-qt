@@ -10,9 +10,14 @@ impl Prototype {
         primary: bool,
         cx: &Context<Self>,
     ) -> Stateful<Div> {
+        let label: SharedString = label.into();
         div()
             .id(id)
             .tab_index(0)
+            .tab_stop(
+                self.modal.is_none()
+                    || matches!(action, Action::Close | Action::Pair | Action::Choose(_, _)),
+            )
             .cursor_pointer()
             .px_4()
             .py_2()
@@ -28,7 +33,7 @@ impl Prototype {
             .hover(|s| s.bg(rgb(if primary { 0x5ed5cd } else { 0x1d2833 })))
             .focus(|s| s.border_color(rgb(ACCENT)))
             .on_click(cx.listener(move |this, _, window, cx| this.act(action.clone(), window, cx)))
-            .child(label.into())
+            .child(label)
     }
     pub fn devices(&self, cx: &Context<Self>) -> AnyElement {
         div()
@@ -60,6 +65,7 @@ impl Prototype {
                             div()
                                 .id(("device", i))
                                 .tab_index(0)
+                                .tab_stop(self.modal.is_none())
                                 .cursor_pointer()
                                 .w(px(240.))
                                 .h(px(256.))
@@ -202,6 +208,7 @@ impl Prototype {
         div()
             .id(id)
             .tab_index(0)
+            .tab_stop(self.modal.is_none())
             .cursor_pointer()
             .w(px(42.))
             .h(px(24.))
@@ -562,8 +569,12 @@ impl Prototype {
             }
         }
         div()
+            .id("modal-overlay")
+            .track_focus(&self.modal_focus)
+            .tab_stop(false)
             .absolute()
             .inset_0()
+            .occlude()
             .bg(rgba(0x050a12d9))
             .flex()
             .items_center()
