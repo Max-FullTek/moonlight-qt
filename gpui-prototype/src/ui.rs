@@ -2,6 +2,38 @@ use crate::*;
 use settings::{CODECS, FEC, FPS, RESOLUTIONS};
 
 impl Prototype {
+    pub fn navigation(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        icon: &'static str,
+        action: Action,
+        selected: bool,
+        cx: &Context<Self>,
+    ) -> Stateful<Div> {
+        div()
+            .id(id)
+            .tab_index(0)
+            .tab_stop(self.modal.is_none())
+            .h_full()
+            .px_4()
+            .flex()
+            .items_center()
+            .gap_2()
+            .cursor_pointer()
+            .border_b_2()
+            .border_color(rgb(if selected { ACCENT } else { BG }))
+            .text_color(rgb(if selected { ACCENT } else { MUTED }))
+            .focus(|style| style.bg(rgb(0x193139)))
+            .hover(|style| style.bg(rgb(SURFACE)))
+            .on_click(cx.listener(move |this, _, window, cx| this.act(action.clone(), window, cx)))
+            .child(svg().path(icon).size(px(20.)).text_color(rgb(if selected {
+                ACCENT
+            } else {
+                MUTED
+            })))
+            .child(label)
+    }
     pub fn button(
         &self,
         id: impl Into<ElementId>,
@@ -136,7 +168,8 @@ impl Prototype {
                         .child(
                             svg()
                                 .path(if i == 0 { "monitor" } else { "gamepad" })
-                                .size(px(36.)),
+                                .size(px(36.))
+                                .text_color(rgb(TEXT)),
                         )
                         .child(
                             div()

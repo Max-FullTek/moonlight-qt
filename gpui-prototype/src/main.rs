@@ -255,22 +255,24 @@ impl Render for Prototype {
                     .gap_5()
                     .border_b_1()
                     .border_color(rgb(BORDER))
-                    .child(svg().path("gamepad").size(px(27.)))
+                    .child(svg().path("gamepad").size(px(27.)).text_color(rgb(TEXT)))
                     .child(
                         div()
                             .text_size(px(if narrow { 15. } else { 21. }))
                             .child("Moonlight V+ Lite"),
                     )
-                    .child(self.button(
+                    .child(self.navigation(
                         "devices-nav",
                         "裝置",
+                        "monitor",
                         Action::Devices,
                         self.page != Page::Settings,
                         cx,
                     ))
-                    .child(self.button(
+                    .child(self.navigation(
                         "settings-nav",
                         "設定",
+                        "sliders",
                         Action::Settings,
                         self.page == Page::Settings,
                         cx,
