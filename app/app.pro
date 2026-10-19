@@ -1,6 +1,7 @@
 QT += core quick network quickcontrols2 svg gui-private
 !config_SL: QT += multimedia
-CONFIG += c++17
+CONFIG += c++17 lrelease embed_translations
+QM_FILES_RESOURCE_PREFIX = /languages
 
 unix:!macx {
     TARGET = moonlight

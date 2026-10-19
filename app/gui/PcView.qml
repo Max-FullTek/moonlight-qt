@@ -18,6 +18,8 @@ import "Brand.js" as Brand
 CenteredGridView {
     // The computer list uses the local solid theme background.
     readonly property bool usesOwnBackground: true
+    signal addComputerRequested()
+    signal settingsRequested()
     property ComputerModel computerModel : createModel()
     id: pcGrid
     focus: true
@@ -157,44 +159,14 @@ CenteredGridView {
         selectAddressDialog.open()
     }
 
-    // 搜索状态：Manrope 800 大标题 + DM Mono 说明行 + 斜条纹读条，
-    // 都咬着同一条左基线。
-    Column {
+    HostEmptyState {
+        id: emptyState
         anchors.centerIn: parent
-        width: Math.min(parent.width - Theme.spaceXl * 2, 560)
-        spacing: Theme.spaceMd
+        width: Math.max(1, Math.min(parent.width - Theme.spaceXl * 2, 560))
         visible: pcGrid.count === 0
-
-        Text {
-            width: parent.width
-            text: StreamingPreferences.enableMdns ? qsTr("Searching") : qsTr("No Computers")
-            color: Theme.text
-            font.family: Theme.fontSans
-            font.pointSize: 26
-            font.weight: Font.ExtraBold
-            font.capitalization: Font.AllUppercase
-            font.letterSpacing: Theme.trackingTight(26)
-            // 标题和说明都咬着读条的左基线，不居中 —— 和加载页、退出页一致
-            horizontalAlignment: Text.AlignLeft
-        }
-
-        // 关掉 mDNS 时读条停在暗态：这里本来就没有在扫描，一台没通电的仪表比
-        // 一条空轨道更说明问题。
-        HardProgress {
-            width: parent.width
-            running: StreamingPreferences.enableMdns
-        }
-
-        Text {
-            width: parent.width
-            text: StreamingPreferences.enableMdns ? qsTr("Searching for compatible hosts on your local network...")
-                                                  : qsTr("Automatic PC discovery is disabled. Add your PC manually.")
-            color: Theme.textDim
-            font.family: Theme.fontMono
-            font.pointSize: Theme.fontBody
-            horizontalAlignment: Text.AlignLeft
-            wrapMode: Text.Wrap
-        }
+        discoveryEnabled: StreamingPreferences.enableMdns
+        onAddComputerRequested: pcGrid.addComputerRequested()
+        onSettingsRequested: pcGrid.settingsRequested()
     }
 
     model: computerModel

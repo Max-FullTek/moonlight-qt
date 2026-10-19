@@ -8,6 +8,7 @@ ToolButton {
     id: control
 
     property string iconSource
+    Accessible.name: control.text !== "" ? control.text : control.ToolTip.text
 
     // 工具栏图标现在是 Fluent 24px Regular 的线性字形（和设置页分类栏同一套），
     // 不再是以前那批 Material 48px filled。线性笔画在 40px 下会显得又细又飘，

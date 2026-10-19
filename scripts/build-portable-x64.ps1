@@ -94,6 +94,11 @@ New-Item -ItemType File -Path (Join-Path $deploy 'portable.dat') | Out-Null
 $env:PATH = "$deploy;$env:PATH"
 $testResults = @()
 $env:QT_QPA_PLATFORM = 'offscreen'
+$env:QT_QUICK_BACKEND = 'software'
+Invoke-Checked (Join-Path $qtBins 'qmltestrunner.exe') @(
+    '-input', (Join-Path $SourceRoot 'tests/lite_ui'), '-o', '-,txt'
+)
+$testResults += @{ name = 'lite-manual-connection-ui'; result = 'passed-offscreen' }
 foreach ($test in @('keyboard_state', 'shared_helpers', 'clipboard_payload_routing', 'overlay_menu_navigation')) {
     $testBuild = Join-Path $root "test-$test"
     New-Item -ItemType Directory -Path $testBuild | Out-Null

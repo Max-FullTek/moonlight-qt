@@ -188,38 +188,17 @@ ApplicationWindow {
         }
     }
 
-    // 全局壁纸。PcView 负责抓取、缓存和刷新，抓到之后写回这里，
-    // 这样连接进度页、退出页、设置页共用同一张背景，而不是各自一片纯色。
-    property string backgroundImageUrl: ""
-
-    // PcView / AppView / SettingsView 各自已经按自己的配方铺了一层壁纸（半透明 + 压暗），
-    // 它们背后再垫一张全尺寸原图的话两层会错位叠在一起。所以这层只服务于自己不画背景的页面
-    // ——连接进度页、退出页。
-    readonly property bool showGlobalBackground:
-        !(stackView.currentItem && stackView.currentItem.usesOwnBackground === true)
-
-    // 屏幕键盘单例,HardTextField 组件统一从这里取(见 theme/HardTextField.qml)
+    // Kept for local artwork fallback in StreamSegue.
+    readonly property string backgroundImageUrl: ""
     readonly property alias gamepadOsk: gamepadKeyboard
 
-    Image {
-        anchors.fill: parent
-        anchors.topMargin: -window.chromeInset
-        source: window.backgroundImageUrl
-        visible: source != "" && window.showGlobalBackground
-        fillMode: Image.PreserveAspectCrop
-        asynchronous: true
-        cache: true
-        z: -3
-    }
-
-    // 压暗壁纸，保证上层内容的可读性；强度和各个自绘背景页使用同一设置。
-    Rectangle {
-        anchors.fill: parent
-        anchors.topMargin: -window.chromeInset
-        color: Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b,
-                       StreamingPreferences.backgroundOverlayOpacity / 100.0)
-        visible: window.showGlobalBackground
-        z: -2
+    Connections {
+        target: stackView.currentItem
+        ignoreUnknownSignals: true
+        function onAddComputerRequested() { addPcDialog.open() }
+        function onSettingsRequested() {
+            window.navigateTo("qrc:/gui/SettingsView.qml", SettingsView)
+        }
     }
 
     StackView {
@@ -463,6 +442,7 @@ ApplicationWindow {
                 visible: stackView.depth > 1
 
                 iconSource: "qrc:/res/fluent/tb-back.svg"
+                Accessible.name: qsTr("Back")
 
                 onClicked: goBack()
 
@@ -485,7 +465,7 @@ ApplicationWindow {
                     Text {
                         id: wordmark
                         visible: toolBar.width > 700
-                        text: "MOONLIGHT V+ FOR PC"
+                        text: "MOONLIGHT V+ LITE"
                         color: Theme.text
                         font.family: Theme.fontSans
                         font.pointSize: Theme.fontCardTitle

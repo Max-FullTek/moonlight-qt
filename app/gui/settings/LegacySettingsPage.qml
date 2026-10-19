@@ -173,7 +173,7 @@ Column {
 
     SettingsCard {
         visible: settingsPage.category === "ui" && hasVisibleContent
-        title: qsTr("Notifications and integrations")
+        title: qsTr("Notifications and power")
 
         ToggleRow {
             title: qsTr("Show connection quality warnings")
@@ -503,7 +503,7 @@ Column {
         title: qsTr("Network")
 
         ToggleRow {
-            title: qsTr("Automatically find PCs on the local network (Recommended)")
+            title: qsTr("Automatically find PCs on the local network")
             checked: StreamingPreferences.enableMdns
             onToggled: function(value) {
                 if (StreamingPreferences.enableMdns === value) {

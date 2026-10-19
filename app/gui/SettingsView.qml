@@ -18,7 +18,7 @@ import "theme"
 // FocusScope 会把焦点转交给内部真正持焦的控件。
 FocusScope {
     id: settingsPage
-    // 这一页自带壁纸，main.qml 不用再垫一层
+    // Settings use the local solid theme background.
     readonly property bool usesOwnBackground: true
     objectName: qsTr("Settings")
 
@@ -117,26 +117,6 @@ FocusScope {
             rail.focusCurrent()
             event.accepted = true
         }
-    }
-
-    // Reuse the background already owned by the application window. Creating a
-    // hidden PcView here duplicated its model, network work, and scene graph.
-    Image {
-        anchors.fill: parent
-        visible: StreamingPreferences.backgroundSource !== StreamingPreferences.BGS_NONE
-        source: Window.window && Window.window.backgroundImageUrl !== ""
-                ? Window.window.backgroundImageUrl
-                : "qrc:/res/gura.png"
-        fillMode: Image.PreserveAspectCrop
-        z: -2
-    }
-
-    Rectangle {
-        anchors.fill: parent
-        visible: StreamingPreferences.backgroundSource !== StreamingPreferences.BGS_NONE
-        color: Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b,
-                       StreamingPreferences.backgroundOverlayOpacity / 100.0)
-        z: -1
     }
 
     Item {

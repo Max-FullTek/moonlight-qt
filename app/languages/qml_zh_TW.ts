@@ -163,7 +163,7 @@
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="27"/>
         <source>Video</source>
-        <translation type="unfinished"></translation>
+        <translation>視訊</translation>
     </message>
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="28"/>
@@ -257,7 +257,7 @@
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="580"/>
         <source>Video bitrate</source>
-        <translation type="unfinished"></translation>
+        <translation>視訊位元率</translation>
     </message>
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="581"/>
@@ -282,7 +282,7 @@
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="706"/>
         <source>Enhancements</source>
-        <translation type="unfinished"></translation>
+        <translation>畫質增強</translation>
     </message>
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="710"/>
@@ -292,52 +292,52 @@
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="711"/>
         <source>This feature effectively upscales, reduces compression artifacts and enhances the clarity of streamed content.</source>
-        <translation type="unfinished"></translation>
+        <translation>此功能可放大影像、減少壓縮失真，並提升串流畫面的清晰度。</translation>
     </message>
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="712"/>
         <source>Note:</source>
-        <translation type="unfinished"></translation>
+        <translation>注意：</translation>
     </message>
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="713"/>
         <source>If available, ensure that appropriate settings (i.e. RTX Video enhancement) are enabled in your GPU driver configuration.</source>
-        <translation type="unfinished"></translation>
+        <translation>若顯示卡支援，請先在驅動程式設定中啟用對應功能（例如 RTX 視訊增強）。</translation>
     </message>
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="714"/>
         <source>HDR rendering has diverse issues depending on the GPU used, we are working on it but we advise to currently use Non-HDR.</source>
-        <translation type="unfinished"></translation>
+        <translation>HDR 相容性因顯示卡而異，目前建議搭配 SDR 使用。</translation>
     </message>
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="715"/>
         <source>Be advised that using this feature on laptops running on battery power may lead to significant battery drain.</source>
-        <translation type="unfinished"></translation>
+        <translation>筆記型電腦使用電池時，啟用此功能可能大幅增加耗電。</translation>
     </message>
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="722"/>
         <source>Video AI-Enhancement</source>
-        <translation type="unfinished"></translation>
+        <translation>AI 畫質增強</translation>
     </message>
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="734"/>
         <source>Video AI-Enhancement (Not supported by the GPU)</source>
-        <translation type="unfinished"></translation>
+        <translation>AI 畫質增強（顯示卡不支援）</translation>
     </message>
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="739"/>
         <source>Video AI-Enhancement (Experimental)</source>
-        <translation type="unfinished"></translation>
+        <translation>AI 畫質增強（實驗性功能）</translation>
     </message>
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="746"/>
         <source>Stream Resolution Scale</source>
-        <translation type="unfinished"></translation>
+        <translation>串流渲染比例</translation>
     </message>
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="747"/>
         <source>Renders the stream below the selected resolution and upscales it on the client.</source>
-        <translation type="unfinished"></translation>
+        <translation>以低於所選解析度的比例渲染，再由用戶端放大。</translation>
     </message>
     <message>
         <location filename="../gui/settings/BasicSettingsPage.qml" line="790"/>
@@ -419,6 +419,10 @@
     <message>
         <source>Fixed FEC percentage</source>
         <translation>固定 FEC 比例</translation>
+    </message>
+    <message>
+        <source>Enhance video quality by utilizing the GPU's AI-Enhancement capabilities.</source>
+        <translation>使用顯示卡的 AI 增強功能改善畫質。</translation>
     </message>
 </context>
 <context>
@@ -573,7 +577,7 @@
     <message>
         <location filename="../gui/settings/DisplaySettingsPage.qml" line="28"/>
         <source>Display</source>
-        <translation type="unfinished"></translation>
+        <translation>顯示</translation>
     </message>
     <message>
         <location filename="../gui/settings/DisplaySettingsPage.qml" line="32"/>
@@ -608,12 +612,12 @@
     <message>
         <location filename="../gui/settings/DisplaySettingsPage.qml" line="108"/>
         <source>Stretch presentation</source>
-        <translation type="unfinished"></translation>
+        <translation>延展畫面</translation>
     </message>
     <message>
         <location filename="../gui/settings/DisplaySettingsPage.qml" line="109"/>
         <source>Ignores both client and host PC aspect ratios, which is required for displaying Half-SBS (Side-By-Side) 3D signals to AR/XR devices that only support Full-SBS (usually 1920x1080 per eye, meaning a total resolution of 3840x1080)</source>
-        <translation type="unfinished"></translation>
+        <translation>忽略主機與用戶端的長寬比，將 Half-SBS 左右並排 3D 畫面延展至僅支援 Full-SBS 的 AR／XR 裝置（通常每眼 1920×1080，合計 3840×1080）。</translation>
     </message>
     <message>
         <location filename="../gui/settings/DisplaySettingsPage.qml" line="116"/>
@@ -638,7 +642,7 @@
     <message>
         <location filename="../gui/settings/DisplaySettingsPage.qml" line="133"/>
         <source>HDR</source>
-        <translation type="unfinished"></translation>
+        <translation>HDR</translation>
     </message>
     <message>
         <location filename="../gui/settings/DisplaySettingsPage.qml" line="136"/>
@@ -658,12 +662,12 @@
     <message>
         <location filename="../gui/settings/DisplaySettingsPage.qml" line="148"/>
         <source>HDR format</source>
-        <translation type="unfinished"></translation>
+        <translation>HDR 格式</translation>
     </message>
     <message>
         <location filename="../gui/settings/DisplaySettingsPage.qml" line="149"/>
         <source>HDR10 (PQ) is the standard HDR format. HLG offers better compatibility with SDR displays when HDR is not active on the host.</source>
-        <translation type="unfinished"></translation>
+        <translation>HDR10（PQ）是標準 HDR 格式。主機未啟用 HDR 時，HLG 與 SDR 顯示器的相容性較佳。</translation>
     </message>
     <message>
         <source>Enable V-Sync to use frame pacing.</source>
@@ -966,7 +970,7 @@
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="84"/>
         <source>7.1.4 surround sound</source>
-        <translation type="unfinished"></translation>
+        <translation>7.1.4 聲道環繞音效</translation>
     </message>
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="98"/>
@@ -1006,12 +1010,12 @@
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="153"/>
         <source>Screen Combination Mode</source>
-        <translation type="unfinished"></translation>
+        <translation>螢幕組合模式</translation>
     </message>
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="160"/>
         <source>Sunshine Foundation display control</source>
-        <translation type="unfinished"></translation>
+        <translation>Sunshine Foundation 顯示控制</translation>
     </message>
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="174"/>
@@ -1076,7 +1080,7 @@
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="459"/>
         <source>Show configuration warnings</source>
-        <translation type="unfinished"></translation>
+        <translation>顯示設定警告</translation>
     </message>
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="471"/>
@@ -1161,7 +1165,7 @@
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="598"/>
         <source>Show local cursor</source>
-        <translation type="unfinished"></translation>
+        <translation>顯示本機游標</translation>
     </message>
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="608"/>
@@ -1171,7 +1175,7 @@
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="609"/>
         <source>You can toggle this while streaming using Ctrl+Alt+Shift+C.</source>
-        <translation type="unfinished"></translation>
+        <translation>串流時可按 Ctrl+Alt+Shift+C 切換。</translation>
     </message>
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="619"/>
@@ -1216,12 +1220,12 @@
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="709"/>
         <source>Use precision touchpad input when available</source>
-        <translation type="unfinished"></translation>
+        <translation>使用精確式觸控板輸入（若支援）</translation>
     </message>
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="719"/>
         <source>Sends native multi-touch trackpad contacts to compatible Sunshine hosts. Unsupported devices and hosts fall back to pointer input. Changes apply to the next stream.</source>
-        <translation type="unfinished"></translation>
+        <translation>將原生多點觸控板輸入傳送至相容的 Sunshine 主機。不支援的裝置或主機會改用游標輸入，變更於下次串流生效。</translation>
     </message>
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="727"/>
@@ -1256,7 +1260,7 @@
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="788"/>
         <source>Swap Alt and Win keys</source>
-        <translation type="unfinished"></translation>
+        <translation>交換 Alt 與 Win 鍵</translation>
     </message>
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="800"/>
@@ -1311,7 +1315,7 @@
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="885"/>
         <source>Gamepad quit combo</source>
-        <translation type="unfinished"></translation>
+        <translation>手把結束串流組合鍵</translation>
     </message>
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="908"/>
@@ -1403,7 +1407,7 @@
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="1082"/>
         <source>Renderer</source>
-        <translation type="unfinished"></translation>
+        <translation>渲染器</translation>
     </message>
     <message>
         <location filename="../gui/settings/LegacySettingsPage.qml" line="1138"/>
@@ -1489,6 +1493,98 @@
         <location filename="../gui/settings/LegacySettingsPage.qml" line="505"/>
         <source>Diagnostics</source>
         <translation>診斷</translation>
+    </message>
+    <message>
+        <source>Mutes Moonlight's audio when you Alt+Tab out of the stream or click on a different window.</source>
+        <translation>在你使用 Alt+Tab 切換離開串流視窗或按下其他視窗時，Moonlight 將靜音。</translation>
+    </message>
+    <message>
+        <source>Software Settings</source>
+        <translation>應用程式設定</translation>
+    </message>
+    <message>
+        <source>Window display mode</source>
+        <translation>啟動時的視窗模式</translation>
+    </message>
+    <message>
+        <source>Choose how Moonlight opens when the application starts.</source>
+        <translation>選擇 Moonlight 啟動時使用的視窗模式。</translation>
+    </message>
+    <message>
+        <source>Remember window position and size</source>
+        <translation>記住視窗位置與大小</translation>
+    </message>
+    <message>
+        <source>Restore the previous window position and size the next time Moonlight starts.</source>
+        <translation>下次啟動 Moonlight 時還原上次的視窗位置與大小。</translation>
+    </message>
+    <message>
+        <source>Notifications and power</source>
+        <translation>通知與電源</translation>
+    </message>
+    <message>
+        <source>This enables seamless mouse control without capturing the client's mouse cursor. It is ideal for remote desktop usage but will not work in most games.</source>
+        <translation>這可以實現無縫滑鼠控制，而無須捕捉用戶端的滑鼠指標。這是理想的遠端桌面選擇，但在大多數遊戲中不起作用。</translation>
+    </message>
+    <message>
+        <source>This makes the client's mouse cursor visible in the stream.</source>
+        <translation>在串流畫面中顯示用戶端的滑鼠游標。</translation>
+    </message>
+    <message>
+        <source>Receives a compact analyzed haptics signal and renders it through the connected controller's vibration motors. Changes apply to the next stream.</source>
+        <translation>接收經過分析的精簡觸覺訊號，並透過已連接控制器的震動馬達提供回饋。變更將在下次串流時生效。</translation>
+    </message>
+    <message>
+        <source>Joystick deadzone</source>
+        <translation>搖桿死區</translation>
+    </message>
+    <message>
+        <source>Ignores stick deflections below this percentage, e.g. to compensate for a drifting stick. 0% sends stick input unmodified.</source>
+        <translation>忽略低於此百分比的搖桿偏移，可減輕搖桿飄移；0% 會原樣傳送搖桿輸入。</translation>
+    </message>
+    <message>
+        <source>Only enable this option when streaming a game that doesn't support gamepads being connected after startup.</source>
+        <translation>僅在遊戲啟動後不支援手把連線時才啟用此選項。</translation>
+    </message>
+    <message>
+        <source>Enable mouse control with gamepads by holding the '%1' button</source>
+        <translation>長按「%1」鍵啟用手把滑鼠控制</translation>
+    </message>
+    <message>
+        <source>While this is off, holding %1 opens the in-stream overlay menu instead.</source>
+        <translation>關閉時，長按 %1 會開啟串流選單。</translation>
+    </message>
+    <message>
+        <source>Allows Moonlight to capture gamepad inputs even if it's not the current window in focus</source>
+        <translation>即使不是焦點視窗，也允許 Moonlight 擷取手把輸入</translation>
+    </message>
+    <message>
+        <source>(Default)</source>
+        <translation>（預設）</translation>
+    </message>
+    <message>
+        <source>Choose which button combination exits streaming. Use alternatives if the default doesn't work on your device.</source>
+        <translation>選擇結束串流的按鍵組合。若裝置無法使用預設組合，可改選其他組合。</translation>
+    </message>
+    <message>
+        <source>Automatically find PCs on the local network</source>
+        <translation>自動搜尋區網中的電腦</translation>
+    </message>
+    <message>
+        <source>You can toggle it at any time while streaming using %1 or %2.</source>
+        <translation>串流時可隨時按 %1 或 %2 切換。</translation>
+    </message>
+    <message>
+        <source>With a gamepad connected, holding %1 also opens the menu while this is not Disabled (requires Gamepad Mouse to be off).</source>
+        <translation>連接手把且未選擇「停用」時，長按 %1 也可開啟選單（需先關閉手把滑鼠控制）。</translation>
+    </message>
+    <message>
+        <source>Floating button (default)</source>
+        <translation>浮動按鈕（預設）</translation>
+    </message>
+    <message>
+        <source>Disabled</source>
+        <translation>停用</translation>
     </message>
 </context>
 <context>
@@ -2748,7 +2844,7 @@
     <message>
         <location filename="../gui/SettingsView.qml" line="37"/>
         <source>Display Settings</source>
-        <translation type="unfinished"></translation>
+        <translation>顯示設定</translation>
     </message>
     <message>
         <location filename="../gui/SettingsView.qml" line="38"/>
@@ -2791,6 +2887,10 @@
     <message>
         <source>Interface</source>
         <translation>介面</translation>
+    </message>
+    <message>
+        <source>About</source>
+        <translation>關於</translation>
     </message>
 </context>
 <context>
@@ -2908,7 +3008,7 @@
     <message>
         <location filename="../gui/main.qml" line="701"/>
         <source>Display Settings</source>
-        <translation type="unfinished"></translation>
+        <translation>顯示設定</translation>
     </message>
     <message>
         <location filename="../gui/main.qml" line="748"/>
@@ -2976,6 +3076,18 @@
         <source>Learn more</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Back</source>
+        <translation>返回</translation>
+    </message>
+    <message>
+        <source>This version of Moonlight isn't optimized for your PC. Please download the '%1' version of Moonlight for the best streaming performance.</source>
+        <translation>此版本的 Moonlight 尚未針對你的電腦最佳化。請下載「%1」版本的 Moonlight，以獲得最佳的串流效能。</translation>
+    </message>
+    <message>
+        <source>No keyboard? Press %1 to open the on-screen keyboard.</source>
+        <translation>沒有鍵盤？按 %1 開啟螢幕鍵盤。</translation>
+    </message>
 </context>
 <context>
     <name>UsbForwardingEnvironment</name>
@@ -3026,5 +3138,63 @@
     <message><source>Pipw image is unavailable</source><translation>Pipw 圖片無法使用</translation></message>
     <message><source>This background image is unavailable. Please try another image.</source><translation>這張背景圖片無法使用，請換一張再試。</translation></message>
     <message><source>Unable to load the background image. Please try another image.</source><translation>無法載入背景圖片，請換一張再試。</translation></message>
+</context>
+<context>
+    <name>HostEmptyState</name>
+    <message>
+        <source>Add your PC</source>
+        <translation>新增你的電腦</translation>
+    </message>
+    <message>
+        <source>Enter your PC's LAN or Tailscale IP address to pair and start streaming.</source>
+        <translation>輸入主機的區網或 Tailscale IP 位址，配對後即可開始串流。</translation>
+    </message>
+    <message>
+        <source>Add PC manually</source>
+        <translation>手動新增電腦</translation>
+    </message>
+    <message>
+        <source>Open settings</source>
+        <translation>開啟設定</translation>
+    </message>
+    <message>
+        <source>Local discovery is running. You can also add a PC manually.</source>
+        <translation>正在搜尋區網主機，也可以手動新增電腦。</translation>
+    </message>
+    <message>
+        <source>Local discovery is off. You can enable it in settings.</source>
+        <translation>區網自動搜尋已關閉，可在設定中啟用。</translation>
+    </message>
+</context>
+<context>
+    <name>AboutSettingsPage</name>
+    <message>
+        <source>No external browser is available.</source>
+        <translation>找不到可用的外部瀏覽器。</translation>
+    </message>
+    <message>
+        <source>About</source>
+        <translation>關於</translation>
+    </message>
+    <message>
+        <source>Version %1</source>
+        <translation>版本 %1</translation>
+    </message>
+    <message>
+        <source>Legal notice</source>
+        <translation>授權聲明</translation>
+    </message>
+    <message>
+        <source>This software is released under GNU GPLv3. The full license and third-party component information are provided below.</source>
+        <translation>本軟體以 GNU GPLv3 授權發布。完整授權條款與第三方元件資訊如下。</translation>
+    </message>
+    <message>
+        <source>License agreement</source>
+        <translation>授權條款</translation>
+    </message>
+    <message>
+        <source>Third-party notice</source>
+        <translation>第三方元件聲明</translation>
+    </message>
 </context>
 </TS>

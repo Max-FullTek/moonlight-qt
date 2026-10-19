@@ -807,6 +807,7 @@ Column {
 
                 HardSwitch {
                     id: streamResolutionScaleSwitch
+                    Accessible.name: qsTr("Stream Resolution Scale")
                     anchors.verticalCenter: parent.verticalCenter
                     checked: StreamingPreferences.streamResolutionScale
                     onToggled: {
@@ -841,111 +842,4 @@ Column {
         }
     }
 
-    // ================= 远程覆盖 =================
-    SettingsCard {
-        title: qsTr("Remote overrides")
-        subtitle: qsTr("Used instead of the values above when streaming over the internet.")
-
-        SettingsRow {
-            title: qsTr("Remote Resolution")
-
-            Row {
-                spacing: Theme.spaceSm
-
-                HardSwitch {
-                    id: remoteResolutionSwitch
-                    anchors.verticalCenter: parent.verticalCenter
-                    checked: StreamingPreferences.remoteResolution
-                    onToggled: {
-                        StreamingPreferences.remoteResolution = checked
-                    }
-                }
-
-                HardTextField {
-                    id: remoteResolutionWidthField
-                    anchors.verticalCenter: parent.verticalCenter
-                    maximumLength: 4
-                    inputMethodHints: Qt.ImhDigitsOnly
-                    placeholderText: "1280"
-                    validator: IntValidator{bottom:256; top:8192}
-                    width: 96
-                    visible: remoteResolutionSwitch.checked
-                    text: StreamingPreferences.remoteResolutionWidth > 0 ? StreamingPreferences.remoteResolutionWidth.toString() : ""
-                    onEditingFinished: {
-                        var value = parseInt(text);
-                        if (!isNaN(value)) {
-                            StreamingPreferences.remoteResolutionWidth = value;
-                        }
-                    }
-                }
-
-                Label {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "x"
-                    font.bold: true
-                    visible: remoteResolutionSwitch.checked
-                }
-
-                HardTextField {
-                    id: remoteResolutionHeightField
-                    anchors.verticalCenter: parent.verticalCenter
-                    maximumLength: 4
-                    inputMethodHints: Qt.ImhDigitsOnly
-                    placeholderText: "720"
-                    validator: IntValidator{bottom:256; top:8192}
-                    width: 96
-                    visible: remoteResolutionSwitch.checked
-                    text: StreamingPreferences.remoteResolutionHeight > 0 ? StreamingPreferences.remoteResolutionHeight.toString() : ""
-                    onEditingFinished: {
-                        var value = parseInt(text);
-                        if (!isNaN(value)) {
-                            StreamingPreferences.remoteResolutionHeight = value;
-                        }
-                    }
-                }
-            }
-        }
-
-        SettingsRow {
-            title: qsTr("Remote Frame Rate")
-
-            Row {
-                spacing: Theme.spaceSm
-
-                HardSwitch {
-                    id: remoteFpsSwitch
-                    anchors.verticalCenter: parent.verticalCenter
-                    checked: StreamingPreferences.remoteFps
-                    onToggled: {
-                        StreamingPreferences.remoteFps = checked
-                    }
-                }
-
-                HardTextField {
-                    id: remoteFpsRateField
-                    anchors.verticalCenter: parent.verticalCenter
-                    maximumLength: 3
-                    inputMethodHints: Qt.ImhDigitsOnly
-                    validator: IntValidator{bottom:1; top:512}
-                    placeholderText: "60"
-                    width: 80
-                    visible: remoteFpsSwitch.checked
-                    text: StreamingPreferences.remoteFpsRate > 0 ? StreamingPreferences.remoteFpsRate.toString() : ""
-                    onEditingFinished: {
-                        var value = parseInt(text);
-                        if (!isNaN(value)) {
-                            StreamingPreferences.remoteFpsRate = value;
-                        }
-                    }
-                }
-
-                Label {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("FPS")
-                    font.bold: true
-                    visible: remoteFpsSwitch.checked
-                }
-            }
-        }
-    }
 }

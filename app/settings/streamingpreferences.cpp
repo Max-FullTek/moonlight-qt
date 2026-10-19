@@ -249,7 +249,7 @@ void StreamingPreferences::reload()
     gameOptimizations = settings.value(SER_GAMEOPTS, true).toBool();
     playAudioOnHost = settings.value(SER_HOSTAUDIO, false).toBool();
     multiController = settings.value(SER_MULTICONT, true).toBool();
-    enableMdns = settings.value(SER_MDNS, true).toBool();
+    enableMdns = settings.value(SER_MDNS, false).toBool();
     quitAppAfter = settings.value(SER_QUITAPPAFTER, false).toBool();
     absoluteMouseMode = settings.value(SER_ABSMOUSEMODE, false).toBool();
     showLocalCursor = settings.value(SER_SHOWLOCALCURSOR, false).toBool();
@@ -281,10 +281,10 @@ void StreamingPreferences::reload()
 
     streamResolutionScale = settings.value(SER_STREAMRESOLUTIONSCALE, false).toBool();
     streamResolutionScaleRatio = settings.value(SER_STREAMRESOLUTIONSCALERATIO, 100).toInt();
-    remoteResolution = settings.value(SER_REMOTERESOLUTION, false).toBool();
+    remoteResolution = false;
     remoteResolutionWidth = settings.value(SER_REMOTEWIDTH, 1280).toInt();
     remoteResolutionHeight = settings.value(SER_REMOTEHEIGHT, 720).toInt();
-    remoteFps = settings.value(SER_REMOTEFPS, false).toBool();
+    remoteFps = false;
     remoteFpsRate = settings.value(SER_REMOTEFPSRATE, 60).toInt();
 
     connectionWarnings = settings.value(SER_CONNWARNINGS, true).toBool();
