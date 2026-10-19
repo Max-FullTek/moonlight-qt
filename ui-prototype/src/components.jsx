@@ -48,8 +48,8 @@ export function ToggleField({ label, description, value, onChange, disabled = fa
   return <Field label={label} description={description}>{(id, hint) => <input id={id} aria-describedby={hint} type="checkbox" role="switch" className="switch" checked={value} onChange={event => onChange(event.target.checked)} disabled={disabled}/>}</Field>;
 }
 
-export function NumberField({ label, value, onChange, min, max, suffix = '' }) {
-  return <Field label={label}>{id => <div className="number-control"><input id={id} type="number" min={min} max={max} value={value} onChange={event => onChange(event.target.value === '' ? '' : Number(event.target.value))}/>{suffix ? <span>{suffix}</span> : null}</div>}</Field>;
+export function NumberField({ label, value, onChange, min, max, step = 1, suffix = '' }) {
+  return <Field label={label}>{id => <div className="number-control"><input id={id} type="number" min={min} max={max} step={step} value={value} onChange={event => onChange(event.target.value === '' ? '' : Number(event.target.value))}/>{suffix ? <span>{suffix}</span> : null}</div>}</Field>;
 }
 
 export function Section({ title, children }) {

@@ -20,7 +20,8 @@ test('prototype storage keeps review notes, decisions and per-host app choices',
 
 test('invalid custom video settings do not become saved settings', () => {
   assert.equal(validateSettings(defaults), '');
-  for (const invalid of [{ resolution: 'custom', customWidth: 0 }, { fps: 'custom', customFps: 0 }, { bitrate: '' }, { fec: 'fixed', fecPercent: 101 }, { hdr: true, hdrWhite: '' }]) assert.notEqual(validateSettings({ ...defaults, ...invalid }), '');
+  for (const invalid of [{ resolution: 'custom', customWidth: 0 }, { fps: 'custom', customFps: 0 }, { bitrate: '' }, { fec: 'fixed', fecPercent: 101 }, { hdr: true, hdrBrightnessMode: 'manual', hdrFullFrame: 1200 }, { hdr: true, hdrBrightnessMode: 'manual', hdrMin: -1 }]) assert.notEqual(validateSettings({ ...defaults, ...invalid }), '');
+  assert.equal(validateSettings({ ...defaults, hdr: true, hdrBrightnessMode: 'manual', hdrMin: 0.0001, hdrFullFrame: 400, hdrPeak: 1000 }), '');
 });
 
 test('recommended bitrate follows existing native resolution and FPS policy', () => {

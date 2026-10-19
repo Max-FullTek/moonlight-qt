@@ -15,7 +15,7 @@ export const applications = [
 export const defaults = {
   resolution: '1920x1080', customWidth: 1920, customHeight: 1080, fps: '60', customFps: 60,
   codec: 'auto', bitrate: 20, abr: false, fec: 'host', fecPercent: 20,
-  streamWindow: 'fullscreen', vsync: true, pacing: false, hdr: false, hdrFormat: 'pq', hdrPeak: 1000, hdrWhite: 200,
+  streamWindow: 'fullscreen', vsync: true, pacing: false, hdr: false, hdrFormat: 'pq', hdrBrightnessMode: 'host', hdrPeak: 1000, hdrMin: 0.001, hdrFullFrame: 400,
   enhancement: false, resolutionScale: false, scaleRatio: 100, stretch: false,
   audio: 'stereo', muteHost: true, muteBackground: false,
   desktopMouse: false, localCursor: false, swapMouse: false, swapAlt: false, reverseScroll: false,
@@ -24,15 +24,19 @@ export const defaults = {
   backgroundGamepad: false, quitCombo: 'default', haptics: 'physical',
   monitorMode: 'follow', monitor: 'auto', optimize: true, quitHost: false,
   decoder: 'auto', yuv444: false, discovery: false, stats: false, overlay: 'button',
-  uiWindow: 'window', rememberWindow: true, connectionWarnings: true,
+  uiWindow: 'window', language: 'auto', rememberWindow: true, connectionWarnings: true,
   configurationWarnings: true, keepAwake: true,
 };
 
 export const categories = [
-  { id: 'stream', name: '影音串流', icon: 'monitor' },
-  { id: 'input', name: '鍵鼠手把', icon: 'gamepad' },
-  { id: 'host', name: '主機螢幕', icon: 'screens' },
-  { id: 'advanced', name: '進階與其他', icon: 'sliders' },
+  { id: 'stream', name: '串流', icon: 'monitor' },
+  { id: 'display', name: '顯示', icon: 'screens' },
+  { id: 'audio', name: '音效', icon: 'sliders' },
+  { id: 'host', name: '主機', icon: 'screens' },
+  { id: 'input', name: '鍵盤與滑鼠', icon: 'sliders' },
+  { id: 'gamepad', name: '手把', icon: 'gamepad' },
+  { id: 'advanced', name: '相容性與診斷', icon: 'sliders' },
+  { id: 'ui', name: '介面', icon: 'monitor' },
 ];
 
 export const monitorModes = [
@@ -51,10 +55,22 @@ export const optionalFeatures = [
   { id: 'languages', name: '繁中／英文以外的介面語言', impact: '移除後只提供繁中／英文介面；主機名稱、遊戲名稱與剪貼簿文字不受限制。', source: 'LegacySettingsPage.qml' },
 ];
 
+// Review inventory of the current Lite QML settings, not an implemented GPUI contract.
+export const settingsCoverage = [
+  { category: '串流', source: 'BasicSettingsPage.qml', coverage: '解析度／自訂、FPS／自訂、編碼、位元率、ABR、FEC、AI 增強、渲染比例', limitation: '解析度快捷清單暫列常用值；其他尺寸可自訂。GPU／主機能力判斷尚未接上。' },
+  { category: '顯示', source: 'DisplaySettingsPage.qml、HdrBrightnessCard.qml', coverage: '視窗模式、SBS 延展、VSync、影格節奏、HDR 格式、亮度模式、峰值／最低／全畫面亮度', limitation: '上一版錯用 SDR 白位準，現已改回原版三種亮度值。PQ 拖曳曲線與實際顯示器偵測尚未重製。' },
+  { category: '音效', source: 'LegacySettingsPage.qml', coverage: '立體聲／5.1／7.1／7.1.4、主機靜音；另預覽背景靜音偏好', limitation: '不播放音效；麥克風本次停用。' },
+  { category: '主機', source: 'LegacySettingsPage.qml、ScreenCombinationModeSelector.qml', coverage: '六種螢幕組合模式、螢幕選擇、最佳化遊戲設定、結束主機程式', limitation: '螢幕清單使用範例；圖解卡片改選單是呈現提案，未刪除控制模式。' },
+  { category: '鍵盤與滑鼠', source: 'LegacySettingsPage.qml', coverage: '桌面滑鼠、本機游標、左右鍵／Alt-Win 交換、反向捲動、快捷鍵攔截、觸控板', limitation: '原型不攔截系統按鍵；文字／圖片剪貼簿能力保留，沒有檔案傳送。' },
+  { category: '手把', source: 'LegacySettingsPage.qml', coverage: 'ABXY 交換、死區、強制連線、手把滑鼠、結束組合鍵、DualSense 觸覺；另預覽背景輸入偏好', limitation: '一般手把映射保留；硬體輸入與觸覺尚未接上。' },
+  { category: '相容性與診斷', source: 'LegacySettingsPage.qml', coverage: '解碼器、YUV 4:4:4、區網搜尋、統計、串流控制選單位置', limitation: 'Windows 範圍不列 macOS 專用 Renderer 選單；不代表移除 Windows D3D11 路徑。' },
+  { category: '介面與關於', source: 'LegacySettingsPage.qml、AboutSettingsPage.qml', coverage: '語言選項、視窗模式／位置、警告、保持喚醒、授權', limitation: '上一版只列語言說明，現補選擇入口；實際翻譯切換尚未接上，其他語言仍待決定。' },
+];
+
 export const scopeGroups = [
   { title: '已確認保留', status: 'keep', items: ['手動新增區網／Tailscale 位址、配對與主機管理', '應用程式清單、開始／恢復／結束串流', '解析度、FPS、編碼、位元率、HDR、ABR／FEC', '一般鍵鼠與手把、文字及圖片剪貼簿、多螢幕', '效能統計與相容性設定'] },
   { title: '已確認移除／停用', status: 'remove', items: ['USB/IP 原生裝置分享（一般輸入仍保留）', '檔案傳送與檔案映射', '線上壁紙／公告、Discord、自動更新', 'STUN 與外部連線診斷、公網專用解析度／FPS 覆寫', '麥克風這次停用，保留未來評估'] },
-  { title: '介面縮減提案', status: 'simplify', items: ['設定由 9 類合併為 4 類，少用選項收進進階區', '多螢幕圖解卡片改為下拉選單與文字說明', '連線過場改成清楚的狀態提示', '版本與授權集中到「關於」', 'GPUI 第一版先使用標準視窗標題列'] },
+  { title: '介面調整提案', status: 'simplify', items: ['沿用原版裝置首頁，點選裝置後再進入配對／應用程式', '設定保留原版分類：8 類設定與獨立的「關於」', '設定項目直接展開，不再集中藏在進階摺疊區', '多螢幕圖解卡片暫以選單對照，功能不刪除', 'GPUI 第一版先使用標準視窗標題列'] },
 ];
 
 export function loadState(storage = globalThis.localStorage) {
@@ -121,6 +137,6 @@ export function validateSettings(settings) {
   if (!Number.isFinite(settings.bitrate) || settings.bitrate < 1 || settings.bitrate > 150) return '位元率須介於 1～150 Mbps。';
   if (settings.fec === 'fixed' && (!Number.isInteger(settings.fecPercent) || settings.fecPercent < 0 || settings.fecPercent > 100)) return '固定 FEC 百分比須介於 0～100。';
   if (settings.resolutionScale && (!Number.isInteger(settings.scaleRatio) || settings.scaleRatio < 20 || settings.scaleRatio > 100)) return '渲染比例須介於 20～100%。';
-  if (settings.hdr && (!Number.isFinite(settings.hdrPeak) || settings.hdrPeak < 100 || settings.hdrPeak > 10000 || !Number.isFinite(settings.hdrWhite) || settings.hdrWhite < 50 || settings.hdrWhite > 1000)) return 'HDR 峰值須介於 100～10000 nits，SDR 白位準須介於 50～1000 nits。';
+  if (settings.hdr && settings.hdrBrightnessMode === 'manual' && (!Number.isFinite(settings.hdrPeak) || settings.hdrPeak < 1 || settings.hdrPeak > 10000 || !Number.isFinite(settings.hdrMin) || settings.hdrMin < 0 || settings.hdrMin > 10 || !Number.isFinite(settings.hdrFullFrame) || settings.hdrFullFrame < 1 || settings.hdrFullFrame > 10000 || settings.hdrMin > settings.hdrFullFrame || settings.hdrFullFrame > settings.hdrPeak)) return 'HDR 亮度須符合：最低（0～10）≤ 全畫面（1～10000）≤ 峰值（1～10000 nits）。';
   return '';
 }
