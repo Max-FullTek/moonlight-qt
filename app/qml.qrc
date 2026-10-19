@@ -23,7 +23,6 @@
         <file>gui/NavigableMessageDialog.qml</file>
         <file>gui/NavigableDialog.qml</file>
         <file>gui/GamepadKeyboard.qml</file>
-        <file>gui/BackgroundSourceDialog.qml</file>
         <file>gui/CenteredGridView.qml</file>
         <file>gui/CliPair.qml</file>
         <file>gui/theme/qmldir</file>
@@ -50,16 +49,11 @@
         <file>gui/settings/BasicSettingsPage.qml</file>
         <file>gui/settings/DisplaySettingsPage.qml</file>
         <file>gui/settings/LegacySettingsPage.qml</file>
-        <file>gui/settings/EcosystemSettingsPage.qml</file>
-        <file>gui/settings/PeripheralsSettingsPage.qml</file>
-        <file>gui/settings/UsbForwardingBindDialog.qml</file>
         <file>gui/settings/AboutSettingsPage.qml</file>
-        <file>gui/settings/EcosystemPlatformCatalog.qml</file>
         <file>gui/settings/PlatformNavButton.qml</file>
         <file>gui/settings/TechTag.qml</file>
         <file>gui/settings/TechTagCloud.qml</file>
         <file>gui/settings/TechPhrase.qml</file>
-        <file>gui/settings/EcosystemCapabilityGroup.qml</file>
         <file>gui/settings/CommunityLicenseNotice.qml</file>
     </qresource>
 </RCC>

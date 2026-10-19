@@ -38,19 +38,12 @@ FocusScope {
         { key: "host",     icon: "qrc:/res/fluent/cat-host.svg",     title: qsTr("Host Settings") },
         { key: "input",    icon: "qrc:/res/fluent/cat-input.svg",    title: qsTr("Input Settings") },
         { key: "gamepad",  icon: "qrc:/res/fluent/cat-gamepad.svg",  title: qsTr("Gamepad Settings") },
-        { key: "peripherals", icon: "qrc:/res/fluent/cat-peripherals.svg", title: qsTr("Peripherals Settings") },
         { key: "advanced", icon: "qrc:/res/fluent/cat-advanced.svg", title: qsTr("Compatibility and diagnostics") },
         { key: "ui",       icon: "qrc:/res/fluent/cat-ui.svg",       title: qsTr("Interface") },
-        { key: "ecosystem",icon: "qrc:/res/fluent/cat-ecosystem.svg",title: qsTr("AlkaidLab Ecosystem") },
         { key: "about",    icon: "qrc:/res/fluent/cat-about.svg",    title: qsTr("About") }
     ]
 
-    // USB 设备转发只在有本地 USB/IP 后端的平台提供（Windows/macOS）；
-    // 没有的平台连分类一起隐藏，避免出现空页。
-    readonly property var categories: rawCategories.filter(
-        function(c) {
-            return c.key !== "peripherals" || SystemProperties.usbForwardingAvailable
-        })
+    readonly property var categories: rawCategories
 
     StackView.onActivated: {
         // This enables Tab and BackTab based navigation rather than arrow keys.
@@ -229,36 +222,15 @@ FocusScope {
                 onLanguageChanged: settingsPage.languageChanged()
             }
 
-            EcosystemSettingsPage {
-                id: ecosystemPage
-                y: basicPage.height + displayPage.height + legacyPage.height
-                width: parent.width
-                visible: settingsPage.category === "ecosystem"
-                height: visible ? implicitHeight : 0
-                onAboutRequested: {
-                    settingsPage.category = "about"
-                    rail.focusCurrent()
-                    scrollArea.contentY = 0
-                }
-            }
-
             AboutSettingsPage {
                 id: aboutPage
-                y: basicPage.height + displayPage.height + legacyPage.height + ecosystemPage.height
+                y: basicPage.height + displayPage.height + legacyPage.height
                 width: parent.width
                 visible: settingsPage.category === "about"
                 height: visible ? implicitHeight : 0
                 onScrollToEndRequested: scrollArea.scrollToEnd()
             }
 
-            PeripheralsSettingsPage {
-                id: peripheralsPage
-                y: basicPage.height + displayPage.height + legacyPage.height
-                   + ecosystemPage.height + aboutPage.height
-                width: parent.width
-                visible: settingsPage.category === "peripherals"
-                height: visible ? implicitHeight : 0
-            }
         }
     }
 

@@ -1,6 +1,7 @@
 #pragma once
 
-#include "mappingfetcher.h"
+#include <QMap>
+#include <QStringList>
 
 #include <QSettings>
 
@@ -73,6 +74,4 @@ public:
 private:
     QMap<QString, SdlGamepadMapping> m_Mappings;
 
-    static MappingFetcher* s_MappingFetcher;
 };
-

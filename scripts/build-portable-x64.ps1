@@ -1,4 +1,4 @@
-# Builds the existing feature set. This script does not perform a security audit.
+# Builds the slim Windows x64 feature set. This script does not perform a security audit.
 param(
     [string]$SourceRoot = (Split-Path $PSScriptRoot -Parent)
 )
@@ -64,7 +64,9 @@ try {
 } finally { Pop-Location }
 
 $deps = Join-Path $SourceRoot 'libs/windows/lib/x64'
-Copy-Item -Path (Join-Path $deps '*.dll') -Destination $deploy
+Get-ChildItem -LiteralPath $deps -Filter '*.dll' |
+    Where-Object Name -ne 'discord-rpc.dll' |
+    Copy-Item -Destination $deploy
 Copy-Item -LiteralPath (Join-Path $build 'app/release/Moonlight.exe') -Destination $deploy
 Copy-Item -LiteralPath (Join-Path $build 'AntiHooking/release/AntiHooking.dll') -Destination $deploy
 Copy-Item -LiteralPath (Join-Path $build 'clipboard-helper/release/moonlight-clipboard-helper.exe') -Destination $deploy
@@ -91,7 +93,8 @@ New-Item -ItemType File -Path (Join-Path $deploy 'portable.dat') | Out-Null
 # Focused existing regressions; no streaming host or user credentials are used.
 $env:PATH = "$deploy;$env:PATH"
 $testResults = @()
-foreach ($test in @('keyboard_state', 'shared_helpers', 'clipboard_payload_routing')) {
+$env:QT_QPA_PLATFORM = 'offscreen'
+foreach ($test in @('keyboard_state', 'shared_helpers', 'clipboard_payload_routing', 'overlay_menu_navigation')) {
     $testBuild = Join-Path $root "test-$test"
     New-Item -ItemType Directory -Path $testBuild | Out-Null
     Push-Location -LiteralPath $testBuild
@@ -102,6 +105,10 @@ foreach ($test in @('keyboard_state', 'shared_helpers', 'clipboard_payload_routi
         $testResults += @{ name = $test; result = 'passed' }
     } finally { Pop-Location }
 }
+
+& (Join-Path $PSScriptRoot 'smoke-portable-gui.ps1') -PortablePath $deploy `
+    -TestRoot (Join-Path $root 'gui-smoke') -QtPlugins (& $qmake -query QT_INSTALL_PLUGINS)
+$testResults += @{ name = 'gui-qml-startup'; result = 'passed-offscreen-no-host' }
 
 $provenance = [ordered]@{
     schemaVersion = 1
@@ -122,7 +129,7 @@ $provenance = [ordered]@{
     dotnet = (dotnet --version)
     prebuiltDependencies = (Get-Content (Join-Path $SourceRoot 'build/portable-deps.json') -Raw | ConvertFrom-Json)
     tests = $testResults
-    features = 'Unmodified upstream v6.5.0 feature set; baseline before slimming'
+    features = 'Lite: no updater, online wallpaper/promotion, Discord, STUN, USB/IP, or file mapping; bundled gamepad mappings and text/image clipboard retained; microphone disabled'
     assurance = 'Source build with prebuilt third-party dependencies; not a full security audit or a bit-reproducibility claim'
 }
 $provenance | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $deploy 'build-provenance.json')
@@ -130,7 +137,7 @@ $fileHashes = @(Get-ChildItem -LiteralPath $deploy -File -Recurse | Sort-Object 
     @{ path = [IO.Path]::GetRelativePath($deploy, $_.FullName).Replace('\', '/'); sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
 })
 $fileHashes | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $deploy 'file-sha256.json')
-$zipName = "Moonlight-VPlus-SelfBuild-x64-$version.zip"
+$zipName = "Moonlight-VPlus-Lite-x64-$version.zip"
 $package = Join-Path $artifacts $zipName
 Compress-Archive -Path (Join-Path $deploy '*') -DestinationPath $package
 $packageHash = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash

@@ -80,8 +80,6 @@
 #define SER_HDRMINBRIGHTNESS "hdrminbrightness"
 #define SER_HDRMAXAVERAGEBRIGHTNESS "hdrmaxaveragebrightness"
 #define SER_AUTOUPDATECHECK "autoupdatecheck"
-#define SER_USBFORWARDING "usbforwarding"
-#define SER_USBFORWARDINGBOUND "usbforwardingbound"
 #define SER_RENDERER "renderer"
 #define SER_BACKGROUNDSOURCE "backgroundsource"
 #define SER_BACKGROUNDIMAGEAPI "backgroundimageapi"
@@ -277,11 +275,9 @@ void StreamingPreferences::reload()
 #endif
     framePacing = settings.value(SER_FRAMEPACING, false).toBool();
     videoEnhancement = settings.value(SER_VIDEOENHANCEMENT, false).toBool();
-    enableMicrophone = settings.value(SER_MICROPHONE, false).toBool();
+    enableMicrophone = false; // Microphone requires a separately validated host feature.
     overlayMenuPosition = loadOverlayMenuPlacement(settings);
-    autoUpdateCheck = settings.value(SER_AUTOUPDATECHECK, true).toBool();
-    usbForwardingEnabled = settings.value(SER_USBFORWARDING, false).toBool();
-    m_UsbForwardingBoundDevices = settings.value(SER_USBFORWARDINGBOUND, QStringList()).toStringList();
+    autoUpdateCheck = false;
 
     streamResolutionScale = settings.value(SER_STREAMRESOLUTIONSCALE, false).toBool();
     streamResolutionScaleRatio = settings.value(SER_STREAMRESOLUTIONSCALERATIO, 100).toInt();
@@ -293,9 +289,9 @@ void StreamingPreferences::reload()
 
     connectionWarnings = settings.value(SER_CONNWARNINGS, true).toBool();
     configurationWarnings = settings.value(SER_CONFWARNINGS, true).toBool();
-    richPresence = settings.value(SER_RICHPRESENCE, true).toBool();
+    richPresence = false;
     gamepadMouse = settings.value(SER_GAMEPADMOUSE, true).toBool();
-    detectNetworkBlocking = settings.value(SER_DETECTNETBLOCKING, true).toBool();
+    detectNetworkBlocking = false;
     showPerformanceOverlay = settings.value(SER_SHOWPERFOVERLAY, false).toBool();
     packetSize = settings.value(SER_PACKETSIZE, 0).toInt();
     swapMouseButtons = settings.value(SER_SWAPMOUSEBUTTONS, false).toBool();
@@ -351,10 +347,7 @@ void StreamingPreferences::reload()
     rememberWindowPosition = settings.value(SER_REMEMBERWINDOWPOSITION, true).toBool();
     language = static_cast<Language>(settings.value(SER_LANGUAGE,
                                                     static_cast<int>(Language::LANG_AUTO)).toInt());
-    const auto defaultBackgroundSource = defaultVer > 0 ? BGS_ANIME : BGS_PHOTOGRAPHY;
-    m_BackgroundSource = decodeBackgroundSource(settings.value(
-                                                    SER_BACKGROUNDSOURCE,
-                                                    static_cast<int>(defaultBackgroundSource)).toInt());
+    m_BackgroundSource = BGS_NONE;
     m_BackgroundImageApi = settings.value(SER_BACKGROUNDIMAGEAPI).toString().trimmed();
     m_BackgroundImageLocalPath = settings.value(SER_BACKGROUNDIMAGELOCALPATH).toString();
     m_BackgroundOverlayOpacity = qBound(0,
@@ -523,16 +516,6 @@ void StreamingPreferences::setBackgroundSetupCompleted(bool completed)
 
     m_BackgroundSetupCompleted = completed;
     emit backgroundSetupCompletedChanged();
-}
-
-void StreamingPreferences::setUsbForwardingBoundDevices(const QStringList& devices)
-{
-    if (m_UsbForwardingBoundDevices == devices) {
-        return;
-    }
-
-    m_UsbForwardingBoundDevices = devices;
-    emit usbForwardingBoundDevicesChanged();
 }
 
 void StreamingPreferences::resetBackgroundConfiguration()
@@ -760,8 +743,6 @@ void StreamingPreferences::save()
     settings.setValue(SER_MICROPHONE, enableMicrophone);
     settings.setValue(SER_OVERLAYMENUPLACEMENT, static_cast<int>(overlayMenuPosition));
     settings.setValue(SER_AUTOUPDATECHECK, autoUpdateCheck);
-    settings.setValue(SER_USBFORWARDING, usbForwardingEnabled);
-    settings.setValue(SER_USBFORWARDINGBOUND, m_UsbForwardingBoundDevices);
 }
 
 int StreamingPreferences::getDefaultBitrate(int width, int height, int fps, bool yuv444)

@@ -92,9 +92,7 @@ constexpr int kGamepadHintBarHeight = 30;
 OverlayMenuPanel::OverlayMenuPanel(QWindow* parent, OverlayWindowMode windowMode)
     : OverlayRasterWindow(parent, windowMode), m_CurrentLevel(0), m_HoveredIndex(-1),
       m_Visible(false), m_HasGamepads(false), m_GamepadUiStyle(GamepadUiStyleXbox),
-      m_SwapFaceButtons(false), m_FileMappingState(FileMappingState::Unknown),
-      m_FileMappingDetail(tr("Checking")), m_RemoteUsbAvailable(false),
-      m_RemoteUsbState(RemoteUsbState::Unavailable), m_RemoteUsbDetail(tr("Unavailable")),
+      m_SwapFaceButtons(false),
       m_ParentX(0), m_ParentY(0), m_ParentW(0), m_ParentH(0), m_WindowMode(windowMode),
       m_CloseWhenPointerOutside(false), m_ContentOffset(0), m_Closing(false), m_TargetPosition(),
       m_AnchorMode(AnchorMode::RightEdge), m_TriggerPosition(std::nullopt)
@@ -226,28 +224,6 @@ void OverlayMenuPanel::buildMenuLevels()
                          MenuAction::MenuActionMax, 3, true, false, false});
     top.items.push_back({tr("Bitrate"),       QString(),  MenuItemType::SubMenu,
                          MenuAction::MenuActionMax, 2, true, false, false});
-    const bool separatorAfterHostFiles =
-#ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS
-            false;
-#else
-            !m_RemoteUsbAvailable;
-#endif
-    top.items.push_back({tr("Host Files"),    m_FileMappingDetail, MenuItemType::Action,
-                         MenuAction::ShowHostFiles, 0, true,
-                         m_FileMappingState == FileMappingState::Available ||
-                         m_FileMappingState == FileMappingState::Open,
-                         separatorAfterHostFiles});
-    if (m_RemoteUsbAvailable) {
-        top.items.push_back(
-            { tr("USB Devices"),
-              m_RemoteUsbNeedsActivation ? tr("Activate device") : m_RemoteUsbDetail,
-              MenuItemType::SubMenu, MenuAction::MenuActionMax, 4, true, false,
-#ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS
-              false });
-#else
-              true });
-#endif
-    }
 #ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS
     top.items.push_back({tr("Function Tests"),
                          tr("Developer"),
@@ -256,8 +232,7 @@ void OverlayMenuPanel::buildMenuLevels()
 #endif
     top.items.push_back({tr("Toggle Fullscreen"), QString(), MenuItemType::Action,
                          MenuAction::ToggleFullScreen, 0, true, false, false});
-    top.items.push_back({tr("Microphone"),    QString(),  MenuItemType::Toggle,
-                         MenuAction::ToggleMicrophone, 0, true, false, !m_HasGamepads}); // separator if no gamepad item follows
+
     // Only show Gamepad Mouse toggle when a gamepad is actually connected
     if (m_HasGamepads) {
         top.items.push_back({tr("Gamepad Mouse"), QString(),  MenuItemType::Toggle,
@@ -328,74 +303,11 @@ void OverlayMenuPanel::buildMenuLevels()
                                MenuAction::SetMenuPlacementDisabled, 0, true, false, false});
     m_MenuLevels.push_back(placement);
 
-    // === Level 4: Remote USB devices ===
-    if (m_RemoteUsbAvailable) {
-        MenuLevel usb;
-        usb.title = tr("USB Devices");
-        if (m_RemoteUsbDevices.empty()) {
-            const QString emptyDetail =
-                m_RemoteUsbState == RemoteUsbState::Discovering
-                    ? tr("Scanning") : tr("No devices found");
-            usb.items.push_back({tr("USB Devices"), emptyDetail,
-                                 MenuItemType::Action,
-                                 MenuAction::MenuActionMax, 0, false, false,
-                                 false});
-        }
-        else {
-            for (const RemoteUsbDevice& device : m_RemoteUsbDevices) {
-                const bool active = !m_RemoteUsbActiveDeviceId.isEmpty() &&
-                                    device.id == m_RemoteUsbActiveDeviceId;
-                QString detail = device.detail;
-                if (active) {
-                    switch (m_RemoteUsbState) {
-                    case RemoteUsbState::Opening:
-                        detail = tr("Connecting — select to cancel");
-                        break;
-                    case RemoteUsbState::Open:
-                        detail = tr("Connected — select to release");
-                        break;
-                    case RemoteUsbState::Stopping:
-                        detail = tr("Releasing");
-                        break;
-                    default:
-                        break;
-                    }
-                }
-                const bool busy = m_RemoteUsbState == RemoteUsbState::Opening ||
-                                  m_RemoteUsbState == RemoteUsbState::Stopping;
-                const bool hasOpenDevice =
-                    m_RemoteUsbState == RemoteUsbState::Open &&
-                    !m_RemoteUsbActiveDeviceId.isEmpty();
-                if (m_RemoteUsbNeedsActivation && device.supported) {
-                    detail = tr("Select to activate");
-                    if (!device.detail.isEmpty()) {
-                        detail += QStringLiteral(" · ") + device.detail;
-                    }
-                }
-                const bool canRelease = active &&
-                    (m_RemoteUsbState == RemoteUsbState::Opening ||
-                     m_RemoteUsbState == RemoteUsbState::Open);
-                usb.items.push_back({device.label, detail,
-                                     MenuItemType::Action,
-                                     canRelease
-                                         ? MenuAction::ReleaseRemoteUsbDevice
-                                         : MenuAction::SelectRemoteUsbDevice,
-                                     0,
-                                     canRelease || (device.supported && !busy &&
-                                         (!hasOpenDevice || active)),
-                                     active,
-                                     false,
-                                     device.id});
-            }
-        }
-        m_MenuLevels.push_back(std::move(usb));
-    }
-
     if (m_CurrentLevel >= static_cast<int>(m_MenuLevels.size())) {
         m_CurrentLevel = 0;
     }
 
-    // Rebuilds (gamepad set / USB refresh) wipe derived details; re-stamp
+    // Gamepad hint rebuilds wipe derived details; re-stamp
     // the bitrate state so the scrubber row and preset checkmarks survive.
     refreshBitrateDetails();
 }
@@ -635,69 +547,8 @@ void OverlayMenuPanel::updateMenuPositionState(MenuAction activePlacementAction)
     forceRepaint();
 }
 
-void OverlayMenuPanel::updateFileMappingState(FileMappingState state, const QString& detail)
-{
-    m_FileMappingState = state;
-    m_FileMappingDetail = detail;
-
-    if (m_MenuLevels.empty()) return;
-    for (auto& item : m_MenuLevels[0].items) {
-        if (item.action == MenuAction::ShowHostFiles) {
-            item.detail = detail;
-            item.toggleState = state == FileMappingState::Available ||
-                               state == FileMappingState::Open;
-            forceRepaint();
-            break;
-        }
-    }
-}
-
-void OverlayMenuPanel::updateRemoteUsbState(
-    bool available,
-    RemoteUsbState state,
-    std::vector<RemoteUsbDevice> devices,
-    const QString& activeDeviceId,
-    const QString& detail)
-{
-    m_RemoteUsbAvailable = available;
-    m_RemoteUsbState = state;
-    m_RemoteUsbDevices = std::move(devices);
-    m_RemoteUsbActiveDeviceId = activeDeviceId;
-    m_RemoteUsbNeedsActivation =
-        available && state == RemoteUsbState::Available && activeDeviceId.isEmpty() &&
-        std::any_of(m_RemoteUsbDevices.cbegin(), m_RemoteUsbDevices.cend(),
-                    [](const RemoteUsbDevice& device) { return device.supported; });
-    m_RemoteUsbDetail = detail;
-    const int previousLevel = m_CurrentLevel;
-    buildMenuLevels();
-    if (m_Visible && previousLevel == 4 && m_MenuLevels.size() > 4) {
-        m_CurrentLevel = 4;
-    }
-    if (m_Visible) {
-        repositionWindow();
-    }
-    forceRepaint();
-}
-
 void OverlayMenuPanel::dispatchActionItem(const MenuItem& item)
 {
-    // USB callbacks can synchronously rebuild the device list. Own the payload
-    // before calling out so a refresh cannot invalidate the selected identity.
-    const QString payload = item.payload;
-    if (item.action == MenuAction::SelectRemoteUsbDevice) {
-        beginInteraction();
-        if (m_RemoteUsbDeviceCallback) {
-            m_RemoteUsbDeviceCallback(payload);
-        }
-        return;
-    }
-    if (item.action == MenuAction::ReleaseRemoteUsbDevice) {
-        beginInteraction();
-        if (m_RemoteUsbReleaseCallback) {
-            m_RemoteUsbReleaseCallback();
-        }
-        return;
-    }
     closeMenu();
     if (m_ActionCallback) {
         m_ActionCallback(item.action);
@@ -1143,7 +994,6 @@ void OverlayMenuPanel::paintOverlay(QPainter& p)
         }
         switch (item.action) {
         case MenuAction::ToggleFullScreen: return QStringLiteral("cat-display");
-        case MenuAction::ShowHostFiles: return QStringLiteral("menu-files");
         case MenuAction::ToggleMicrophone: return QStringLiteral("menu-microphone");
         case MenuAction::ToggleGamepadMouse: return QStringLiteral("cat-gamepad");
         case MenuAction::Quit:
@@ -1172,15 +1022,6 @@ void OverlayMenuPanel::paintOverlay(QPainter& p)
             p.drawRect(row.adjusted(0, 0, -1, -1));
             p.fillRect(QRect(4, itemY + 1, 4, m_ItemHeight - 2), MenuAccent);
         }
-        const bool activationPrompt =
-            m_RemoteUsbNeedsActivation &&
-            ((m_CurrentLevel == 0 && item.type == MenuItemType::SubMenu && item.targetLevel == 4) ||
-             (m_CurrentLevel == 4 && item.action == MenuAction::SelectRemoteUsbDevice &&
-              item.enabled));
-        if (activationPrompt) {
-            p.fillRect(QRect(4, itemY + 4, 4, m_ItemHeight - 8), MenuAccent);
-        }
-
         if (hasIcons) {
             drawIcon(iconForItem(item),
                      QRect(textPad, itemY + (m_ItemHeight - 20) / 2, 20, 20),
@@ -1190,14 +1031,14 @@ void OverlayMenuPanel::paintOverlay(QPainter& p)
         // --- SubMenu item ---
         if (item.type == MenuItemType::SubMenu) {
             p.setFont(m_LabelFont);
-            p.setPen(activationPrompt ? MenuAccent : item.enabled ? MenuText : MenuFaint);
+            p.setPen(item.enabled ? MenuText : MenuFaint);
             QRect lr(labelX, itemY, cw - labelX - 36, m_ItemHeight);
             p.drawText(lr, Qt::AlignLeft | Qt::AlignVCenter, item.label);
 
             // Detail text (e.g., "20 Mbps")
             if (!item.detail.isEmpty()) {
                 p.setFont(m_DetailFont);
-                p.setPen(activationPrompt ? MenuAccent : MenuDim);
+                p.setPen(MenuDim);
                 QRect dr(cw / 2, itemY, cw / 2 - textPad - 20, m_ItemHeight);
                 p.drawText(dr, Qt::AlignRight | Qt::AlignVCenter, item.detail);
             }
@@ -1284,7 +1125,7 @@ void OverlayMenuPanel::paintOverlay(QPainter& p)
                 p.drawText(lb, Qt::AlignLeft | Qt::AlignBottom, item.label);
 
                 p.setFont(m_DetailFont);
-                p.setPen(activationPrompt ? MenuAccent : MenuDim);
+                p.setPen(MenuDim);
                 QRect sr(labelX, itemY + topH, cw - labelX - textPad, m_ItemHeight - topH);
                 p.drawText(sr, Qt::AlignLeft | Qt::AlignTop, item.detail);
             } else {

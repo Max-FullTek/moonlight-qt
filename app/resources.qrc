@@ -1,6 +1,5 @@
 <RCC>
     <qresource prefix="/">
-        <file>res/backgrounds/pipw_review_index.json</file>
         <file>res/ic_videogame_asset_white_48px.svg</file>
         <file>res/desktop_windows-48px.svg</file>
         <file>res/ic_add_to_queue_white_48px.svg</file>
@@ -130,7 +129,5 @@
         <file alias="d3d11_ayuv_pixel.fxc">shaders/d3d11_ayuv_pixel.fxc</file>
         <file alias="d3d11_y410_pixel.fxc">shaders/d3d11_y410_pixel.fxc</file>
         <file alias="vt_renderer.metal">shaders/vt_renderer.metal</file>
-        <file alias="install-portable-update.ps1">deploy/windows/install-portable-update.ps1</file>
-        <file alias="install-dmg-update.sh">deploy/macos/install-dmg-update.sh</file>
     </qresource>
 </RCC>

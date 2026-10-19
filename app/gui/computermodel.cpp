@@ -7,7 +7,6 @@
 #include <QThreadPool>
 #include <QWriteLocker>
 
-
 ComputerModel::ComputerModel(QObject* object)
     : QAbstractListModel(object) {}
 
@@ -266,35 +265,6 @@ void ComputerModel::renameComputer(int computerIndex, QString name)
 QString ComputerModel::generatePinString()
 {
     return m_ComputerManager->generatePinString();
-}
-
-class DeferredTestConnectionTask : public QObject, public QRunnable
-{
-    Q_OBJECT
-public:
-    void run()
-    {
-        unsigned int portTestResult = LiTestClientConnectivity("qt.conntest.moonlight-stream.org", 443, ML_PORT_FLAG_ALL);
-        if (portTestResult == ML_TEST_RESULT_INCONCLUSIVE) {
-            emit connectionTestCompleted(-1, QString());
-        }
-        else {
-            char blockedPorts[512];
-            LiStringifyPortFlags(portTestResult, "\n", blockedPorts, sizeof(blockedPorts));
-            emit connectionTestCompleted(portTestResult, QString(blockedPorts));
-        }
-    }
-
-signals:
-    void connectionTestCompleted(int result, QString blockedPorts);
-};
-
-void ComputerModel::testConnectionForComputer(int)
-{
-    DeferredTestConnectionTask* testConnectionTask = new DeferredTestConnectionTask();
-    QObject::connect(testConnectionTask, &DeferredTestConnectionTask::connectionTestCompleted,
-                     this, &ComputerModel::connectionTestCompleted);
-    QThreadPool::globalInstance()->start(testConnectionTask);
 }
 
 void ComputerModel::pairComputer(int computerIndex, QString pin)

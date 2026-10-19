@@ -39,8 +39,6 @@ isEmpty(MOONLIGHT_NUMERIC_VERSION): MOONLIGHT_NUMERIC_VERSION = $$cat(version.tx
 
 TEMPLATE = app
 
-include(../file-mapping/file-mapping.pri)
-
 # The following define makes your compiler emit warnings if you use
 # any feature of Qt which has been marked as deprecated (the exact warnings
 # depend on your compiler). Please consult the documentation of the
@@ -187,7 +185,6 @@ win32:!winrt {
         streaming/input/winpen.cpp
     HEADERS += streaming/input/wintouchpad.h
 
-    CONFIG += discord-rpc
 }
 
 # Developer-only streaming diagnostics. The implementation and menu entries are
@@ -244,7 +241,6 @@ SOURCES += \
     cli/startstream.cpp \
     settings/compatfetcher.cpp \
     settings/devicelocalsettings.cpp \
-    settings/mappingfetcher.cpp \
     settings/streamingpreferences.cpp \
     streaming/input/abstouch.cpp \
     streaming/input/cursorshapeclassifier.cpp \
@@ -255,10 +251,6 @@ SOURCES += \
     streaming/input/touchpad.cpp \
     streaming/input/reltouch.cpp \
     streaming/session.cpp \
-    streaming/filemappingclient.cpp \
-    streaming/filemappingwebsocket.cpp \
-    streaming/filemappingprotocoladapter.cpp \
-    streaming/filemappingux.cpp \
     streaming/clipboardhelperclient.cpp \
     streaming/clipboardipc.cpp \
     streaming/audio/audio.cpp \
@@ -268,8 +260,6 @@ SOURCES += \
     gui/computermodel.cpp \
     gui/appmodel.cpp \
     streaming/streamutils.cpp \
-    backend/autoupdatechecker.cpp \
-    backend/portableupdateinstaller.cpp \
     path.cpp \
     settings/mappingmanager.cpp \
     gui/sdlgamepadkeynavigation.cpp \
@@ -282,13 +272,7 @@ SOURCES += \
     streaming/video/overlaymenubutton.cpp \
     streaming/video/overlaytoast.cpp \
     backend/systemproperties.cpp \
-    backend/usbforwardingenvironment.cpp \
-    backend/usbforwardingbackend.cpp \
-    backend/usbforwardinglocalserver.cpp \
-    backend/usbforwardingtunnel.cpp \
     wm.cpp \
-    imageutils.cpp \
-    pipwbackground.cpp \
     streaming/video/videoenhancement.cpp
 
 HEADERS += \
@@ -297,21 +281,15 @@ HEADERS += \
     SDL_compat.h \
     backend/nvaddress.h \
     backend/nvapp.h \
-    backend/usbforwardingenvironment.h \
-    backend/usbforwardingbackend.h \
-    backend/usbforwardinglocalserver.h \
-    backend/usbforwardingtunnel.h \
     cli/pair.h \
     settings/compatfetcher.h \
     settings/devicelocalsettings.h \
-    settings/mappingfetcher.h \
     streaming/video/videoenhancement.h \
     utils.h \
     backend/computerseeker.h \
     backend/identitymanager.h \
     backend/nvcomputer.h \
     backend/nvhttp.h \
-    backend/usbforwardingcapability.h \
     backend/nvpairingmanager.h \
     backend/computermanager.h \
     backend/boxartmanager.h \
@@ -327,10 +305,6 @@ HEADERS += \
     streaming/input/gamepadsensorrate.h \
     streaming/input/keyboardstate.h \
     streaming/session.h \
-    streaming/filemappingclient.h \
-    streaming/filemappingwebsocket.h \
-    streaming/filemappingprotocoladapter.h \
-    streaming/filemappingux.h \
     streaming/clipboardhelperclient.h \
     streaming/clipboardipc.h \
     streaming/audio/renderers/renderer.h \
@@ -344,8 +318,6 @@ HEADERS += \
     streaming/video/decoder.h \
     streaming/network/bandwidth.h \
     streaming/streamutils.h \
-    backend/autoupdatechecker.h \
-    backend/portableupdateinstaller.h \
     path.h \
     settings/mappingmanager.h \
     gui/sdlgamepadkeynavigation.h \
@@ -362,8 +334,6 @@ HEADERS += \
     streaming/video/overlaytoasteventstate.h \
     streaming/video/overlaytoast.h \
     backend/systemproperties.h \
-    imageutils.h \
-    pipwbackground.h \
     uifont.h
 
 # Conditional files for non-Steam Link builds

@@ -85,11 +85,8 @@ static QString getStartupApplicationDir(const char* argv0)
 #include "utils.h"
 #include "gui/computermodel.h"
 #include "gui/appmodel.h"
-#include "backend/autoupdatechecker.h"
 #include "backend/computermanager.h"
 #include "backend/systemproperties.h"
-#include "backend/usbforwardingenvironment.h"
-#include "backend/usbforwardingbackend.h"
 #include "streaming/session.h"
 #ifdef HAS_QT_SDL_WAYLAND_BRIDGE
 #include "streaming/waylandqtsdlbridge.h"
@@ -98,7 +95,6 @@ static QString getStartupApplicationDir(const char* argv0)
 #include "gui/sdlgamepadkeynavigation.h"
 #include "gui/windowplacement.h"
 #include "gui/windowswindowchrome.h"
-#include "imageutils.h"
 #include "uifont.h"
 #include "streaming/macpermissions.h"
 #ifdef Q_OS_DARWIN
@@ -1095,8 +1091,8 @@ int main(int argc, char *argv[])
     // Set our app name for SDL to use with PulseAudio and PipeWire. This matches what we
     // provide as our app name to libsoundio too. On SDL 2.0.18+, SDL_APP_NAME is also used
     // for screensaver inhibitor reporting.
-    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_APP_NAME, "Moonlight V+ for PC");
-    SDL_SetHint(SDL_HINT_APP_NAME, "Moonlight V+ for PC");
+    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_APP_NAME, "Moonlight V+ Lite for PC");
+    SDL_SetHint(SDL_HINT_APP_NAME, "Moonlight V+ Lite for PC");
 
     // SDL will try to lock the mouse cursor on Wayland if it's not visible in order to
     // support applications that assume they can warp the cursor (which isn't possible
@@ -1149,7 +1145,7 @@ int main(int argc, char *argv[])
 #endif
 
     QGuiApplication app(argc, argv);
-    QGuiApplication::setApplicationDisplayName(QStringLiteral("Moonlight V+ for PC"));
+    QGuiApplication::setApplicationDisplayName(QStringLiteral("Moonlight V+ Lite for PC"));
 
     // Declare this before the QML engine so SDL's video and EGL references
     // outlive Qt Quick, but are released before QGuiApplication. Initialization
@@ -1352,33 +1348,11 @@ int main(int argc, char *argv[])
                                               [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
                                                   return new ComputerManager(StreamingPreferences::get(qmlEngine));
                                               });
-    qmlRegisterSingletonType<AutoUpdateChecker>("AutoUpdateChecker", 1, 0,
-                                                "AutoUpdateChecker",
-                                                [](QQmlEngine*, QJSEngine*) -> QObject* {
-                                                    return new AutoUpdateChecker();
-                                                });
     qmlRegisterSingletonType<SystemProperties>("SystemProperties", 1, 0,
                                                "SystemProperties",
                                                [](QQmlEngine*, QJSEngine*) -> QObject* {
                                                    return new SystemProperties();
                                                });
-    qmlRegisterSingletonType<UsbForwardingEnvironment>("UsbForwardingEnvironment", 1, 0,
-                                                       "UsbForwardingEnvironment",
-                                                       [](QQmlEngine*, QJSEngine*) -> QObject* {
-                                                           /* Static singleton; QML must not delete it. */
-                                                           QQmlEngine::setObjectOwnership(
-                                                               UsbForwardingEnvironment::get(),
-                                                               QQmlEngine::CppOwnership);
-                                                           return UsbForwardingEnvironment::get();
-                                                       });
-    qmlRegisterSingletonType<UsbForwardingBackend>("UsbForwardingBackend", 1, 0,
-                                                   "UsbForwardingBackend",
-                                                   [](QQmlEngine*, QJSEngine*) -> QObject* {
-                                                       QQmlEngine::setObjectOwnership(
-                                                           UsbForwardingBackend::get(),
-                                                           QQmlEngine::CppOwnership);
-                                                       return UsbForwardingBackend::get();
-                                                   });
     qmlRegisterSingletonType<SdlGamepadKeyNavigation>("SdlGamepadKeyNavigation", 1, 0,
                                                       "SdlGamepadKeyNavigation",
                                                       [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
@@ -1389,7 +1363,6 @@ int main(int argc, char *argv[])
                                                    [](QQmlEngine* qmlEngine, QJSEngine*) -> QObject* {
                                                        return StreamingPreferences::get(qmlEngine);
                                                    });
-    qmlRegisterType<ImageUtils>("ImageUtils", 1, 0, "ImageUtils");
     qmlRegisterType<WindowPlacement>("WindowPlacement", 1, 0, "WindowPlacement");
     qmlRegisterType<WindowsWindowChrome>("WindowsWindowChrome", 1, 0, "WindowsWindowChrome");
 

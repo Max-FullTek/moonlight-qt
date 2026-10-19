@@ -6,11 +6,11 @@
 #include <QWheelEvent>
 #include <QTest>
 
-// Native preview of the production panel, with simulated USB status changes.
+// Native preview of the production panel, for retained stream controls.
 class MenuPreview : public QRasterWindow {
 public:
     explicit MenuPreview(OverlayMenuPanel &panel) : menu(panel) {
-        setTitle(QStringLiteral("USB Menu Interaction Check"));
+        setTitle(QStringLiteral("Stream Menu Interaction Check"));
         setGeometry(150, 100, 900, 700);
     }
 protected:
@@ -19,7 +19,7 @@ protected:
         painter.fillRect(QRect(QPoint(), size()), QColor(35, 38, 45));
         painter.setPen(Qt::white);
         painter.drawText(QRect(30, 30, 800, 100), Qt::AlignLeft,
-            QStringLiteral("USB menu preview - simulated device states\nClick outside to close; click the background to reopen.\nEscape: back, then close."));
+            QStringLiteral("Stream menu preview\nClick outside to close; click the background to reopen.\nEscape: back, then close."));
     }
     void mouseReleaseEvent(QMouseEvent *) override {
         if (menu.isMenuVisible()) menu.dismissOnOutsideClick(QCursor::pos());
@@ -39,80 +39,21 @@ int main(int argc, char **argv)
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/Manrope-SemiBold.ttf"));
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/DMMono-Regular.ttf"));
     OverlayMenuPanel panel;
-    QString selected;
-    int releaseCount = 0;
-    const std::vector<OverlayMenuPanel::RemoteUsbDevice> devices {
-        {QStringLiteral("1-1"), QStringLiteral("Phone"), QStringLiteral("18D1:4EE7"), true},
-        {QStringLiteral("1-2"), QStringLiteral("Keyboard"), QStringLiteral("046D:B34D"), true}
-    };
-    panel.setRemoteUsbDeviceCallback([&](const QString &id) {
-        selected = id;
-        panel.updateRemoteUsbState(true, OverlayMenuPanel::RemoteUsbState::Opening,
-                                   devices, id, QStringLiteral("Connecting"));
-    });
-    panel.setRemoteUsbReleaseCallback([&] {
-        ++releaseCount;
-        panel.updateRemoteUsbState(true, OverlayMenuPanel::RemoteUsbState::Stopping,
-                                   devices, selected, QStringLiteral("Releasing"));
-    });
-    panel.updateRemoteUsbState(true, OverlayMenuPanel::RemoteUsbState::Available,
-                               devices, {}, QStringLiteral("1 available"));
     if (app.arguments().contains(QStringLiteral("--interactive"))) {
         MenuPreview preview(panel);
         preview.show();
         panel.setTransientParent(&preview);
-        panel.setTitle(QStringLiteral("USB Menu Interaction Check"));
-        panel.setRemoteUsbDeviceCallback([&](const QString &id) {
-            selected = id;
-            panel.updateRemoteUsbState(true, OverlayMenuPanel::RemoteUsbState::Opening,
-                                       devices, id, QStringLiteral("Connecting"));
-            QTimer::singleShot(1200, &panel, [&] {
-                panel.updateRemoteUsbState(true, OverlayMenuPanel::RemoteUsbState::Open,
-                                           devices, selected, QStringLiteral("Connected"));
-            });
-        });
-        panel.setRemoteUsbReleaseCallback([&] {
-            panel.updateRemoteUsbState(true, OverlayMenuPanel::RemoteUsbState::Stopping,
-                                       devices, selected, QStringLiteral("Releasing"));
-            QTimer::singleShot(1200, &panel, [&] {
-                panel.updateRemoteUsbState(true, OverlayMenuPanel::RemoteUsbState::Available,
-                                           devices, {}, QStringLiteral("1 available"));
-            });
-        });
         panel.showAtCursor(0, 0, 1600, 1200, QPoint(400, 250), false);
         return app.exec();
     }
-    // Offscreen cursor remains outside this panel. Explicitly entering a
-    // shorter submenu must not trigger the pointer-leave dismissal timer.
+    // Entering and leaving a retained submenu must preserve active interaction.
     panel.showAtCursor(0, 0, 1600, 1200, QPoint(400, 400), true);
     QTest::qWait(20);
     const int initialHeight = panel.height();
-    // Shadow + title + padding + four preceding rows + row center.
-    QTest::mouseClick(&panel, Qt::LeftButton, Qt::NoModifier, QPoint(140, 8 + 32 + 4 + 4 * 38 + 19));
-    if (panel.height() >= initialHeight) qFatal("USB submenu did not open");
+    QTest::mouseClick(&panel, Qt::LeftButton, Qt::NoModifier,
+                      QPoint(140, 8 + 32 + 4 + 1 * 38 + 19));
     QTest::qWait(700);
-    if (!panel.isVisible()) qFatal("submenu closed while moving toward its devices");
-    panel.updateRemoteUsbState(true, OverlayMenuPanel::RemoteUsbState::Available,
-                               devices, {}, QStringLiteral("1 available"));
-    QTest::qWait(700);
-    if (!panel.isVisible()) qFatal("device refresh dismissed submenu");
-    QTest::mouseClick(&panel, Qt::LeftButton, Qt::NoModifier, QPoint(140, 8 + 32 + 4 + 19));
-    if (selected != QStringLiteral("1-1")) qFatal("device selection was not dispatched");
-    QTest::qWait(220);
-    if (!panel.isVisible()) qFatal("connecting status dismissed menu");
-    QTest::mouseClick(&panel, Qt::LeftButton, Qt::NoModifier, QPoint(140, 101));
-    if (selected != QStringLiteral("1-1") || releaseCount != 0)
-        qFatal("connecting state allowed switching to another device");
-    QTest::mouseClick(&panel, Qt::LeftButton, Qt::NoModifier, QPoint(140, 63));
-    if (releaseCount != 1 || !panel.isVisible()) qFatal("connecting device cannot be cancelled");
-    QTest::mouseClick(&panel, Qt::LeftButton, Qt::NoModifier, QPoint(140, 63));
-    if (releaseCount != 1) qFatal("stopping device allowed duplicate release");
-    panel.updateRemoteUsbState(true, OverlayMenuPanel::RemoteUsbState::Open,
-                               devices, selected, QStringLiteral("Connected"));
-    QTest::mouseClick(&panel, Qt::LeftButton, Qt::NoModifier, QPoint(140, 63));
-    if (releaseCount != 2 || !panel.isVisible()) qFatal("release did not keep status visible");
-    panel.updateRemoteUsbState(true, OverlayMenuPanel::RemoteUsbState::Available,
-                               devices, {}, QStringLiteral("1 available"));
+    if (!panel.isVisible()) qFatal("menu position submenu dismissed during interaction");
     panel.gamepadBack();
     QTest::qWait(700);
     if (!panel.isVisible() || panel.height() != initialHeight) qFatal("back lost active interaction");

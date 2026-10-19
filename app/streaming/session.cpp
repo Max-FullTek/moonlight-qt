@@ -1,7 +1,5 @@
 #include "session.h"
 #include "clipboardhelperclient.h"
-#include "filemappingclient.h"
-#include "filemappingux.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/streamutils.h"
 #ifdef HAS_QT_SDL_WAYLAND_BRIDGE
@@ -17,9 +15,6 @@
 #include "backend/richpresencemanager.h"
 #include "backend/nvhttp.h"
 #include "backend/identitymanager.h"
-#include "backend/usbforwardingbackend.h"
-#include "backend/usbforwardingenvironment.h"
-#include "backend/usbforwardinglocalserver.h"
 #include "gui/windowsdisplaygeometry.h"
 
 #include <Limelight.h>
@@ -373,8 +368,6 @@ bool qtWindowNativeMonitorBounds(QWindow* window, QRect& bounds)
 #include <QQuickOpenGLUtils>
 #endif
 
-#define CONN_TEST_SERVER "qt.conntest.moonlight-stream.org"
-
 CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     Session::clStageStarting,
     nullptr,
@@ -462,103 +455,6 @@ private:
     std::shared_ptr<std::atomic_int> m_CurrentBitrateKbps;
 };
 
-QString fileMappingStateName(OverlayMenuPanel::FileMappingState state)
-{
-    return FileMappingUx::stateName(state);
-}
-
-QString appendFileMappingDiagnostic(const QString& event,
-                                    const QString& detail = QString(),
-                                    const QString& hostUuid = QString(),
-                                    const QString& sessionId = QString())
-{
-    return FileMappingUx::appendDiagnostic(event, detail, hostUuid, sessionId);
-}
-
-bool isFileMappingPathInsideDirectory(const QString& path, const QString& directory)
-{
-    const QString target = QDir::cleanPath(QFileInfo(path).canonicalFilePath());
-    const QString base = QDir::cleanPath(QFileInfo(directory).canonicalFilePath());
-    if (target.isEmpty() || base.isEmpty()) {
-        return false;
-    }
-
-#if defined(Q_OS_WIN)
-    return target.compare(base, Qt::CaseInsensitive) == 0 ||
-           target.startsWith(base + QLatin1Char('/'), Qt::CaseInsensitive);
-#else
-    return target == base || target.startsWith(base + QLatin1Char('/'));
-#endif
-}
-
-bool isMoonlightGeneratedFileMappingMirrorPath(const QString& path)
-{
-    if (path.isEmpty() || QFileInfo(path).fileName() == QStringLiteral("Latest")) {
-        return false;
-    }
-    return isFileMappingPathInsideDirectory(path, FileMappingUx::diagnosticsDirectory());
-}
-
-class FileMappingSmokeTask : public QRunnable
-{
-public:
-    FileMappingSmokeTask(NvComputer computer,
-                         QString mappingId,
-                         QString path,
-                         quint64 offset,
-                         quint32 length,
-                         int timeoutMs)
-        : m_Computer(std::move(computer)),
-          m_MappingId(std::move(mappingId)),
-          m_Path(std::move(path)),
-          m_Offset(offset),
-          m_Length(length),
-          m_TimeoutMs(timeoutMs)
-    {
-    }
-
-    virtual void run() override
-    {
-        FileMappingClient client(&m_Computer);
-        FileMappingClient::SmokeResult result = client.smokeRead(m_MappingId,
-                                                                 m_Path,
-                                                                 m_Offset,
-                                                                 m_Length,
-                                                                 m_TimeoutMs);
-        if (!result.ok) {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "File mapping smoke failed: mapping=%s path=%s error=%s",
-                        m_MappingId.toUtf8().constData(),
-                        m_Path.toUtf8().constData(),
-                        result.error.toUtf8().constData());
-            return;
-        }
-
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "File mapping smoke passed: mapping=%s path=%s",
-                    m_MappingId.toUtf8().constData(),
-                    m_Path.toUtf8().constData());
-    }
-
-private:
-    NvComputer m_Computer;
-    QString m_MappingId;
-    QString m_Path;
-    quint64 m_Offset;
-    quint32 m_Length;
-    int m_TimeoutMs;
-};
-
-int readBoundedEnvInt(const char* name, int fallback, int minimum, int maximum)
-{
-    bool ok = false;
-    int value = qEnvironmentVariableIntValue(name, &ok);
-    if (!ok) {
-        return fallback;
-    }
-    return qBound(minimum, value, maximum);
-}
-
 void Session::clStageStarting(int stage)
 {
     // We know this is called on the same thread as LiStartConnection()
@@ -569,9 +465,9 @@ void Session::clStageStarting(int stage)
 
 void Session::clStageFailed(int stage, int errorCode)
 {
-    // Perform the port test now, while we're on the async connection thread and not blocking the UI.
+    // External connectivity diagnostics are disabled; preserve local port details.
     unsigned int portFlags = LiGetPortFlagsFromStage(stage);
-    s_ActiveSession->m_PortTestResults = LiTestClientConnectivity(CONN_TEST_SERVER, 443, portFlags);
+    s_ActiveSession->m_PortTestResults = ML_TEST_RESULT_INCONCLUSIVE;
 
     char failingPorts[128];
     LiStringifyPortFlags(portFlags, ", ", failingPorts, sizeof(failingPorts));
@@ -587,7 +483,7 @@ void Session::clStageFailed(int stage, int errorCode)
 void Session::clConnectionTerminated(int errorCode)
 {
     unsigned int portFlags = LiGetPortFlagsFromTerminationErrorCode(errorCode);
-    s_ActiveSession->m_PortTestResults = LiTestClientConnectivity(CONN_TEST_SERVER, 443, portFlags);
+    s_ActiveSession->m_PortTestResults = ML_TEST_RESULT_INCONCLUSIVE;
 
     // Decide whether this looks like a transient network interruption that we
     // should try to silently reconnect from, rather than tearing down the
@@ -693,7 +589,6 @@ void Session::displayTerminationError(int errorCode)
         break;
     }
 }
-
 
 void Session::clLogMessage(const char* format, ...)
 {
@@ -966,7 +861,6 @@ void Session::clSetAdaptiveTriggers(uint16_t controllerNumber, uint8_t eventFlag
     }
 }
 
-
 bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
                             StreamingPreferences::RendererSelection renderer,
                             SDL_Window* window, int videoFormat, int width, int height,
@@ -1154,7 +1048,6 @@ void Session::getDecoderInfo(SDL_Window* window,
         return;
     }
 
-
 #if 0 // See AV1 comment at the top of this function
     if (chooseDecoder(StreamingPreferences::VDS_FORCE_HARDWARE,
                       StreamingPreferences::RS_PROBE_ONLY,
@@ -1286,10 +1179,6 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences* prefere
       m_SunshineAbrEnabled(false), m_LastAbrFeedbackTicks(0),
       m_AbrFeedbackInFlight(std::make_shared<std::atomic_bool>(false)),
       m_AbrCurrentBitrateKbps(std::make_shared<std::atomic_int>(0)), m_Toast(nullptr),
-      m_FileMappingState(OverlayMenuPanel::FileMappingState::Unknown),
-      m_FileMappingDetail(tr("Checking")), m_FileMappingToast(), m_FileMappingToastPending(false),
-      m_FileMappingProbeState(nullptr), m_FileMappingMountState(nullptr), m_FileMappingMountPath(),
-      m_FileMappingSessionId(QUuid::createUuid().toString(QUuid::WithoutBraces)),
       m_MenuCloseTicks(0), m_MicStream(nullptr)
 {
     memset(&m_LastAbrVideoStats, 0, sizeof(m_LastAbrVideoStats));
@@ -1305,301 +1194,10 @@ Session::~Session()
         stopClipboardHelper();
     }
 
-    if (m_UsbTunnel != nullptr) {
-        m_UsbTunnel->disconnect(this);
-        m_UsbTunnel->stop();
-        delete m_UsbTunnel;
-        m_UsbTunnel = nullptr;
-    }
-
-    if (m_UsbLocalServer != nullptr) {
-        m_UsbLocalServer->stop();
-        delete m_UsbLocalServer;
-        m_UsbLocalServer = nullptr;
-    }
-
     delete m_DualSenseHapticsRenderer;
     m_DualSenseHapticsRenderer = nullptr;
 
     SDL_DestroyMutex(m_DecoderLock);
-}
-
-void Session::updateRemoteUsbMenuState()
-{
-    if (m_MenuPanel == nullptr) {
-        return;
-    }
-
-    m_MenuPanel->updateRemoteUsbState(
-        m_Preferences->usbForwardingEnabled, m_RemoteUsbState,
-        m_RemoteUsbDevices, m_RemoteUsbActiveDeviceId, m_RemoteUsbDetail);
-}
-
-void Session::refreshRemoteUsbDevices()
-{
-    m_RemoteUsbDevices.clear();
-
-    if (m_Preferences->usbForwardingEnabled) {
-        /* Only shared (bound) devices can be forwarded, so the overlay lists
-         * exactly those. Binding itself is a desktop-side, elevated action. */
-        const QVariantList shared = UsbForwardingBackend::get()->devices();
-        for (const QVariant& entry : shared) {
-            const QVariantMap device = entry.toMap();
-            if (!device.value(QStringLiteral("isBound")).toBool() ||
-                !device.value(QStringLiteral("isConnected")).toBool()) {
-                continue;
-            }
-            // Linux：共享后端口上被换成另一台设备（busid 相同、身份不符）
-            // 时禁止转发，避免张冠李戴；isReplaced 仅 Linux 后端产生。
-            if (device.value(QStringLiteral("isReplaced")).toBool()) {
-                continue;
-            }
-            OverlayMenuPanel::RemoteUsbDevice menuDevice;
-            menuDevice.id = device.value(QStringLiteral("busId")).toString();
-            if (menuDevice.id.isEmpty()) {
-                continue;
-            }
-            menuDevice.label = device.value(QStringLiteral("description")).toString();
-            if (menuDevice.label.isEmpty()) {
-                menuDevice.label = tr("USB device");
-            }
-            menuDevice.detail = device.value(QStringLiteral("vidPid")).toString().toUpper();
-            menuDevice.supported = device.value(QStringLiteral("isSupported")).toBool();
-            m_RemoteUsbDevices.push_back(std::move(menuDevice));
-        }
-    }
-
-    if (m_RemoteUsbState != OverlayMenuPanel::RemoteUsbState::Open &&
-        m_RemoteUsbState != OverlayMenuPanel::RemoteUsbState::Opening &&
-        m_RemoteUsbState != OverlayMenuPanel::RemoteUsbState::Stopping) {
-        if (!m_Preferences->usbForwardingEnabled) {
-            m_RemoteUsbState = OverlayMenuPanel::RemoteUsbState::Unavailable;
-            m_RemoteUsbDetail = tr("Unavailable");
-        } else if (m_RemoteUsbDevices.empty()) {
-            m_RemoteUsbState = OverlayMenuPanel::RemoteUsbState::Available;
-            m_RemoteUsbDetail = tr("No shared devices");
-        } else {
-            m_RemoteUsbState = OverlayMenuPanel::RemoteUsbState::Available;
-            m_RemoteUsbDetail = tr("%1 available").arg(m_RemoteUsbDevices.size());
-        }
-    }
-
-    updateRemoteUsbMenuState();
-}
-
-void Session::enumerateRemoteUsb()
-{
-    if (!m_Preferences->usbForwardingEnabled) {
-        refreshRemoteUsbDevices();
-        return;
-    }
-    // Refreshing the list must not hide the active operation or its Stop action.
-    if (m_RemoteUsbState != OverlayMenuPanel::RemoteUsbState::Open &&
-        m_RemoteUsbState != OverlayMenuPanel::RemoteUsbState::Opening &&
-        m_RemoteUsbState != OverlayMenuPanel::RemoteUsbState::Stopping) {
-        m_RemoteUsbState = OverlayMenuPanel::RemoteUsbState::Discovering;
-        m_RemoteUsbDetail = tr("Scanning");
-    }
-    updateRemoteUsbMenuState();
-
-    UsbForwardingBackend* backend = UsbForwardingBackend::get();
-    /* devicesChanged is emitted on the Qt thread once the probe finishes. */
-    connect(backend, &UsbForwardingBackend::devicesChanged,
-            this, &Session::refreshRemoteUsbDevices,
-            static_cast<Qt::ConnectionType>(Qt::QueuedConnection |
-                                            Qt::UniqueConnection));
-    backend->refresh();
-}
-
-void Session::startRemoteUsb(const QString &deviceId)
-{
-    if (!m_Preferences->usbForwardingEnabled || deviceId.isEmpty()) {
-        return;
-    }
-    if (m_UsbTunnel != nullptr || m_UsbCapabilityPending) {
-        showStreamingToast(tr("Another USB device is already being forwarded."),
-                           3000);
-        return;
-    }
-
-    bool supported = false;
-    for (const auto& device : m_RemoteUsbDevices) {
-        if (device.id == deviceId) {
-            supported = device.supported;
-            break;
-        }
-    }
-    if (!supported) {
-        showStreamingToast(tr("This USB device cannot be forwarded."), 3000);
-        return;
-    }
-
-    UsbForwarding::TunnelConfig config;
-    config.busId = deviceId.toUtf8();
-
-    IdentityManager* identity = IdentityManager::get();
-    if (identity == nullptr || m_Computer == nullptr) {
-        showStreamingToast(tr("USB forwarding is unavailable for this host."),
-                           3000);
-        return;
-    }
-    NvAddress address;
-    uint16_t httpsPort;
-    QString uuid;
-    {
-        QReadLocker locker(&m_Computer->lock);
-        address = m_Computer->activeAddress;
-        httpsPort = m_Computer->activeHttpsPort;
-        uuid = m_Computer->uuid;
-        config.host = m_Computer->activeAddress.address();
-        config.pinnedServerCertificate = m_Computer->serverCert;
-    }
-    config.sslConfiguration = identity->getSslConfig();
-
-    m_RemoteUsbActiveDeviceId = deviceId;
-    m_RemoteUsbState = OverlayMenuPanel::RemoteUsbState::Opening;
-    m_RemoteUsbDetail = tr("Checking host USB forwarding support");
-    m_UsbCapabilityPending = true;
-    const auto generation = ++m_UsbCapabilityGeneration;
-    updateRemoteUsbMenuState();
-
-    struct Result {
-        std::optional<UsbForwarding::Capability> capability;
-        bool hostUpdateRequired = false;
-        QString localError;
-    };
-    auto result = std::make_shared<Result>();
-    // Capture a connection snapshot, never Session or NvComputer, on the worker.
-    auto worker = QThread::create([result, address, httpsPort, uuid,
-                                  certificate = config.pinnedServerCertificate] {
-        result->localError = UsbForwardingEnvironment::readinessError(
-            UsbForwardingEnvironment::probeServices());
-        if (!result->localError.isEmpty()) return;
-        try {
-            NvHTTP http(address, httpsPort, certificate, true, nullptr, uuid);
-            result->capability = http.getUsbForwardingCapability();
-        } catch (const QtNetworkReplyException& error) {
-            result->hostUpdateRequired = error.getError() == QNetworkReply::ContentNotFoundError;
-        } catch (const std::exception&) {
-            // Never surface/log a response body that could contain credentials.
-        }
-    });
-    connect(worker, &QThread::finished, this,
-            [this, result, generation, config = std::move(config)]() mutable {
-        if (generation != m_UsbCapabilityGeneration) return;
-        m_UsbCapabilityPending = false;
-        if (!m_Preferences->usbForwardingEnabled) {
-            teardownUsbTunnel();
-            return;
-        }
-        if (!result->localError.isEmpty() || !result->capability || !result->capability->available) {
-            const QString message = !result->localError.isEmpty() ? result->localError : result->hostUpdateRequired
-                ? tr("Update Sunshine to use automatic USB forwarding setup.")
-                : !result->capability ? tr("Could not check host USB forwarding. Try again.")
-                : result->capability->reason == QStringLiteral("disabled")
-                    ? tr("Enable USB forwarding in Sunshine settings and restart the host.")
-                    : tr("Host USB forwarding is unavailable. Check its driver and settings.");
-            teardownUsbTunnel();
-            m_RemoteUsbDetail = message;
-            updateRemoteUsbMenuState();
-            showStreamingToast(message, 5000);
-            return;
-        }
-        config.port = result->capability->port;
-        config.sessionToken = result->capability->token;
-        startConfiguredRemoteUsb(std::move(config));
-    });
-    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
-    worker->start();
-}
-
-void Session::startConfiguredRemoteUsb(UsbForwarding::TunnelConfig config)
-{
-#ifdef Q_OS_DARWIN
-    /* macOS has no resident USB/IP service: spawn the bundled moonlight-usbd
-     * for this device and point the tunnel at its ephemeral loopback port.
-     * Spawned on the Session thread with blocking waits (like the clipboard
-     * helper), never on the capability worker above. */
-    m_UsbLocalServer = new UsbForwardingLocalServer();
-    quint16 helperPort = 0;
-    QString helperError;
-    if (!m_UsbLocalServer->start({QString::fromUtf8(config.busId)},
-                                 &helperPort, &helperError)) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "USB helper failed to start: %s",
-                    helperError.toUtf8().constData());
-        const QString message = helperError.contains(QLatin1String("device_occupied"))
-                ? tr("This USB device is in use by macOS and cannot be forwarded.")
-                : helperError.contains(QLatin1String("device_not_found"))
-                      ? tr("The USB device was unplugged. Refresh the list and try again.")
-                      : tr("Could not start the local USB sharing service.");
-        delete m_UsbLocalServer;
-        m_UsbLocalServer = nullptr;
-        teardownUsbTunnel();
-        m_RemoteUsbDetail = message;
-        updateRemoteUsbMenuState();
-        showStreamingToast(message, 5000);
-        return;
-    }
-    config.localHost = QStringLiteral("127.0.0.1");
-    config.localPort = helperPort;
-#endif
-
-    m_RemoteUsbDetail = tr("Connecting");
-    updateRemoteUsbMenuState();
-    m_UsbTunnel = new UsbForwarding::Tunnel(std::move(config), this);
-    connect(m_UsbTunnel, &UsbForwarding::Tunnel::forwarding, this, [this] {
-        m_RemoteUsbState = OverlayMenuPanel::RemoteUsbState::Open;
-        m_RemoteUsbDetail = tr("Connected");
-        updateRemoteUsbMenuState();
-        showStreamingToast(tr("USB tunnel connected. Check device availability on the host."), 4000);
-    });
-    connect(m_UsbTunnel, &UsbForwarding::Tunnel::finished,
-            this, [this](const QString& message) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "USB tunnel finished: %s",
-                    message.toUtf8().constData());
-        if (!message.isEmpty()) {
-            showStreamingToast(message, 4000);
-        }
-        teardownUsbTunnel();
-    });
-
-    QString startError;
-    if (!m_UsbTunnel->start(&startError)) {
-        showStreamingToast(startError, 4000);
-        teardownUsbTunnel();
-    }
-}
-
-void Session::stopRemoteUsb()
-{
-    if (m_UsbTunnel == nullptr && !m_UsbCapabilityPending) {
-        return;
-    }
-    m_RemoteUsbState = OverlayMenuPanel::RemoteUsbState::Stopping;
-    m_RemoteUsbDetail = tr("Releasing");
-    updateRemoteUsbMenuState();
-    teardownUsbTunnel();
-}
-
-void Session::teardownUsbTunnel()
-{
-    ++m_UsbCapabilityGeneration;
-    m_UsbCapabilityPending = false;
-    if (m_UsbTunnel != nullptr) {
-        m_UsbTunnel->disconnect(this);
-        m_UsbTunnel->stop();
-        m_UsbTunnel->deleteLater();
-        m_UsbTunnel = nullptr;
-    }
-    if (m_UsbLocalServer != nullptr) {
-        m_UsbLocalServer->stop();
-        delete m_UsbLocalServer;
-        m_UsbLocalServer = nullptr;
-    }
-    m_RemoteUsbActiveDeviceId.clear();
-    m_RemoteUsbState = OverlayMenuPanel::RemoteUsbState::Available;
-    refreshRemoteUsbDevices();
 }
 
 bool Session::initialize(QQuickWindow* qtWindow)
@@ -2300,7 +1898,6 @@ bool Session::validateLaunch(SDL_Window* testWindow)
     return true;
 }
 
-
 class DeferredSessionCleanupTask : public QRunnable
 {
 public:
@@ -2793,21 +2390,12 @@ void Session::showQtOverlayMenu(std::optional<QPoint> pointerGlobalPosition,
                                         m_Preferences->swapFaceButtons)
             : QString());
 
-    if (m_Preferences->usbForwardingEnabled &&
-        m_RemoteUsbState != OverlayMenuPanel::RemoteUsbState::Opening &&
-        m_RemoteUsbState != OverlayMenuPanel::RemoteUsbState::Open &&
-        m_RemoteUsbState != OverlayMenuPanel::RemoteUsbState::Stopping) {
-        enumerateRemoteUsb();
-    }
-
     // Update dynamic state before showing
     m_MenuPanel->updateMicrophoneState(m_MicStream != nullptr);
     m_MenuPanel->updateBitrateState(m_Preferences->bitrateKbps);
     m_MenuPanel->updateGamepadMouseState(m_InputHandler->isMouseEmulationActive());
     m_MenuPanel->updateMenuPositionState(
             menuPlacementActionForPreference(m_Preferences->overlayMenuPosition));
-    updateFileMappingMenuState();
-    updateRemoteUsbMenuState();
 
     // Show menu based on user preference
     switch (m_Preferences->overlayMenuPosition) {
@@ -2977,43 +2565,6 @@ void Session::dispatchQtMenuAction(OverlayMenuPanel::MenuAction action)
         combo = SdlInputHandler::KeyComboTogglePointerRegionLock;
         break;
 
-    case OverlayMenuPanel::MenuAction::ShowHostFiles:
-        appendFileMappingDiagnostic(
-                QStringLiteral("overlay.click_host_files"),
-                QStringLiteral("state=%1 detail=%2 mount_path=%3")
-                        .arg(fileMappingStateName(m_FileMappingState),
-                             m_FileMappingDetail,
-                             m_FileMappingMountPath),
-                m_Computer ? m_Computer->uuid : QString(),
-                m_FileMappingSessionId);
-        if (m_FileMappingState == OverlayMenuPanel::FileMappingState::Checking ||
-            m_FileMappingState == OverlayMenuPanel::FileMappingState::Unknown) {
-            showStreamingToast(tr("Checking host file sharing..."), 2000);
-        }
-        else if (m_FileMappingState == OverlayMenuPanel::FileMappingState::Mounting) {
-            showStreamingToast(tr("Preparing host files..."), 2000);
-        }
-        else if (m_FileMappingState == OverlayMenuPanel::FileMappingState::Open &&
-                 !m_FileMappingMountPath.isEmpty()) {
-            openFileMappingMountPath();
-            showStreamingToast(tr("Opening host files..."), 2000);
-        }
-        else if (m_FileMappingState == OverlayMenuPanel::FileMappingState::Available) {
-            startFileMappingMount();
-        }
-        else if (m_FileMappingState == OverlayMenuPanel::FileMappingState::Error ||
-                 m_FileMappingState == OverlayMenuPanel::FileMappingState::Unavailable) {
-            showStreamingToast(m_FileMappingToast.isEmpty()
-                               ? tr("Host file sharing is not available. Retrying...")
-                               : m_FileMappingToast + tr(" Retrying..."),
-                               4500);
-            startFileMappingUxProbe();
-        }
-        else {
-            showStreamingToast(tr("Host file sharing is not available."), 3000);
-        }
-        return;
-
     // --- Microphone toggle ---
     // Deferred: toggle mic outside processEvents() to avoid QAudioSource heap corruption
     case OverlayMenuPanel::MenuAction::ToggleMicrophone:
@@ -3141,88 +2692,6 @@ void Session::processQtOverlayEvents()
 #endif
 }
 
-void Session::updateFileMappingMenuState()
-{
-    if (m_MenuPanel) {
-        m_MenuPanel->updateFileMappingState(m_FileMappingState, m_FileMappingDetail);
-    }
-}
-
-bool Session::openFileMappingMountPath()
-{
-    if (m_FileMappingMountPath.isEmpty()) {
-        appendFileMappingDiagnostic(
-                QStringLiteral("finder_reveal.skip"),
-                QStringLiteral("empty_mount_path"),
-                m_Computer ? m_Computer->uuid : QString(),
-                m_FileMappingSessionId);
-        return false;
-    }
-
-    const QString markerPath = QDir(m_FileMappingMountPath).filePath(QStringLiteral("README.txt"));
-    appendFileMappingDiagnostic(
-            QStringLiteral("finder_reveal.start"),
-            QStringLiteral("mount_path=%1 marker=%2 marker_exists=%3")
-                    .arg(m_FileMappingMountPath,
-                         markerPath,
-                         QFileInfo::exists(markerPath) ? QStringLiteral("true") : QStringLiteral("false")),
-            m_Computer ? m_Computer->uuid : QString(),
-            m_FileMappingSessionId);
-
-#if defined(Q_OS_MACOS)
-    if (QFileInfo::exists(markerPath) &&
-            QProcess::startDetached(QStringLiteral("/usr/bin/open"),
-                                    { QStringLiteral("-R"),
-                                      markerPath })) {
-        appendFileMappingDiagnostic(
-                QStringLiteral("finder_reveal.open_r"),
-                QStringLiteral("ok=true marker=%1").arg(markerPath),
-                m_Computer ? m_Computer->uuid : QString(),
-                m_FileMappingSessionId);
-        return true;
-    }
-    if (QProcess::startDetached(QStringLiteral("/usr/bin/open"),
-                                { m_FileMappingMountPath })) {
-        appendFileMappingDiagnostic(
-                QStringLiteral("finder_reveal.open_folder"),
-                QStringLiteral("ok=true mount_path=%1").arg(m_FileMappingMountPath),
-                m_Computer ? m_Computer->uuid : QString(),
-                m_FileMappingSessionId);
-        return true;
-    }
-#elif defined(Q_OS_WIN32) || defined(Q_OS_WIN)
-    if (QFileInfo::exists(markerPath) &&
-            QProcess::startDetached(QStringLiteral("explorer.exe"),
-                                    { QStringLiteral("/select,%1").arg(QDir::toNativeSeparators(markerPath)) })) {
-        appendFileMappingDiagnostic(
-                QStringLiteral("explorer_reveal.open_select"),
-                QStringLiteral("ok=true marker=%1").arg(markerPath),
-                m_Computer ? m_Computer->uuid : QString(),
-                m_FileMappingSessionId);
-        return true;
-    }
-    if (QProcess::startDetached(QStringLiteral("explorer.exe"),
-                                { QDir::toNativeSeparators(m_FileMappingMountPath) })) {
-        appendFileMappingDiagnostic(
-                QStringLiteral("explorer_reveal.open_folder"),
-                QStringLiteral("ok=true mount_path=%1").arg(m_FileMappingMountPath),
-                m_Computer ? m_Computer->uuid : QString(),
-                m_FileMappingSessionId);
-        return true;
-    }
-#endif
-
-    const bool opened = QDesktopServices::openUrl(QUrl::fromLocalFile(m_FileMappingMountPath));
-    appendFileMappingDiagnostic(
-            QStringLiteral("finder_reveal.desktop_services"),
-            QStringLiteral("ok=%1 mount_path=%2")
-                    .arg(opened ? QStringLiteral("true") : QStringLiteral("false"),
-                         m_FileMappingMountPath),
-            m_Computer ? m_Computer->uuid : QString(),
-            m_FileMappingSessionId);
-    return opened;
-}
-
 void Session::requestRuntimeBitrateChange(int bitrateKbps)
 {
     if (!m_Computer) {
@@ -3244,7 +2713,6 @@ void Session::requestRuntimeBitrateChange(int bitrateKbps)
 void Session::startRuntimeBitrateWorker()
 {
     // Snapshot the connection under lock; the worker never touches Session
-    // or NvComputer (same pattern as startRemoteUsb()).
     NvAddress address;
     uint16_t httpsPort;
     QString uuid;
@@ -3407,282 +2875,6 @@ void Session::stopSunshineAbr()
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Sunshine ABR disable failed: unknown error");
     }
-}
-
-void Session::startFileMappingUxProbe()
-{
-    appendFileMappingDiagnostic(
-            QStringLiteral("ux_probe.request"),
-            QStringLiteral("current_state=%1").arg(fileMappingStateName(m_FileMappingState)),
-            m_Computer ? m_Computer->uuid : QString(),
-            m_FileMappingSessionId);
-
-    m_FileMappingState = OverlayMenuPanel::FileMappingState::Checking;
-    m_FileMappingDetail = tr("Checking");
-    m_FileMappingToast = tr("Checking host file sharing...");
-    m_FileMappingToastPending = false;
-    updateFileMappingMenuState();
-
-    if (m_Computer == nullptr) {
-        m_FileMappingState = OverlayMenuPanel::FileMappingState::Unavailable;
-        m_FileMappingDetail = tr("Unavailable");
-        m_FileMappingToast = tr("Host file sharing is not available.");
-        appendFileMappingDiagnostic(
-                QStringLiteral("ux_probe.no_computer"),
-                m_FileMappingToast,
-                QString(),
-                m_FileMappingSessionId);
-        updateFileMappingMenuState();
-        return;
-    }
-
-    NvComputer computerSnapshot;
-    {
-        QReadLocker locker(&m_Computer->lock);
-        computerSnapshot = *m_Computer;
-    }
-
-    m_FileMappingProbeState = std::make_shared<FileMappingUx::ProbeState>();
-    FileMappingUx::startCapabilityProbe(std::move(computerSnapshot),
-                                        m_FileMappingProbeState,
-                                        2500);
-}
-
-void Session::processFileMappingUxProbeResult()
-{
-    if (!m_FileMappingProbeState) {
-        return;
-    }
-
-    bool available = false;
-    bool error = false;
-    QString detail;
-    QString message;
-    QString diagnosticsPath;
-    {
-        QMutexLocker locker(&m_FileMappingProbeState->lock);
-        if (!m_FileMappingProbeState->pending) {
-            return;
-        }
-        m_FileMappingProbeState->pending = false;
-        available = m_FileMappingProbeState->available;
-        error = m_FileMappingProbeState->error;
-        detail = m_FileMappingProbeState->detail;
-        message = m_FileMappingProbeState->message;
-        diagnosticsPath = m_FileMappingProbeState->diagnosticsPath;
-    }
-
-    m_FileMappingState = available ? OverlayMenuPanel::FileMappingState::Available :
-                         error ? OverlayMenuPanel::FileMappingState::Error :
-                         OverlayMenuPanel::FileMappingState::Unavailable;
-    m_FileMappingDetail = detail;
-    m_FileMappingToast = message;
-    m_FileMappingToastPending = available;
-    updateFileMappingMenuState();
-
-    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "File mapping UX probe: state=%d detail=%s message=%s diagnostics=%s",
-                static_cast<int>(m_FileMappingState),
-                m_FileMappingDetail.toUtf8().constData(),
-                m_FileMappingToast.toUtf8().constData(),
-                diagnosticsPath.toUtf8().constData());
-
-    if (m_FileMappingToastPending) {
-        m_FileMappingToastPending = false;
-        showStreamingToast(m_FileMappingToast, 2500);
-    }
-}
-
-void Session::startFileMappingMount()
-{
-    appendFileMappingDiagnostic(
-            QStringLiteral("mount.request"),
-            QStringLiteral("current_state=%1 existing_task=%2 mount_path=%3")
-                    .arg(fileMappingStateName(m_FileMappingState),
-                         m_FileMappingMountState ? QStringLiteral("true") : QStringLiteral("false"),
-                         m_FileMappingMountPath),
-            m_Computer ? m_Computer->uuid : QString(),
-            m_FileMappingSessionId);
-
-    if (m_FileMappingMountState) {
-        showStreamingToast(tr("Preparing host files..."), 2000);
-        return;
-    }
-
-    if (!m_FileMappingMountPath.isEmpty()) {
-        openFileMappingMountPath();
-        showStreamingToast(tr("Opening host files..."), 2000);
-        return;
-    }
-
-    m_FileMappingState = OverlayMenuPanel::FileMappingState::Mounting;
-    m_FileMappingDetail = tr("Preparing");
-    m_FileMappingToast = tr("Preparing host files...");
-    m_FileMappingToastPending = false;
-    updateFileMappingMenuState();
-    showStreamingToast(m_FileMappingToast, 2000);
-
-    if (m_Computer == nullptr) {
-        m_FileMappingState = OverlayMenuPanel::FileMappingState::Unavailable;
-        m_FileMappingDetail = tr("Unavailable");
-        m_FileMappingToast = tr("Host file sharing is not available.");
-        appendFileMappingDiagnostic(
-                QStringLiteral("mount.no_computer"),
-                m_FileMappingToast,
-                QString(),
-                m_FileMappingSessionId);
-        updateFileMappingMenuState();
-        return;
-    }
-
-    NvComputer computerSnapshot;
-    {
-        QReadLocker locker(&m_Computer->lock);
-        computerSnapshot = *m_Computer;
-    }
-
-    m_FileMappingMountState = std::make_shared<FileMappingUx::MountState>();
-    FileMappingUx::startMount(std::move(computerSnapshot),
-                              m_FileMappingSessionId,
-                              m_FileMappingMountState,
-                              8000);
-}
-
-void Session::processFileMappingMountResult()
-{
-    if (!m_FileMappingMountState) {
-        return;
-    }
-
-    bool ok = false;
-    QString detail;
-    QString message;
-    QString displayPath;
-    QString diagnosticsPath;
-    {
-        QMutexLocker locker(&m_FileMappingMountState->lock);
-        if (!m_FileMappingMountState->pending) {
-            return;
-        }
-        m_FileMappingMountState->pending = false;
-        ok = m_FileMappingMountState->ok;
-        detail = m_FileMappingMountState->detail;
-        message = m_FileMappingMountState->message;
-        displayPath = m_FileMappingMountState->displayPath;
-        diagnosticsPath = m_FileMappingMountState->diagnosticsPath;
-    }
-    m_FileMappingMountState.reset();
-
-    appendFileMappingDiagnostic(
-            QStringLiteral("mount.result"),
-            QStringLiteral("ok=%1 detail=%2 message=%3 display_path=%4 diagnostics=%5")
-                    .arg(ok ? QStringLiteral("true") : QStringLiteral("false"),
-                         detail,
-                         message,
-                         displayPath,
-                         diagnosticsPath),
-            m_Computer ? m_Computer->uuid : QString(),
-            m_FileMappingSessionId);
-
-    if (ok && !displayPath.isEmpty()) {
-        m_FileMappingMountPath = displayPath;
-        m_FileMappingState = OverlayMenuPanel::FileMappingState::Open;
-        m_FileMappingDetail = detail.isEmpty() ? tr("Open") : detail;
-        m_FileMappingToast = message.isEmpty() ? tr("Host files are ready.") : message;
-        updateFileMappingMenuState();
-        const bool opened = openFileMappingMountPath();
-        showStreamingToast(opened
-                           ? m_FileMappingToast
-                           : tr("Host files are ready, but the folder did not open. Check %1.").arg(m_FileMappingMountPath),
-                           3000);
-    }
-    else {
-        m_FileMappingMountPath.clear();
-        m_FileMappingState = OverlayMenuPanel::FileMappingState::Error;
-        m_FileMappingDetail = detail.isEmpty() ? tr("Error") : detail;
-        m_FileMappingToast = message.isEmpty() ? tr("Host files could not be opened.") : message;
-        updateFileMappingMenuState();
-        showStreamingToast(m_FileMappingToast, 4500);
-    }
-}
-
-void Session::cleanupFileMappingMount()
-{
-    appendFileMappingDiagnostic(
-            QStringLiteral("mount.cleanup"),
-            QStringLiteral("mount_path=%1").arg(m_FileMappingMountPath),
-            m_Computer ? m_Computer->uuid : QString(),
-            m_FileMappingSessionId);
-    m_FileMappingMountState.reset();
-    const QString mountPath = m_FileMappingMountPath;
-    m_FileMappingMountPath.clear();
-    if (!mountPath.isEmpty()) {
-        const bool generatedMirrorPath = isMoonlightGeneratedFileMappingMirrorPath(mountPath);
-#if defined(Q_OS_MACOS)
-        if (generatedMirrorPath) {
-            QProcess::execute(QStringLiteral("/sbin/umount"), { mountPath });
-        }
-#endif
-        if (generatedMirrorPath) {
-            const bool removed = QDir(mountPath).removeRecursively();
-            appendFileMappingDiagnostic(
-                    removed ? QStringLiteral("mount.cleanup.delete")
-                            : QStringLiteral("mount.cleanup.delete_failed"),
-                    QStringLiteral("mount_path=%1").arg(mountPath),
-                    m_Computer ? m_Computer->uuid : QString(),
-                    m_FileMappingSessionId);
-        }
-        else {
-            appendFileMappingDiagnostic(
-                    QStringLiteral("mount.cleanup.skip_delete"),
-                    QStringLiteral("mount_path=%1 reason=outside_moonlight_mirror").arg(mountPath),
-                    m_Computer ? m_Computer->uuid : QString(),
-                    m_FileMappingSessionId);
-        }
-    }
-}
-
-void Session::startFileMappingSmokeProbe()
-{
-    if (qEnvironmentVariableIntValue("MOONLIGHT_FILE_MAPPING_SMOKE") == 0) {
-        return;
-    }
-
-    if (m_Computer == nullptr) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "File mapping smoke skipped: no active computer");
-        return;
-    }
-
-    const QString mappingId = QString::fromLocal8Bit(qgetenv("MOONLIGHT_FILE_MAPPING_SMOKE_MAPPING")).trimmed();
-    const QString path = QString::fromLocal8Bit(qgetenv("MOONLIGHT_FILE_MAPPING_SMOKE_PATH")).trimmed();
-    if (mappingId.isEmpty() || path.isEmpty()) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "File mapping smoke skipped: set MOONLIGHT_FILE_MAPPING_SMOKE_MAPPING and MOONLIGHT_FILE_MAPPING_SMOKE_PATH");
-        return;
-    }
-
-    const int timeoutMs = readBoundedEnvInt("MOONLIGHT_FILE_MAPPING_SMOKE_TIMEOUT_MS", 5000, 1000, 60000);
-    const int offset = readBoundedEnvInt("MOONLIGHT_FILE_MAPPING_SMOKE_OFFSET", 0, 0, 1024 * 1024 * 1024);
-    const int length = readBoundedEnvInt("MOONLIGHT_FILE_MAPPING_SMOKE_LENGTH", 4096, 1, 1024 * 1024);
-
-    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "Starting file mapping smoke probe: mapping=%s path=%s",
-                mappingId.toUtf8().constData(),
-                path.toUtf8().constData());
-
-    NvComputer computerSnapshot;
-    {
-        QReadLocker locker(&m_Computer->lock);
-        computerSnapshot = *m_Computer;
-    }
-
-    QThreadPool::globalInstance()->start(new FileMappingSmokeTask(std::move(computerSnapshot),
-                                                                  mappingId,
-                                                                  path,
-                                                                  static_cast<quint64>(offset),
-                                                                  static_cast<quint32>(length),
-                                                                  timeoutMs));
 }
 
 void Session::sendSunshineAbrFeedback()
@@ -3848,8 +3040,6 @@ public:
 
 bool Session::tryReconnect()
 {
-    // Drop any forwarded USB device so the reconnect starts from a clean state.
-    teardownUsbTunnel();
 
     // Release any locally tracked pressed keys before tearing down the dead connection.
     // If the old control stream is still partly alive, this gives the host one last
@@ -4355,8 +3545,7 @@ bool Session::startConnectionAsync()
 
     emit connectionStarted();
     startSunshineAbr();
-    startFileMappingUxProbe();
-    startFileMappingSmokeProbe();
+
     if (m_Preferences->enableMicrophone) {
         // Use the deferred mic toggle mechanism instead of QueuedConnection to avoid
         // heap corruption when creating QAudioSource within nested event loops (processEvents).
@@ -4670,8 +3859,7 @@ void Session::exec()
         m_InputHandler = nullptr;
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         QThreadPool::globalInstance()->start(new DeferredSessionCleanupTask(this));
-        // Release the forwarded USB device with the stream, not with the Session.
-        teardownUsbTunnel();
+
         return;
     }
 
@@ -4965,12 +4153,7 @@ void Session::exec()
     m_MenuPanel->setActionCallback([this](OverlayMenuPanel::MenuAction action) {
         dispatchQtMenuAction(action);
     });
-    m_MenuPanel->setRemoteUsbDeviceCallback([this](const QString& deviceId) {
-        startRemoteUsb(deviceId);
-    });
-    m_MenuPanel->setRemoteUsbReleaseCallback([this] {
-        stopRemoteUsb();
-    });
+
     m_MenuPanel->setBitrateChangeCallback([this](int bitrateKbps) {
         // Manual adjustment takes over from the settings page auto-recompute.
         m_Preferences->autoAdjustBitrate = false;
@@ -4980,7 +4163,7 @@ void Session::exec()
         // actually accepted (see startRuntimeBitrateWorker()).
         requestRuntimeBitrateChange(bitrateKbps);
     });
-    updateRemoteUsbMenuState();
+
     m_MenuPanel->setCloseCallback([this]() {
         // Record close timestamp for edge-trigger debounce
         m_MenuCloseTicks = SDL_GetTicks();
@@ -5046,20 +4229,12 @@ void Session::exec()
         // visibility as active Qt work forces this SDL loop to wake and drain
         // all Qt events every 10 ms even while the button is idle, which can
         // delay input and video processing.
-        // Remote USB 转发的 queued 工作投递在本线程（helper spawn 的
-        // worker-finished lambda、tunnel 状态通知、helper stderr 排水），
-        // 而本循环已取代 app.exec()、只在返回 true 时泵事件：转发存续期间
-        // 必须保持泵转，否则 helper 无法启动、日志会写满 stderr 管道把
-        // moonlight-usbd 卡死、tunnel 的 forwarding/finished 通知也收不到。
-        // 隧道的数据面跑在自己的 IO 线程（usbforwardingtunnel.cpp），不依赖
-        // 本泵——1000Hz 鼠标的 URB 洪流不再与输入处理争抢本线程。
         // Qt owns the native Wayland toplevel and must continuously process
         // configure, input, and close events for the surface imported by SDL.
         return m_WaylandStreamWindow != nullptr ||
                (m_MenuPanel && m_MenuPanel->needsEventProcessing()) ||
                (m_MenuButton && m_MenuButton->needsEventProcessing()) ||
-               (m_Toast && m_Toast->needsEventProcessing()) || m_UsbCapabilityPending ||
-               m_UsbLocalServer != nullptr || m_UsbTunnel != nullptr ||
+               (m_Toast && m_Toast->needsEventProcessing()) ||
 #ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS
                (m_StylusReplayTest && m_StylusReplayTest->isPanelVisible());
 #else
@@ -5172,8 +4347,7 @@ void Session::exec()
 #ifdef Q_OS_WIN32
         processClientSdrWhiteUpdate();
 #endif
-        processFileMappingUxProbeResult();
-        processFileMappingMountResult();
+
         processClipboardHelperMessages();
 #ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS
         if (m_StylusReplayTest) {
@@ -5212,8 +4386,7 @@ void Session::exec()
         if (!SDL_WaitEventTimeout(&event, waitTimeoutMs)) {
             presence.runCallbacks();
             processClipboardHelperMessages();
-            processFileMappingUxProbeResult();
-            processFileMappingMountResult();
+
             processQtEventsDuringStream(true);
             processSunshineAbrFeedback();
             continue;
@@ -5233,8 +4406,7 @@ void Session::exec()
 #endif
             presence.runCallbacks();
             processClipboardHelperMessages();
-            processFileMappingUxProbeResult();
-            processFileMappingMountResult();
+
             processQtEventsDuringStream();
             processSunshineAbrFeedback();
             continue;
@@ -5802,8 +4974,7 @@ void Session::exec()
         }
 
         processClipboardHelperMessages();
-        processFileMappingUxProbeResult();
-        processFileMappingMountResult();
+
         processQtEventsDuringStream();
 #ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS
         if (m_StylusReplayTest) {
@@ -5844,8 +5015,6 @@ DispatchDeferredCleanup:
     m_WasCapturedBeforeStylusReplayPanel = false;
     m_StylusReplayTest.reset();
 #endif
-
-    cleanupFileMappingMount();
 
     // Destroy the Qt overlay menu panel
     if (m_MenuPanel) {
@@ -5950,8 +5119,6 @@ DispatchDeferredCleanup:
     }
 
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
-    // Release the forwarded USB device with the stream.
-    teardownUsbTunnel();
 
     // Cleanup can take a while, so dispatch it to a worker thread.
     // When it is complete, it will release our s_ActiveSessionSemaphore

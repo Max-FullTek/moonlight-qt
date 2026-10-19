@@ -54,9 +54,6 @@ public:
         UngrabInput,
         PasteText,
         TogglePointerRegionLock,
-        ShowHostFiles,
-        SelectRemoteUsbDevice,
-        ReleaseRemoteUsbDevice,
         // Microphone
         ToggleMicrophone,
         // Gamepad mouse emulation
@@ -75,33 +72,6 @@ public:
         MenuActionMax
     };
 
-    enum class FileMappingState {
-        Unknown,
-        Checking,
-        Unavailable,
-        Available,
-        Mounting,
-        Open,
-        Error
-    };
-
-    enum class RemoteUsbState {
-        Unavailable,
-        Discovering,
-        Available,
-        Opening,
-        Open,
-        Stopping,
-        Error
-    };
-
-    struct RemoteUsbDevice {
-        QString id;
-        QString label;
-        QString detail;
-        bool supported = true;
-    };
-
     enum class MenuItemType {
         Action,     // dispatch action + close menu
         SubMenu,    // navigate to sub-level
@@ -112,8 +82,6 @@ public:
 
     using ActionCallback = std::function<void(MenuAction)>;
     using CloseCallback  = std::function<void()>;
-    using RemoteUsbDeviceCallback = std::function<void(const QString&)>;
-    using RemoteUsbReleaseCallback = std::function<void()>;
     // Fired when a bitrate adjustment settles (debounced while scrubbing,
     // immediate for preset taps). The value is in kbps.
     using BitrateChangeCallback = std::function<void(int)>;
@@ -124,12 +92,6 @@ public:
 
     void setActionCallback(ActionCallback cb) { m_ActionCallback = cb; }
     void setCloseCallback(CloseCallback cb)   { m_CloseCallback = cb; }
-    void setRemoteUsbDeviceCallback(RemoteUsbDeviceCallback cb) {
-        m_RemoteUsbDeviceCallback = std::move(cb);
-    }
-    void setRemoteUsbReleaseCallback(RemoteUsbReleaseCallback cb) {
-        m_RemoteUsbReleaseCallback = std::move(cb);
-    }
     void setBitrateChangeCallback(BitrateChangeCallback cb) {
         m_BitrateChangeCallback = std::move(cb);
     }
@@ -168,12 +130,7 @@ public:
     void updateBitrateState(int bitrateKbps);
     void updateMenuPositionState(MenuAction activePlacementAction);
     void updateGamepadMouseState(bool enabled);
-    void updateFileMappingState(FileMappingState state, const QString& detail);
-    void updateRemoteUsbState(bool available,
-                              RemoteUsbState state,
-                              std::vector<RemoteUsbDevice> devices,
-                              const QString& activeDeviceId,
-                              const QString& detail);
+
     // 手柄在位状态、UI 风格、swapFaceButtons 与退出组合键 glyph 文案：菜单
     // 打开前由 Session 推送，任一变化即重建菜单级（手柄专属条目与按键提示
     // 跟着变）
@@ -287,19 +244,9 @@ private:
     GamepadUiStyle m_GamepadUiStyle;
     bool m_SwapFaceButtons;
     QString m_QuitComboGlyphs;
-    FileMappingState m_FileMappingState;
-    QString m_FileMappingDetail;
-    bool m_RemoteUsbAvailable;
-    bool m_RemoteUsbNeedsActivation = false;
-    RemoteUsbState m_RemoteUsbState;
-    std::vector<RemoteUsbDevice> m_RemoteUsbDevices;
-    QString m_RemoteUsbActiveDeviceId;
-    QString m_RemoteUsbDetail;
 
     ActionCallback m_ActionCallback;
     CloseCallback  m_CloseCallback;
-    RemoteUsbDeviceCallback m_RemoteUsbDeviceCallback;
-    RemoteUsbReleaseCallback m_RemoteUsbReleaseCallback;
     BitrateChangeCallback m_BitrateChangeCallback;
 
     // Bitrate slider state. m_BitrateKbps is the on-screen value;

@@ -5,7 +5,6 @@ import QtQuick.Window 2.2
 import QtQuick.Controls.Material as MaterialStyle
 
 import ComputerManager 1.0
-import AutoUpdateChecker 1.0
 import StreamingPreferences 1.0
 import SystemProperties 1.0
 import SdlGamepadKeyNavigation 1.0
@@ -19,7 +18,6 @@ ApplicationWindow {
     property bool pollingActive: false
     property bool revealAfterFirstFrame: false
     property bool configurationChecksStarted: false
-    property bool initialBackgroundChoiceHandled: false
 
     Timer {
         id: revealFallbackTimer
@@ -118,16 +116,6 @@ ApplicationWindow {
         SystemProperties.startAsyncLoad()
     }
 
-    function commitInitialBackgroundSource(source) {
-        if (initialBackgroundChoiceHandled) {
-            return
-        }
-
-        initialBackgroundChoiceHandled = true
-        StreamingPreferences.backgroundSource = source
-        StreamingPreferences.save()
-    }
-
     Component.onCompleted: {
         // Always fit the initial window to the current screen. When the preference
         // is enabled, restore the last normal window geometry before showing it.
@@ -155,14 +143,8 @@ ApplicationWindow {
             window.showFullScreen()
         }
 
-        // Let a fresh install choose its background before any other startup
-        // warning is opened. Existing installs and CLI launches skip this step.
-        if (runConfigChecks && !StreamingPreferences.backgroundSetupCompleted) {
-            Qt.callLater(function() { backgroundSourceDialog.open() })
-        }
-        else {
-            startConfigurationChecks()
-        }
+        startConfigurationChecks()
+
     }
 
     onClosing: windowPlacement.flush()
@@ -590,29 +572,6 @@ ApplicationWindow {
             }
 
             NavigableToolButton {
-                id: qqButton
-                visible: SystemProperties.hasBrowser &&
-                         stackView.currentItem instanceof SettingsView
-
-                iconSource: "qrc:/res/qq-2.svg"
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered
-                // 源串必须是英文：这个仓库的源语言是 en_GB，中文源串会变成 28 个
-                // 语言包里的 msgid，而且全都 unfinished —— 英语用户看到的就是那四个
-                // 中文字。梗放到 zh_CN 的译文里，两边都能要。
-                ToolTip.text: qsTr("Join our QQ group")
-
-                // TODO need to make sure browser is brought to foreground.
-                onClicked: Qt.openUrlExternally("https://qm.qq.com/cgi-bin/qm/qr?k=wI7aTvDQdd900n1L_wjjJw3qNP0yOgUa&jump_from=webapi&authKey=CDBn7sGy7HpCKYTcFmoEdNuG/zmkrBWUC/W5A/oZZycKzXwuO/XFCA97IpJRktj3");
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocusReason)
-                }
-            }
-
-            NavigableToolButton {
                 id: addPcButton
                 visible: stackView.currentItem instanceof PcView
 
@@ -631,68 +590,6 @@ ApplicationWindow {
 
                 onClicked: {
                     addPcDialog.open()
-                }
-
-                Keys.onDownPressed: {
-                    stackView.currentItem.forceActiveFocus(Qt.TabFocusReason)
-                }
-            }
-
-            NavigableToolButton {
-                property string browserUrl: ""
-
-                id: updateButton
-
-                iconSource: "qrc:/res/fluent/tb-update.svg"
-
-                ToolTip.delay: 1000
-                ToolTip.timeout: 3000
-                ToolTip.visible: hovered || visible
-
-                // Invisible until we get a callback notifying us that
-                // an update is available
-                visible: false
-
-                onClicked: {
-                    if (AutoUpdateChecker.supportsInAppUpdate()) {
-                        portableUpdateDialog.text = qsTr("Preparing update...")
-                        portableUpdateDialog.open()
-                        AutoUpdateChecker.installUpdate(browserUrl)
-                    }
-                    else if (SystemProperties.hasBrowser) {
-                        Qt.openUrlExternally(browserUrl);
-                    }
-                }
-
-                function updateAvailable(version, url)
-                {
-                    ToolTip.text = Brand.text(qsTr("Update available for Moonlight: Version %1")).arg(version)
-                    updateButton.browserUrl = url
-                    updateButton.visible = true
-                }
-
-                function portableUpdateStatusChanged(message)
-                {
-                    portableUpdateDialog.text = message
-                    if (!portableUpdateDialog.visible) {
-                        portableUpdateDialog.open()
-                    }
-                }
-
-                function portableUpdateFailed(message)
-                {
-                    portableUpdateDialog.close()
-                    portableUpdateErrorDialog.text = message
-                    portableUpdateErrorDialog.open()
-                }
-
-                Component.onCompleted: {
-                    AutoUpdateChecker.onUpdateAvailable.connect(updateAvailable)
-                    AutoUpdateChecker.onPortableUpdateStatusChanged.connect(portableUpdateStatusChanged)
-                    AutoUpdateChecker.onPortableUpdateFailed.connect(portableUpdateFailed)
-                    if (StreamingPreferences.autoUpdateCheck) {
-                        AutoUpdateChecker.start()
-                    }
                 }
 
                 Keys.onDownPressed: {
@@ -838,39 +735,6 @@ ApplicationWindow {
         helpUrl: "https://github.com/moonlight-stream/moonlight-docs/wiki/Fixing-Hardware-Decoding-Problems"
     }
 
-    NavigableMessageDialog {
-        id: portableUpdateDialog
-        standardButtons: Dialog.NoButton
-        closePolicy: Popup.CloseOnEscape
-        showSpinner: true
-        text: qsTr("Preparing update...")
-    }
-
-    BackgroundSourceDialog {
-        id: backgroundSourceDialog
-
-        onSourceChosen: function(source) {
-            window.commitInitialBackgroundSource(source)
-        }
-
-        Connections {
-            target: backgroundSourceDialog
-            function onClosed() {
-                // Escape and window-manager close mean “decide later”: keep the
-                // photography default, mark the picker handled, then continue startup.
-                if (!window.initialBackgroundChoiceHandled) {
-                    window.commitInitialBackgroundSource(StreamingPreferences.BGS_PHOTOGRAPHY)
-                }
-                window.startConfigurationChecks()
-            }
-        }
-    }
-
-    ErrorMessageDialog {
-        id: portableUpdateErrorDialog
-        text: ""
-    }
-
     ErrorMessageDialog {
         id: xWaylandDialog
         text: qsTr("Hardware acceleration doesn't work on XWayland. Continuing on XWayland may result in poor streaming performance. " +
@@ -994,59 +858,6 @@ ApplicationWindow {
                 Layout.fillWidth: true
             }
 
-            // 云主机推广。放在这里是因为「我没有可以串流的主机」正好是打开这个框的
-            // 人最可能卡住的地方 —— 手动填 IP 填不出一台主机来。
-            //
-            // 基地云目前只面向简体中文用户；自动语言模式下跟随系统语言。
-            // 没有浏览器可用时也整块隐藏（和 QQ 按钮同一个判断），否则按钮点了没反应。
-            Item {
-                Layout.fillWidth: true
-                Layout.topMargin: Theme.spaceSm
-                implicitHeight: promoColumn.implicitHeight
-                visible: SystemProperties.hasBrowser &&
-                         (StreamingPreferences.language === StreamingPreferences.LANG_ZH_CN ||
-                          (StreamingPreferences.language === StreamingPreferences.LANG_AUTO &&
-                           Qt.locale().name === "zh_CN"))
-
-                Column {
-                    id: promoColumn
-
-                    anchors { left: parent.left; right: parent.right }
-                    spacing: Theme.spaceSm
-
-                    Rectangle {
-                        width: parent.width
-                        height: 1
-                        color: Theme.line
-                    }
-
-                    MicroLabel {
-                        width: parent.width
-                        text: qsTr("No host PC of your own?")
-                        // 这句比一般微标签长，允许折行（MicroLabel 默认单行省略）
-                        elide: Text.ElideNone
-                        wrapMode: Text.Wrap
-                    }
-
-                    Text {
-                        width: parent.width
-                        //: Procriva Cloud is a product name and must not be translated.
-                        text: qsTr("Procriva Cloud rents out cloud hosts that are ready to stream.")
-                        color: Theme.text
-                        font.family: Theme.fontSans
-                        font.pointSize: Theme.fontBody
-                        wrapMode: Text.Wrap
-                    }
-
-                    HardButton {
-                        text: qsTr("Learn more")
-                        // 焦点默认停在输入框上，别让这颗按钮抢走
-                        focusPolicy: Qt.TabFocus
-
-                        onClicked: Qt.openUrlExternally("https://client.cloud.procriva.com/")
-                    }
-                }
-            }
         }
     }
 }

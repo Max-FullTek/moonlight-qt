@@ -3,227 +3,29 @@ import QtQuick 2.9
 import QtQuick.Controls
 import "."
 import "../theme"
-import AutoUpdateChecker 1.0
-import StreamingPreferences 1.0
 import SystemProperties 1.0
 
-// “关于”展示社区入口、版本更新和法律声明。
-// 页面不保存偏好、不嵌入网页；更新请求统一交给 AutoUpdateChecker。
 Column {
     id: aboutPage
-
     signal scrollToEndRequested()
-
     width: parent ? parent.width : 0
     spacing: Theme.spaceLg
-
-    function isSimplifiedChineseLocale() {
-        var localeName = Qt.locale().name.replace("-", "_").toLowerCase()
-        return localeName === "zh_cn" || localeName.indexOf("zh_hans") === 0
-    }
-
-    readonly property bool useMainlandLinks:
-        StreamingPreferences.language === StreamingPreferences.LANG_ZH_CN ||
-        (StreamingPreferences.language === StreamingPreferences.LANG_AUTO &&
-         isSimplifiedChineseLocale())
-    // 社区介绍保留四个可见前导空格。
-    readonly property string paragraphIndent: "\u00A0\u00A0\u00A0\u00A0"
-
-    readonly property string issueUrl: "https://github.com/qiin2333/moonlight-qt/issues/new/choose"
-    readonly property string qqUrl: "https://qm.qq.com/q/3tWBFVNZ"
-    readonly property string officialSiteUrl: useMainlandLinks
-        ? "https://www.alkaidlab.cn/"
-        : "https://www.alkaidlab.com/"
-    readonly property string bilibiliUrl: "https://space.bilibili.com/3690974838524514"
     readonly property string licenseUrl: "https://github.com/AlkaidLab/foundation-sunshine/blob/master/LICENSE"
     readonly property string noticeUrl: "https://github.com/AlkaidLab/foundation-sunshine/blob/master/NOTICE"
-    readonly property string usbipdcppUrl: "https://github.com/yunsmall/usbipdcpp"
-    property bool updateCheckRequested: false
-    property bool updateCheckInProgress: false
-    property string pendingUpdateVersion: ""
-    property string updateStatus: ""
-
     function openExternal(url) {
         if (!Qt.openUrlExternally(url)) {
             ToolTip.show(qsTr("No external browser is available."), 3500)
         }
     }
-
-    function revealLegalNotice() {
-        // 让按钮事件完成后再滚动，避免和当前点击的焦点滚动互相覆盖。
-        Qt.callLater(function() { aboutPage.scrollToEndRequested() })
-    }
-
-    function requestUpdateCheck() {
-        if (updateCheckInProgress) {
-            return
-        }
-
-        updateCheckRequested = true
-        updateCheckInProgress = true
-        pendingUpdateVersion = ""
-        updateStatus = qsTr("Checking for updates...")
-        if (!AutoUpdateChecker.checkForUpdates()) {
-            if (!AutoUpdateChecker.supportsUpdateCheck()) {
-                updateCheckRequested = false
-                updateCheckInProgress = false
-                updateStatus = qsTr("Unable to check for updates.")
-            }
-        }
-    }
-
-    function handleUpdateCheckStarted() {
-        if (aboutPage.updateCheckRequested) {
-            aboutPage.updateCheckInProgress = true
-            aboutPage.updateStatus = qsTr("Checking for updates...")
-        }
-    }
-
-    function handleUpdateAvailable(version, url) {
-        if (aboutPage.updateCheckRequested) {
-            aboutPage.pendingUpdateVersion = version
-        }
-    }
-
-    function handleUpdateCheckFinished(updateAvailable) {
-        if (!aboutPage.updateCheckRequested) {
-            return
-        }
-
-        aboutPage.updateCheckRequested = false
-        aboutPage.updateCheckInProgress = false
-        aboutPage.updateStatus = updateAvailable && aboutPage.pendingUpdateVersion !== ""
-                ? qsTr("Update available: Version %1").arg(aboutPage.pendingUpdateVersion)
-                : qsTr("You are using the latest version.")
-    }
-
-    function handleUpdateCheckFailed() {
-        if (!aboutPage.updateCheckRequested) {
-            return
-        }
-
-        aboutPage.updateCheckRequested = false
-        aboutPage.updateCheckInProgress = false
-        aboutPage.updateStatus = qsTr("Unable to check for updates.")
-    }
-
-    Component.onCompleted: {
-        AutoUpdateChecker.onUpdateCheckStarted.connect(aboutPage.handleUpdateCheckStarted)
-        AutoUpdateChecker.onUpdateAvailable.connect(aboutPage.handleUpdateAvailable)
-        AutoUpdateChecker.onUpdateCheckFinished.connect(aboutPage.handleUpdateCheckFinished)
-        AutoUpdateChecker.onUpdateCheckFailed.connect(aboutPage.handleUpdateCheckFailed)
-    }
-
-    Component.onDestruction: {
-        AutoUpdateChecker.onUpdateCheckStarted.disconnect(aboutPage.handleUpdateCheckStarted)
-        AutoUpdateChecker.onUpdateAvailable.disconnect(aboutPage.handleUpdateAvailable)
-        AutoUpdateChecker.onUpdateCheckFinished.disconnect(aboutPage.handleUpdateCheckFinished)
-        AutoUpdateChecker.onUpdateCheckFailed.disconnect(aboutPage.handleUpdateCheckFailed)
-    }
-
     SettingsCard {
         title: qsTr("About")
-
-        Column {
-            width: parent.width
-            spacing: Theme.spaceMd
-
-            TechTag {
-                text: qsTr("AlkaidLab Open Source Community")
-                prominent: true
-            }
-
-            Text {
-                width: parent.width
-                text: aboutPage.paragraphIndent + qsTr("Founded in 2024, AlkaidLab has brought together tens of thousands of users and maintained in-depth dialogue with thousands of them. Guided by extensive real-world feedback, we have developed a systematic understanding of networking and streaming as a whole and built a complete solution spanning video, audio, touch, controllers, networking, and multi-device experiences, with continuous improvements ahead. The ecosystem covers desktop PCs, Android handhelds, Windows handhelds, TVs and set-top boxes, projectors, VR devices, and more, aiming to deliver a more elegant and uncompromising streaming experience for gaming, media, creation, and remote collaboration.")
-                color: Theme.textSettingsSubtitle
-                font.family: Theme.fontSans
-                font.pointSize: Theme.fontSettingsSubtitle + 1
-                font.weight: Font.Medium
-                wrapMode: Text.Wrap
-            }
-
-            Text {
-                text: qsTr("Version %1").arg(SystemProperties.versionString)
-                color: Theme.text
-                font.family: Theme.fontSans
-                font.pointSize: Theme.fontRowTitle
-                font.weight: Font.DemiBold
-            }
-
-            Column {
-                width: parent.width
-                spacing: Theme.spaceSm
-
-                Text {
-                    text: qsTr("Check for updates")
-                    color: Theme.text
-                    font.family: Theme.fontSans
-                    font.pointSize: Theme.fontRowTitle
-                    font.weight: Font.DemiBold
-                }
-
-                HardButton {
-                    text: aboutPage.updateCheckInProgress ? qsTr("Checking...") : qsTr("Check now")
-                    primary: true
-                    enabled: AutoUpdateChecker.supportsUpdateCheck() &&
-                        !aboutPage.updateCheckInProgress
-                    icon.source: "qrc:/res/fluent/tb-update.svg"
-                    icon.color: Theme.ink
-                    icon.width: 16
-                    icon.height: 16
-                    onClicked: aboutPage.requestUpdateCheck()
-                }
-
-                Text {
-                    width: parent.width
-                    text: aboutPage.updateStatus
-                    visible: text !== ""
-                    color: Theme.textSettingsSubtitle
-                    font.family: Theme.fontSans
-                    font.pointSize: Theme.fontSettingsSubtitle
-                    wrapMode: Text.Wrap
-                }
-            }
-
-        }
-
-        Flow {
-            width: parent.width
-            spacing: Theme.spaceSm
-
-            HardLink {
-                text: qsTr("Website")
-                prominent: true
-                onClicked: aboutPage.openExternal(aboutPage.officialSiteUrl)
-            }
-
-            HardLink {
-                text: qsTr("Bilibili")
-                prominent: true
-                onClicked: aboutPage.openExternal(aboutPage.bilibiliUrl)
-            }
-
-            HardLink {
-                text: qsTr("QQ Group")
-                prominent: true
-                onClicked: aboutPage.openExternal(aboutPage.qqUrl)
-            }
-
-            HardLink {
-                text: qsTr("Submit Issue")
-                prominent: true
-                onClicked: aboutPage.openExternal(aboutPage.issueUrl)
-            }
-
-            HardLink {
-                text: qsTr("Legal notice")
-                prominent: true
-                onClicked: aboutPage.revealLegalNotice()
-            }
+        Text {
+            text: qsTr("Version %1").arg(SystemProperties.versionString)
+            color: Theme.text
+            font.family: Theme.fontSans
+            font.pointSize: Theme.fontBody
         }
     }
-
     SettingsCard {
         title: qsTr("Legal notice")
         subtitle: qsTr("This software is released under GNU GPLv3. The full license and third-party component information are provided below.")
@@ -245,25 +47,6 @@ Column {
                 HardLink {
                     text: qsTr("Third-party notice")
                     onClicked: aboutPage.openExternal(aboutPage.noticeUrl)
-                }
-            }
-        }
-
-        // usbipdcpp（macOS USB 转发 helper 的核心库）的署名要求，文本按其
-        // README 原文给出。
-        SettingsRow {
-            id: usbipdcppRow
-
-            title: qsTr("usbipdcpp (LGPL-3.0)")
-            description: qsTr("This product uses usbipdcpp (https://github.com/yunsmall/usbipdcpp), licensed under LGPLv3.")
-
-            Flow {
-                width: Math.min(300, Math.max(0, usbipdcppRow.width - Theme.spaceMd * 2))
-                spacing: Theme.spaceSm
-
-                HardLink {
-                    text: qsTr("Project")
-                    onClicked: aboutPage.openExternal(aboutPage.usbipdcppUrl)
                 }
             }
         }

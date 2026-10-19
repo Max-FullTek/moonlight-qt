@@ -38,8 +38,6 @@ public:
 
     Q_INVOKABLE void pairComputer(int computerIndex, QString pin);
 
-    Q_INVOKABLE void testConnectionForComputer(int computerIndex);
-
     Q_INVOKABLE void wakeComputer(int computerIndex);
 
     Q_INVOKABLE void renameComputer(int computerIndex, QString name);
@@ -57,7 +55,6 @@ public:
 
 signals:
     void pairingCompleted(QVariant error);
-    void connectionTestCompleted(int result, QString blockedPorts);
 
 private slots:
     void handleComputerStateChanged(NvComputer* computer);

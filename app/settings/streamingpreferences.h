@@ -271,13 +271,8 @@ public:
     Q_PROPERTY(bool enableMicrophone MEMBER enableMicrophone NOTIFY enableMicrophoneChanged)
     Q_PROPERTY(OverlayMenuPosition overlayMenuPosition MEMBER overlayMenuPosition NOTIFY overlayMenuPositionChanged)
     Q_PROPERTY(bool autoUpdateCheck MEMBER autoUpdateCheck NOTIFY autoUpdateCheckChanged)
-    Q_PROPERTY(bool usbForwardingEnabled MEMBER usbForwardingEnabled NOTIFY usbForwardingEnabledChanged)
-    Q_PROPERTY(QStringList usbForwardingBoundDevices READ usbForwardingBoundDevices WRITE setUsbForwardingBoundDevices NOTIFY usbForwardingBoundDevicesChanged)
 
     Q_INVOKABLE bool retranslate();
-
-    QStringList usbForwardingBoundDevices() const { return m_UsbForwardingBoundDevices; }
-    void setUsbForwardingBoundDevices(const QStringList& devices);
 
     // Directly accessible members for preferences
     int width;
@@ -347,7 +342,6 @@ public:
     bool enableMicrophone;
     OverlayMenuPosition overlayMenuPosition;
     bool autoUpdateCheck;
-    bool usbForwardingEnabled;
     RendererSelection rendererSelection;
 
 signals:
@@ -414,16 +408,12 @@ signals:
     void enableMicrophoneChanged();
     void overlayMenuPositionChanged();
     void autoUpdateCheckChanged();
-    void usbForwardingEnabledChanged();
-    void usbForwardingBoundDevicesChanged();
     void rendererSelectionChanged();
 
 private:
     explicit StreamingPreferences(QQmlEngine *qmlEngine);
 
     QString getSuffixFromLanguage(Language lang);
-
-    QStringList m_UsbForwardingBoundDevices;
 
     BackgroundSource m_BackgroundSource;
     QString m_BackgroundImageApi;
@@ -433,4 +423,3 @@ private:
 
     QQmlEngine* m_QmlEngine;
 };
-

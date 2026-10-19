@@ -19,16 +19,10 @@
 #include "video/overlaymanager.h"
 #include "video/overlaymenupanel.h"
 #include "video/overlaymenubutton.h"
-#include "backend/usbforwardingtunnel.h"
 #include "video/overlaytoast.h"
 #ifndef STEAM_LINK
 #include "micstream.h"
 #endif
-
-namespace FileMappingUx {
-struct ProbeState;
-struct MountState;
-}
 
 class DualSenseHapticsRenderer;
 class QScreen;
@@ -245,9 +239,6 @@ private:
     void startRuntimeBitrateWorker();
     void showStreamingToast(const QString& message, int durationMs = 2000);
     void processQtOverlayEvents();
-    void updateFileMappingMenuState();
-    void updateRemoteUsbMenuState();
-    bool openFileMappingMountPath();
 #ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS
     void restoreCaptureAfterStylusReplayPanel();
 #endif
@@ -355,18 +346,6 @@ private:
     void startSunshineAbr();
     void stopSunshineAbr();
     void sendSunshineAbrFeedback();
-    void startFileMappingUxProbe();
-    void processFileMappingUxProbeResult();
-    void startFileMappingMount();
-    void processFileMappingMountResult();
-    void cleanupFileMappingMount();
-    void startFileMappingSmokeProbe();
-    void refreshRemoteUsbDevices();
-    void enumerateRemoteUsb();
-    void startRemoteUsb(const QString &deviceId);
-    void startConfiguredRemoteUsb(UsbForwarding::TunnelConfig config);
-    void stopRemoteUsb();
-    void teardownUsbTunnel();
 
     static
     int drSubmitDecodeUnit(PDECODE_UNIT du);
@@ -447,14 +426,6 @@ private:
 #ifdef Q_OS_DARWIN
     std::unique_ptr<MacQtEventPumpInputGuard> m_MacQtEventPumpInputGuard;
 #endif
-    OverlayMenuPanel::FileMappingState m_FileMappingState;
-    QString m_FileMappingDetail;
-    QString m_FileMappingToast;
-    bool m_FileMappingToastPending;
-    std::shared_ptr<FileMappingUx::ProbeState> m_FileMappingProbeState;
-    std::shared_ptr<FileMappingUx::MountState> m_FileMappingMountState;
-    QString m_FileMappingMountPath;
-    QString m_FileMappingSessionId;
     Uint32 m_MenuCloseTicks;       // 菜单关闭时间戳（防抖）
     void stopClipboardHelper();
     std::mutex m_ClipboardHelperMutex;
@@ -463,21 +434,6 @@ private:
     std::mutex m_CursorUpdateMutex;
     std::shared_ptr<RemoteCursorUpdate> m_PendingCursorUpdate;
     bool m_CursorUpdateEventQueued = false;
-    /* USB forwarding: one reverse tunnel per forwarded device, owned by this
-     * session. m_RemoteUsbDevices mirrors the bound-device list from
-     * UsbForwardingBackend and feeds the overlay menu. On macOS the local
-     * USB/IP server (moonlight-usbd serve) is spawned per session and torn
-     * down together with the tunnel. */
-    UsbForwarding::Tunnel *m_UsbTunnel = nullptr;
-    class UsbForwardingLocalServer* m_UsbLocalServer = nullptr;
-    quint64 m_UsbCapabilityGeneration = 0;
-    bool m_UsbCapabilityPending = false;
-    std::vector<OverlayMenuPanel::RemoteUsbDevice> m_RemoteUsbDevices;
-    OverlayMenuPanel::RemoteUsbState m_RemoteUsbState =
-        OverlayMenuPanel::RemoteUsbState::Unavailable;
-    QString m_RemoteUsbActiveDeviceId;
-    QString m_RemoteUsbDetail;
-
     static CONNECTION_LISTENER_CALLBACKS k_ConnCallbacks;
     static Session* s_ActiveSession;
     static QSemaphore s_ActiveSessionSemaphore;

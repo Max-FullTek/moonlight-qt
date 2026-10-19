@@ -73,7 +73,7 @@ SystemProperties::SystemProperties()
     // the standard usbip-host kernel stack (usbip + usbipd daemon).
     // The Android service is future work; see the platform table in
     // docs/remote-usb-reverse-tunnel.md.
-    usbForwardingAvailable = true;
+    usbForwardingAvailable = false;
 #endif
 
     QString nativeArch = QSysInfo::currentCpuArchitecture();

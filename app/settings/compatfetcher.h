@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QObject>
-#include <QNetworkAccessManager>
 
 class CompatFetcher : public QObject
 {
@@ -10,13 +9,6 @@ class CompatFetcher : public QObject
 public:
     explicit CompatFetcher(QObject *parent = nullptr);
 
-    void start();
-
     static bool isGfeVersionSupported(QString gfeVersion);
 
-private slots:
-    void handleCompatInfoFetched(QNetworkReply* reply);
-
-private:
-    QNetworkAccessManager* m_Nam;
 };
