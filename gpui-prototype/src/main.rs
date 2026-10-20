@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod core;
+mod input;
 mod settings;
 mod ui;
 use gpui::{prelude::*, *};
@@ -354,11 +355,6 @@ impl Render for Prototype {
                             this.address = text.trim().chars().filter(|c| c.is_ascii_graphic()).take(260).collect();
                         }
                     } else if key.modifiers.control && key.key == "a" { this.address.clear(); }
-                    else if let Some(text) = &key.key_char {
-                        if !key.modifiers.control && !key.modifiers.alt && this.address.len() < 260 {
-                            this.address.extend(text.chars().filter(|c| c.is_ascii_graphic()));
-                        }
-                    }
                     cx.notify();
                 }
                 if event.keystroke.key == "tab" {

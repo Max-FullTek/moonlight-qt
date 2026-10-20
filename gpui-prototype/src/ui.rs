@@ -572,12 +572,15 @@ impl Prototype {
                 content = content.child(body.clone());
             }
             Modal::Add => {
+                let entity = cx.entity();
+                let focus = self.modal_focus.clone();
                 title = "新增裝置";
                 content = content
                     .child("輸入 IP／主機名稱，可附連接埠。支援貼上；Ctrl+A 清空。")
                     .child(
                         div()
                             .id("address-input")
+                            .relative()
                             .tab_index(0)
                             .track_focus(&self.modal_focus)
                             .on_click(
@@ -587,7 +590,21 @@ impl Prototype {
                             .border_1()
                             .border_color(rgb(ACCENT))
                             .bg(rgb(BG))
-                            .child(format!("{}│", self.address)),
+                            .child(format!("{}│", self.address))
+                            .child(
+                                canvas(
+                                    |_, _, _| {},
+                                    move |bounds, _, window, cx| {
+                                        window.handle_input(
+                                            &focus,
+                                            ElementInputHandler::new(bounds, entity.clone()),
+                                            cx,
+                                        );
+                                    },
+                                )
+                                .absolute()
+                                .size_full(),
+                            ),
                     )
                     .child(self.notice.clone())
                     .child(self.button("submit-address", "連線", Action::SubmitAddress, true, cx));
