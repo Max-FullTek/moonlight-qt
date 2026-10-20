@@ -25,6 +25,18 @@ pub struct Host {
 pub struct HostApp {
     pub id: i32,
     pub name: String,
+    #[serde(default)]
+    pub hidden: bool,
+    #[serde(default)]
+    pub direct_launch: bool,
+}
+impl Host {
+    pub fn direct_app(&self) -> Option<i32> {
+        self.apps
+            .iter()
+            .find(|app| app.direct_launch && !app.hidden)
+            .map(|app| app.id)
+    }
 }
 #[derive(Debug, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
@@ -184,6 +196,16 @@ mod tests {
             decode("{\"event\":\"ready\",\"qml_loaded\":false,\"protocol\":1}").unwrap(),
             Event::Ready { qml_loaded: false }
         ));
+    }
+    #[test]
+    fn old_snapshots_default_to_visible_and_direct_launch_excludes_hidden_apps() {
+        let mut host: Host = serde_json::from_value(json!({"id":"host","name":"我的電腦","address":"localhost","online":true,"paired":true,"current_app":0,"apps":[{"id":1,"name":"桌面"}]})).unwrap();
+        assert!(!host.apps[0].hidden);
+        assert_eq!(host.direct_app(), None);
+        host.apps[0].direct_launch = true;
+        assert_eq!(host.direct_app(), Some(1));
+        host.apps[0].hidden = true;
+        assert_eq!(host.direct_app(), None);
     }
     #[test]
     fn map_native_codec_fec_and_bitrate_units() {

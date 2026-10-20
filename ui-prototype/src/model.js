@@ -24,7 +24,7 @@ export const defaults = {
   backgroundGamepad: false, quitCombo: 'default', haptics: 'physical',
   monitorMode: 'follow', monitor: 'auto', optimize: true, quitHost: false,
   decoder: 'auto', yuv444: false, discovery: false, stats: false, overlay: 'button',
-  uiWindow: 'window', language: 'auto', rememberWindow: true, connectionWarnings: true,
+  uiWindow: 'window', language: 'zh-TW', rememberWindow: true, connectionWarnings: true,
   configurationWarnings: true, keepAwake: true,
 };
 
@@ -48,28 +48,27 @@ export const monitorModes = [
   ['only', '僅使用串流螢幕', '只啟用所選螢幕，停用其他螢幕。'],
 ];
 
-export const optionalFeatures = [
-  { id: 'stretch', name: 'AR／XR 的 SBS 畫面延展', impact: '移除後無法將 Half-SBS 3D 畫面延展至僅支援 Full-SBS 的裝置；一般 2D 串流不受影響。', source: 'DisplaySettingsPage.qml' },
-  { id: 'osk', name: '內建手把螢幕鍵盤', impact: '移除後輸入 IP 等文字需使用實體鍵盤或系統螢幕鍵盤；一般手把導航與輸入傳送仍保留。', source: 'GamepadKeyboard.qml' },
-  { id: 'appOptions', name: '遊戲隱藏與個別直啟偏好', impact: '移除後保留完整應用程式清單、開始與恢復串流，但不再提供隱藏遊戲與個別直啟偏好。', source: 'AppView.qml' },
-  { id: 'languages', name: '繁中／英文以外的介面語言', impact: '移除後只提供繁中／英文介面；主機名稱、遊戲名稱與剪貼簿文字不受限制。', source: 'LegacySettingsPage.qml' },
-];
+export const optionalFeatures = [];
+// Accepted Windows PC scope: no SBS stretch or client controller keyboard;
+// retain app hiding/direct launch and Traditional/Simplified Chinese + English.
+export const confirmedDecisions = { stretch: 'remove', osk: 'remove', appOptions: 'keep', languages: 'remove' };
+
 
 // Review inventory of the current Lite QML settings, not an implemented GPUI contract.
 export const settingsCoverage = [
   { category: '串流', source: 'BasicSettingsPage.qml', coverage: '解析度／自訂、FPS／自訂、編碼、位元率、ABR、FEC、AI 增強、渲染比例', limitation: '解析度快捷清單暫列常用值；其他尺寸可自訂。GPU／主機能力判斷尚未接上。' },
-  { category: '顯示', source: 'DisplaySettingsPage.qml、HdrBrightnessCard.qml', coverage: '視窗模式、SBS 延展、VSync、影格節奏、HDR 格式、亮度模式、峰值／最低／全畫面亮度', limitation: '上一版錯用 SDR 白位準，現已改回原版三種亮度值。PQ 拖曳曲線與實際顯示器偵測尚未重製。' },
+  { category: '顯示', source: 'DisplaySettingsPage.qml、HdrBrightnessCard.qml', coverage: '視窗模式、VSync、影格節奏、HDR 格式、亮度模式、峰值／最低／全畫面亮度', limitation: '上一版錯用 SDR 白位準，現已改回原版三種亮度值。PQ 拖曳曲線與實際顯示器偵測尚未重製。' },
   { category: '音效', source: 'LegacySettingsPage.qml', coverage: '立體聲／5.1／7.1／7.1.4、主機靜音；另預覽背景靜音偏好', limitation: '不播放音效；麥克風本次停用。' },
   { category: '主機', source: 'LegacySettingsPage.qml、ScreenCombinationModeSelector.qml', coverage: '六種螢幕組合模式、螢幕選擇、最佳化遊戲設定、結束主機程式', limitation: '螢幕清單使用範例；圖解卡片改選單是呈現提案，未刪除控制模式。' },
   { category: '鍵盤與滑鼠', source: 'LegacySettingsPage.qml', coverage: '桌面滑鼠、本機游標、左右鍵／Alt-Win 交換、反向捲動、快捷鍵攔截、觸控板', limitation: '原型不攔截系統按鍵；文字／圖片剪貼簿能力保留，沒有檔案傳送。' },
-  { category: '手把', source: 'LegacySettingsPage.qml', coverage: 'ABXY 交換、死區、強制連線、手把滑鼠、結束組合鍵、DualSense 觸覺；另預覽背景輸入偏好', limitation: '一般手把映射保留；硬體輸入與觸覺尚未接上。' },
+  { category: '手把', source: 'LegacySettingsPage.qml', coverage: 'ABXY 交換、死區、強制連線、手把滑鼠、結束組合鍵、DualSense 觸覺；另預覽背景輸入偏好', limitation: '一般手把映射保留；不提供客戶端手把螢幕鍵盤。硬體輸入與觸覺尚未接上。' },
   { category: '相容性與診斷', source: 'LegacySettingsPage.qml', coverage: '解碼器、YUV 4:4:4、區網搜尋、統計、串流控制選單位置', limitation: 'Windows 範圍不列 macOS 專用 Renderer 選單；不代表移除 Windows D3D11 路徑。' },
-  { category: '介面與關於', source: 'LegacySettingsPage.qml、AboutSettingsPage.qml', coverage: '語言選項、視窗模式／位置、警告、保持喚醒、授權', limitation: '上一版只列語言說明，現補選擇入口；實際翻譯切換尚未接上，其他語言仍待決定。' },
+  { category: '介面與關於', source: 'LegacySettingsPage.qml、AboutSettingsPage.qml', coverage: '語言選項、視窗模式／位置、警告、保持喚醒、授權', limitation: '上一版只列語言說明，現補選擇入口；實際翻譯切換尚未接上，語系確定為繁中、簡中與英文。' },
 ];
 
 export const scopeGroups = [
-  { title: '已確認保留', status: 'keep', items: ['手動新增區網／Tailscale 位址、配對與主機管理', '應用程式清單、開始／恢復／結束串流', '解析度、FPS、編碼、位元率、HDR、ABR／FEC', '一般鍵鼠與手把、文字及圖片剪貼簿、多螢幕', '效能統計與相容性設定'] },
-  { title: '已確認移除／停用', status: 'remove', items: ['USB/IP 原生裝置分享（一般輸入仍保留）', '檔案傳送與檔案映射', '線上壁紙／公告、Discord、自動更新', 'STUN 與外部連線診斷、公網專用解析度／FPS 覆寫', '麥克風這次停用，保留未來評估'] },
+  { title: '已確認保留', status: 'keep', items: ['手動新增區網／Tailscale 位址、配對與主機管理', '應用程式清單、開始／恢復／結束串流', '解析度、FPS、編碼、位元率、HDR、ABR／FEC', '一般鍵鼠與手把、文字及圖片剪貼簿、多螢幕', '效能統計與相容性設定', '遊戲隱藏與直啟、繁中／簡中／英文介面'] },
+  { title: '已確認移除／停用', status: 'remove', items: ['USB/IP 原生裝置分享（一般輸入仍保留）', '檔案傳送與檔案映射', '線上壁紙／公告、Discord、自動更新', 'STUN 與外部連線診斷、公網專用解析度／FPS 覆寫', '麥克風這次停用，保留未來評估', 'SBS 強制拉伸、客戶端手把螢幕鍵盤及三語以外介面'] },
   { title: '介面調整提案', status: 'simplify', items: ['沿用原版裝置首頁，點選裝置後再進入配對／應用程式', '設定保留原版分類：8 類設定與獨立的「關於」', '設定項目直接展開，不再集中藏在進階摺疊區', '多螢幕圖解卡片暫以選單對照，功能不刪除', 'GPUI 第一版先使用標準視窗標題列'] },
 ];
 
@@ -82,7 +81,8 @@ export function loadState(storage = globalThis.localStorage) {
     for (const [key, initial] of Object.entries(defaults)) {
       if (typeof state.settings?.[key] === typeof initial) settings[key] = state.settings[key];
     }
-    const decisions = {};
+    if (settings.language && !['zh-TW', 'zh-CN', 'en'].includes(settings.language)) settings.language = 'zh-TW';
+    const decisions = { ...confirmedDecisions };
     for (const feature of optionalFeatures) {
       const value = state.decisions?.[feature.id];
       if (['pending', 'keep', 'remove'].includes(value)) decisions[feature.id] = value;

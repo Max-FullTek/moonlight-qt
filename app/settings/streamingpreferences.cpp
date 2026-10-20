@@ -244,7 +244,11 @@ void StreamingPreferences::reload()
         fixedFecPercentage = 20;
     autoAdjustBitrate = settings.value(SER_AUTOADJUSTBITRATE, true).toBool();
     enableSunshineAbr = settings.value(SER_SUNSHINEABR, false).toBool();
+#ifdef Q_OS_WIN32
+    ignoreAspectRatio = false; // Windows PC Lite does not offer SBS/forced stretch.
+#else
     ignoreAspectRatio = settings.value(SER_IGNORE_ASPECT_RATIO, true).toBool();
+#endif
     enableVsync = settings.value(SER_VSYNC, true).toBool();
     gameOptimizations = settings.value(SER_GAMEOPTS, true).toBool();
     playAudioOnHost = settings.value(SER_HOSTAUDIO, false).toBool();
@@ -347,6 +351,14 @@ void StreamingPreferences::reload()
     rememberWindowPosition = settings.value(SER_REMEMBERWINDOWPOSITION, true).toBool();
     language = static_cast<Language>(settings.value(SER_LANGUAGE,
                                                     static_cast<int>(Language::LANG_AUTO)).toInt());
+#ifdef Q_OS_WIN32
+    if (language != LANG_ZH_TW && language != LANG_ZH_CN && language != LANG_EN) {
+        const auto locale = QLocale::system();
+        language = locale.language() == QLocale::Chinese
+                ? (locale.script() == QLocale::TraditionalHanScript ? LANG_ZH_TW : LANG_ZH_CN)
+                : LANG_EN;
+    }
+#endif
     m_BackgroundSource = BGS_NONE;
     m_BackgroundImageApi = settings.value(SER_BACKGROUNDIMAGEAPI).toString().trimmed();
     m_BackgroundImageLocalPath = settings.value(SER_BACKGROUNDIMAGELOCALPATH).toString();

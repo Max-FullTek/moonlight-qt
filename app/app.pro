@@ -656,6 +656,10 @@ TRANSLATIONS += \
     languages/qml_eo.ts \
     languages/qml_ta.ts
 
+# The Windows PC Lite client ships exactly three UI languages. English is the
+# source language; keep other upstream translation sources outside this package.
+win32:TRANSLATIONS = languages/qml_zh_CN.ts languages/qml_zh_TW.ts
+
 # Additional import path used to resolve QML modules in Qt Creator's code model
 QML_IMPORT_PATH =
 

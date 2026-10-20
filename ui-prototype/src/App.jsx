@@ -4,11 +4,11 @@ import Settings from './Settings';
 import Review from './Review';
 import { AboutDialog, AddHostDialog, AppOptionsDialog, HostOptionsDialog, PairDialog } from './Dialogs';
 import { Button, Dialog, Icon } from './components';
-import { applications, defaults, initialHosts, loadState, optionalFeatures, scopeGroups, settingsCoverage, STORAGE_KEY } from './model';
+import { applications, confirmedDecisions, defaults, initialHosts, loadState, optionalFeatures, scopeGroups, settingsCoverage, STORAGE_KEY } from './model';
 
 function initialState() {
   const restored = loadState();
-  return { version: 1, hosts: restored.hosts ?? initialHosts, settings: { ...defaults, ...restored.settings }, decisions: restored.decisions || {}, notes: restored.notes || '', appPreferences: restored.appPreferences || {} };
+  return { version: 1, hosts: restored.hosts ?? initialHosts, settings: { ...defaults, ...restored.settings }, decisions: confirmedDecisions, notes: restored.notes || '', appPreferences: restored.appPreferences || {} };
 }
 
 export default function App() {
@@ -68,7 +68,7 @@ export default function App() {
       {toast ? <div className="inline-notice" role="status"><Icon name="check" size={17}/><span>{toast}</span><button aria-label="關閉提示" onClick={() => setToast('')}><Icon name="close" size={16}/></button></div> : null}
       {page === 'hosts' ? <Hosts hosts={state.hosts} selectedId={selectedId} deviceOpen={deviceOpen} onBack={() => setDeviceOpen(false)} onSelect={selectDevice} onAdd={() => setModal({ type: 'add' })} onOptions={host => setModal({ type: 'host', host })} onPair={host => setModal({ type: 'pair', host })} onWake={host => { updateHost({ ...host, online: true }); setToast('已將範例主機切換為在線；未發送網路封包。'); }} onStart={start} onAppOptions={(host, app) => setModal({ type: 'appOptions', host, app })} settings={state.settings} decisions={state.decisions} appPreferences={state.appPreferences} session={session} onSettings={openSettings}/> : page === 'settings' ? <Settings saved={state.settings} draft={draft} setDraft={setDraft} onSave={settings => setState(previous => ({ ...previous, settings: { ...settings } }))} decisions={state.decisions} category={category} setCategory={setCategory} onCoverage={openReview}/> : <Review decisions={state.decisions} onDecision={(id, value) => setState(previous => ({ ...previous, decisions: { ...previous.decisions, [id]: value } }))} notes={state.notes} setNotes={notes => setState(previous => ({ ...previous, notes }))} exportReview={exportReview} onBack={() => setPage(lastPage)}/>}
     </div>
-    {modal?.type === 'add' ? <AddHostDialog hosts={state.hosts} oskEnabled={state.decisions.osk !== 'remove'} onClose={close} onAdd={host => { setState(previous => ({ ...previous, hosts: [...previous.hosts, host] })); setSelectedId(host.id); setDeviceOpen(true); setModal({ type: 'pair', host }); }}/> : null}
+    {modal?.type === 'add' ? <AddHostDialog hosts={state.hosts} oskEnabled={false} onClose={close} onAdd={host => { setState(previous => ({ ...previous, hosts: [...previous.hosts, host] })); setSelectedId(host.id); setDeviceOpen(true); setModal({ type: 'pair', host }); }}/> : null}
     {modal?.type === 'pair' ? <PairDialog host={selectedHost} onClose={close} onSuccess={() => { updateHost({ ...selectedHost, paired: true }); setToast(`「${selectedHost.name}」已完成模擬配對。`); close(); }} onFailure={() => setModal({ type: 'error', title: '配對未完成', message: 'PIN 未被確認或連線逾時。正式版會顯示主機回報的原因。', retry: { type: 'pair', host: selectedHost } })}/> : null}
     {modal?.type === 'host' ? <HostOptionsDialog host={selectedHost} onClose={close} onSave={host => { updateHost(host); close(); }} onDelete={() => setModal({ type: 'delete', host: selectedHost })}/> : null}
     {modal?.type === 'delete' ? <Dialog title="移除範例主機" onClose={close}><p>確定從此原型移除「{selectedHost.name}」？不會影響 Moonlight 的主機或配對資料。</p><div className="dialog-actions"><Button onClick={close} autoFocus>取消</Button><Button danger onClick={() => { setState(previous => ({ ...previous, hosts: previous.hosts.filter(h => h.id !== selectedHost.id) })); if (session?.hostId === selectedHost.id) setSession(null); setDeviceOpen(false); close(); }}>移除</Button></div></Dialog> : null}

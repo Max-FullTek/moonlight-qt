@@ -1,5 +1,5 @@
 use crate::*;
-use settings::{CODECS, DECODERS, FEC, FPS, RESOLUTIONS, WINDOW_MODES};
+use settings::{CODECS, DECODERS, FEC, FPS, LANGUAGES, RESOLUTIONS, WINDOW_MODES};
 
 impl Prototype {
     pub fn navigation(
@@ -26,13 +26,16 @@ impl Prototype {
             .text_color(rgb(if selected { ACCENT } else { MUTED }))
             .focus(|style| style.bg(rgb(0x193139)))
             .hover(|style| style.bg(rgb(SURFACE)))
-            .on_click(cx.listener(move |this, _, window, cx| this.act(action.clone(), window, cx)))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                this.act(action.clone(), window, cx);
+            }))
             .child(svg().path(icon).size(px(20.)).text_color(rgb(if selected {
                 ACCENT
             } else {
                 MUTED
             })))
-            .child(label)
+            .child(self.tr(label))
     }
     pub fn button(
         &self,
@@ -50,7 +53,11 @@ impl Prototype {
                 self.modal.is_none()
                     || matches!(
                         action,
-                        Action::Close | Action::SubmitAddress | Action::Stop | Action::Choose(_, _)
+                        Action::Close
+                            | Action::SubmitAddress
+                            | Action::Stop
+                            | Action::Choose(_, _)
+                            | Action::AppPreferences(_, _, _)
                     ),
             )
             .cursor_pointer()
@@ -67,8 +74,11 @@ impl Prototype {
             .justify_center()
             .hover(|s| s.bg(rgb(if primary { 0x5ed5cd } else { 0x1d2833 })))
             .focus(|s| s.border_color(rgb(ACCENT)))
-            .on_click(cx.listener(move |this, _, window, cx| this.act(action.clone(), window, cx)))
-            .child(label)
+            .on_click(cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                this.act(action.clone(), window, cx);
+            }))
+            .child(self.tr(&label))
     }
     pub fn devices(&self, cx: &Context<Self>) -> AnyElement {
         div()
@@ -83,7 +93,7 @@ impl Prototype {
                     .items_center()
                     .justify_between()
                     .mb_10()
-                    .child(div().text_size(px(27.)).child("裝置"))
+                    .child(div().text_size(px(27.)).child(self.tr("裝置")))
                     .child(self.button("add", "+ 新增裝置", Action::Add, false, cx)),
             )
             .when(self.hosts.is_empty(), |d| {
@@ -91,7 +101,7 @@ impl Prototype {
                     div()
                         .mb_6()
                         .text_color(rgb(MUTED))
-                        .child("尚未新增裝置。按「新增裝置」輸入主機 IP。"),
+                        .child(self.tr("尚未新增裝置。按「新增裝置」輸入主機 IP。")),
                 )
             })
             .child(div().flex().flex_wrap().justify_center().gap_7().children(
@@ -109,7 +119,7 @@ impl Prototype {
                         .tab_stop(self.modal.is_none())
                         .cursor_pointer()
                         .w(px(240.))
-                        .h(px(256.))
+                        .h(px(305.))
                         .rounded(px(6.))
                         .border_1()
                         .border_color(rgb(BORDER))
@@ -136,7 +146,7 @@ impl Prototype {
                             div()
                                 .text_size(px(12.))
                                 .text_color(rgb(MUTED))
-                                .child(status),
+                                .child(self.tr(status)),
                         )
                         .child(
                             div()
@@ -144,6 +154,13 @@ impl Prototype {
                                 .text_color(rgb(MUTED))
                                 .child(host.address.clone()),
                         )
+                        .child(self.button(
+                            ("host-apps", i),
+                            "開啟程式清單",
+                            Action::OpenApps(i),
+                            false,
+                            cx,
+                        ))
                 }),
             ))
             .into_any_element()
@@ -168,11 +185,23 @@ impl Prototype {
                     .child(host.map(|h| h.name.clone()).unwrap_or_default()),
             )
             .when(host.is_none_or(|h| h.apps.is_empty()), |d| {
-                d.child("正在取得程式清單；請確認 Sunshine 已設定桌面或遊戲。")
+                d.child(self.tr("正在取得程式清單；請確認 Sunshine 已設定桌面或遊戲。"))
             })
+            .child(self.button(
+                "show-hidden",
+                if self.show_hidden {
+                    "隱藏已隱藏項目"
+                } else {
+                    "顯示隱藏項目"
+                },
+                Action::ShowHidden,
+                false,
+                cx,
+            ))
             .children(
                 host.into_iter()
                     .flat_map(|h| h.apps.iter())
+                    .filter(|app| self.show_hidden || !app.hidden)
                     .enumerate()
                     .map(|(i, app)| {
                         div()
@@ -183,7 +212,28 @@ impl Prototype {
                             .border_b_1()
                             .border_color(rgb(BORDER))
                             .child(svg().path("monitor").size(px(36.)).text_color(rgb(TEXT)))
-                            .child(div().flex_1().text_size(px(18.)).child(app.name.clone()))
+                            .opacity(if app.hidden { 0.5 } else { 1.0 })
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_size(px(18.))
+                                    .child(app.name.clone())
+                                    .when(app.direct_launch, |d| {
+                                        d.child(
+                                            div()
+                                                .text_size(px(12.))
+                                                .text_color(rgb(ACCENT))
+                                                .child(self.tr("選取主機時自動啟動")),
+                                        )
+                                    }),
+                            )
+                            .child(self.button(
+                                ("app-options", i),
+                                "程式選項",
+                                Action::AppOptions(app.id),
+                                false,
+                                cx,
+                            ))
                             .child(self.button(
                                 ("start", i),
                                 "開始串流",
@@ -207,14 +257,14 @@ impl Prototype {
                 div()
                     .when(!narrow, |d| d.w(relative(0.42)))
                     .flex_shrink_0()
-                    .child(label.to_owned())
+                    .child(self.tr(label))
                     .when(!hint.is_empty(), |d| {
                         d.child(
                             div()
                                 .mt_1()
                                 .text_size(px(12.))
                                 .text_color(rgb(MUTED))
-                                .child(hint.to_owned()),
+                                .child(self.tr(hint)),
                         )
                     }),
             )
@@ -228,10 +278,18 @@ impl Prototype {
             Field::Fec => ("fec", FEC, self.draft.fec),
             Field::WindowMode => ("window-mode", WINDOW_MODES, self.draft.window_mode),
             Field::Decoder => ("decoder", DECODERS, self.draft.decoder),
+            Field::Language => ("language", LANGUAGES, self.draft.language),
         };
         self.button(
             id,
-            format!("{}     ▾", options[current]),
+            format!(
+                "{}     ▾",
+                if field == Field::Language {
+                    SharedString::from(options[current])
+                } else {
+                    self.tr(options[current])
+                }
+            ),
             Action::Select(field),
             false,
             cx,
@@ -264,7 +322,10 @@ impl Prototype {
             .flex()
             .items_center()
             .when(value, |d| d.justify_end())
-            .on_click(cx.listener(move |this, _, window, cx| this.act(action.clone(), window, cx)))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                this.act(action.clone(), window, cx);
+            }))
             .child(
                 div()
                     .size(px(16.))
@@ -369,28 +430,35 @@ impl Prototype {
             .child(self.button(
                 "stream-tab",
                 "串流",
-                Action::SettingsTab(false),
-                !self.display_settings,
+                Action::SettingsTab(SettingsTab::Stream),
+                self.settings_tab == SettingsTab::Stream,
                 cx,
             ))
             .child(self.button(
                 "display-tab",
                 "顯示",
-                Action::SettingsTab(true),
-                self.display_settings,
+                Action::SettingsTab(SettingsTab::Display),
+                self.settings_tab == SettingsTab::Display,
+                cx,
+            ))
+            .child(self.button(
+                "interface-tab",
+                "介面",
+                Action::SettingsTab(SettingsTab::Interface),
+                self.settings_tab == SettingsTab::Interface,
                 cx,
             ))
             .children(
-                ["音效", "主機", "鍵盤與滑鼠", "手把", "相容性與診斷", "介面"]
+                ["音效", "主機", "鍵盤與滑鼠", "手把", "相容性與診斷"]
                     .into_iter()
-                    .map(|label| div().p_3().text_color(rgb(0x647384)).child(label)),
+                    .map(|label| div().p_3().text_color(rgb(0x647384)).child(self.tr(&label))),
             )
             .child(
                 div()
                     .mt_4()
                     .text_size(px(11.))
                     .text_color(rgb(MUTED))
-                    .child("已開放串流與顯示設定，其餘分類待後續移植。"),
+                    .child(self.tr("已開放串流、顯示與介面語言，其餘分類待後續移植。")),
             );
         let content = div()
             .flex_1()
@@ -405,7 +473,7 @@ impl Prototype {
                     .flex_1()
                     .min_h_0()
                     .p_7()
-                    .child(div().text_size(px(27.)).mb_2().child("設定"))
+                    .child(div().text_size(px(27.)).mb_2().child(self.tr("設定")))
                     .when(narrow, |d| {
                         d.child(
                             div()
@@ -415,15 +483,22 @@ impl Prototype {
                                 .child(self.button(
                                     "narrow-stream-tab",
                                     "串流",
-                                    Action::SettingsTab(false),
-                                    !self.display_settings,
+                                    Action::SettingsTab(SettingsTab::Stream),
+                                    self.settings_tab == SettingsTab::Stream,
                                     cx,
                                 ))
                                 .child(self.button(
                                     "narrow-display-tab",
                                     "顯示",
-                                    Action::SettingsTab(true),
-                                    self.display_settings,
+                                    Action::SettingsTab(SettingsTab::Display),
+                                    self.settings_tab == SettingsTab::Display,
+                                    cx,
+                                ))
+                                .child(self.button(
+                                    "narrow-interface-tab",
+                                    "介面",
+                                    Action::SettingsTab(SettingsTab::Interface),
+                                    self.settings_tab == SettingsTab::Interface,
                                     cx,
                                 )),
                         )
@@ -433,13 +508,21 @@ impl Prototype {
                             .text_size(px(12.))
                             .text_color(rgb(MUTED))
                             .mb_6()
-                            .child("GPUI 整合版 · 儲存後套用至下次串流"),
+                            .child(self.tr("GPUI 整合版 · 儲存後套用至下次串流")),
                     )
-                    .when(self.display_settings, |d| {
+                    .when(self.settings_tab == SettingsTab::Display, |d| {
                         d.child(self.display_fields(narrow, cx))
                     })
-                    .when(!self.display_settings, |d| {
-                        d.child(div().text_size(px(18.)).mb_2().child("畫面"))
+                    .when(self.settings_tab == SettingsTab::Interface, |d| {
+                        d.child(self.field(
+                            "介面語言",
+                            "保留繁體中文、简体中文與 English；不影響主機名稱或剪貼簿內容。",
+                            self.select(Field::Language, cx),
+                            narrow,
+                        ))
+                    })
+                    .when(self.settings_tab == SettingsTab::Stream, |d| {
+                        d.child(div().text_size(px(18.)).mb_2().child(self.tr("畫面")))
                             .child(self.field(
                                 "解析度",
                                 "初版提供常用預設；自訂輸入待補。",
@@ -463,7 +546,7 @@ impl Prototype {
                                 self.bitrate(cx),
                                 narrow,
                             ))
-                            .child(div().mt_6().text_size(px(18.)).child("連線穩定性"))
+                            .child(div().mt_6().text_size(px(18.)).child(self.tr("連線穩定性")))
                             .child(self.field(
                                 "自動調整位元率（ABR）",
                                 "需要相容的 Sunshine 主機。",
@@ -505,7 +588,7 @@ impl Prototype {
                                     ),
                                 )
                             })
-                            .child(div().mt_6().text_size(px(18.)).child("畫質增強"))
+                            .child(div().mt_6().text_size(px(18.)).child(self.tr("畫質增強")))
                             .child(self.field(
                                 "AI 畫質增強",
                                 "由現有核心選擇解碼器；尚未在此頁偵測 GPU 支援。",
@@ -565,26 +648,13 @@ impl Prototype {
                             .flex_1()
                             .text_size(px(12.))
                             .text_color(rgb(MUTED))
-                            .child(if !self.notice.is_empty() {
-                                self.notice.clone()
+                            .child(self.tr(if !self.notice.is_empty() {
+                                &self.notice
                             } else if self.draft != self.saved {
-                                "有尚未儲存的變更".into()
+                                "有尚未儲存的變更"
                             } else {
-                                "下次串流使用已儲存的設定".into()
-                            }),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap_3()
-                            .child(self.button(
-                                "defaults",
-                                "載入預設值",
-                                Action::Defaults,
-                                false,
-                                cx,
-                            ))
-                            .child(self.button("save", "儲存設定", Action::Save, true, cx)),
+                                "下次串流使用已儲存的設定"
+                            })),
                     ),
             );
         div()
@@ -597,7 +667,7 @@ impl Prototype {
     }
     fn display_fields(&self, narrow: bool, cx: &Context<Self>) -> AnyElement {
         div()
-            .child(div().text_size(px(18.)).mb_2().child("顯示模式"))
+            .child(div().text_size(px(18.)).mb_2().child(self.tr("顯示模式")))
             .child(self.field(
                 "啟動顯示模式",
                 "串流中按 Ctrl + Alt + Shift + X 切換全螢幕／視窗。",
@@ -637,7 +707,7 @@ impl Prototype {
                 div()
                     .mt_6()
                     .text_color(rgb(MUTED))
-                    .child("目前串流在主螢幕啟動；螢幕選擇與其他進階顯示設定尚未移植。"),
+                    .child(self.tr("目前串流在主螢幕啟動；螢幕選擇與其他進階顯示設定尚未移植。")),
             )
             .into_any_element()
     }
@@ -647,14 +717,14 @@ impl Prototype {
         match self.modal.as_ref().unwrap() {
             Modal::Info(t, body) => {
                 title = *t;
-                content = content.child(body.clone());
+                content = content.child(self.tr(body));
             }
             Modal::Add => {
                 let entity = cx.entity();
                 let focus = self.modal_focus.clone();
                 title = "新增裝置";
                 content = content
-                    .child("輸入 IP／主機名稱，可附連接埠。支援貼上；Ctrl+A 清空。")
+                    .child(self.tr("輸入 IP／主機名稱，可附連接埠。支援貼上；Ctrl+A 清空。"))
                     .child(
                         div()
                             .id("address-input")
@@ -684,13 +754,13 @@ impl Prototype {
                                 .size_full(),
                             ),
                     )
-                    .child(self.notice.clone())
+                    .child(self.tr(&self.notice))
                     .child(self.button("submit-address", "連線", Action::SubmitAddress, true, cx));
             }
             Modal::Pair(pin) => {
                 title = "配對主機";
                 content = content
-                    .child("請在 Sunshine 的 PIN 配對頁輸入下列驗證碼，並等待配對完成。")
+                    .child(self.tr("請在 Sunshine 的 PIN 配對頁輸入下列驗證碼，並等待配對完成。"))
                     .child(
                         div()
                             .text_size(px(40.))
@@ -700,13 +770,48 @@ impl Prototype {
             }
             Modal::Stream => {
                 title = "串流連線";
-                content = content.child(self.stage.clone()).child(self.button(
+                content = content.child(self.tr(&self.stage)).child(self.button(
                     "stop-stream",
                     "結束連線",
                     Action::Stop,
                     false,
                     cx,
                 ));
+            }
+            Modal::AppOptions(id) => {
+                title = "程式選項";
+                if let Some(app) = self
+                    .hosts
+                    .iter()
+                    .find(|h| Some(&h.id) == self.selected.as_ref())
+                    .and_then(|h| h.apps.iter().find(|a| a.id == *id))
+                {
+                    content = content
+                        .child(app.name.clone())
+                        .child(self.tr("隱藏只影響此客戶端的清單；直啟會在選取主機時啟動此程式。"))
+                        .child(self.button(
+                            "app-hide",
+                            if app.hidden {
+                                "取消隱藏"
+                            } else {
+                                "隱藏此程式"
+                            },
+                            Action::AppPreferences(*id, !app.hidden, false),
+                            false,
+                            cx,
+                        ))
+                        .child(self.button(
+                            "app-direct",
+                            if app.direct_launch {
+                                "取消直啟"
+                            } else {
+                                "設為直啟"
+                            },
+                            Action::AppPreferences(*id, false, !app.direct_launch),
+                            false,
+                            cx,
+                        ));
+                }
             }
             Modal::Select(field) => {
                 let (t, options, current) = match field {
@@ -716,13 +821,18 @@ impl Prototype {
                     Field::Fec => ("封包遺失保護（FEC）", FEC, self.draft.fec),
                     Field::WindowMode => ("啟動顯示模式", WINDOW_MODES, self.draft.window_mode),
                     Field::Decoder => ("視訊解碼器", DECODERS, self.draft.decoder),
+                    Field::Language => ("介面語言", LANGUAGES, self.draft.language),
                 };
                 title = t;
                 let field = *field;
                 content = content.children(options.iter().enumerate().map(|(i, option)| {
                     self.button(
                         ("option", i),
-                        *option,
+                        if field == Field::Language {
+                            SharedString::from(*option)
+                        } else {
+                            self.tr(option)
+                        },
                         Action::Choose(field, i),
                         i == current,
                         cx,
@@ -751,7 +861,7 @@ impl Prototype {
                     .border_1()
                     .border_color(rgb(0x465565))
                     .bg(rgb(SURFACE))
-                    .child(div().text_size(px(20.)).mb_5().child(title))
+                    .child(div().text_size(px(20.)).mb_5().child(self.tr(title)))
                     .child(content)
                     .child(div().mt_6().flex().justify_end().child(self.button(
                         "close",

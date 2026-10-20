@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QReadLocker>
+#include <QWriteLocker>
 #include <QRegularExpression>
 #include <QThread>
 #include <QTimer>
@@ -126,7 +127,7 @@ void GpuiCoreBridge::publishHosts() {
     for (auto* host : m_Manager->getComputers()) {
         QReadLocker lock(&host->lock);
         QJsonArray apps;
-        for (const auto& app : host->appList) apps.append(QJsonObject{{"id", app.id}, {"name", app.name}});
+        for (const auto& app : host->appList) apps.append(QJsonObject{{"id", app.id}, {"name", app.name}, {"hidden", app.hidden}, {"direct_launch", app.directLaunch}});
         const auto address = host->manualAddress.isNull() ? host->activeAddress : host->manualAddress;
         hosts.append(QJsonObject{{"id", host->uuid}, {"name", host->name}, {"address", address.toString()},
                                  {"online", host->state == NvComputer::CS_ONLINE},
@@ -167,9 +168,32 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         m_Manager->addNewHostManually(address);
         return;
     }
-    if (name != "pair" && name != "start") { fail("unknown_command", tr("Unknown command.")); return; }
+    if (name != "pair" && name != "start" && name != "app_preferences") { fail("unknown_command", tr("Unknown command.")); return; }
     auto* host = findHost(request.value("host").toString());
     if (!host) { fail("host_not_found", tr("Host not found.")); return; }
+    if (name == "app_preferences") {
+        if (!request["hidden"].isBool() || !request["direct_launch"].isBool() ||
+            !integer(request, "app", 1, 2147483647) ||
+            (request["hidden"].toBool() && request["direct_launch"].toBool())) {
+            fail("invalid_app_preferences", tr("Application preferences are invalid.")); return;
+        }
+        {
+            QWriteLocker lock(&host->lock);
+            NvApp* selected = nullptr;
+            for (auto& app : host->appList) if (app.id == request["app"].toInt()) selected = &app;
+            if (!selected) { fail("app_not_found", tr("Application not found.")); return; }
+            if (request["hidden"].toBool() && host->currentGameId == selected->id) {
+                fail("app_running", tr("A running application cannot be hidden.")); return;
+            }
+            selected->hidden = request["hidden"].toBool();
+            selected->directLaunch = request["direct_launch"].toBool();
+            if (selected->directLaunch) {
+                for (auto& app : host->appList) if (&app != selected) app.directLaunch = false;
+            }
+        }
+        m_Manager->clientSideAttributeUpdated(host);
+        return;
+    }
     if (name == "pair") {
         { QReadLocker lock(&host->lock);
           if (host->pairState == NvComputer::PS_PAIRED) { send({{"event", "paired"}}); return; }

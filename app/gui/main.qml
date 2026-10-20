@@ -190,7 +190,6 @@ ApplicationWindow {
 
     // Kept for local artwork fallback in StreamSegue.
     readonly property string backgroundImageUrl: ""
-    readonly property alias gamepadOsk: gamepadKeyboard
 
     Connections {
         target: stackView.currentItem
@@ -773,10 +772,6 @@ ApplicationWindow {
         }
     }
 
-    GamepadKeyboard {
-        id: gamepadKeyboard
-    }
-
     NavigableDialog {
         id: addPcDialog
         property string label: qsTr("Enter the IP address of your host PC:")
@@ -786,8 +781,6 @@ ApplicationWindow {
         onOpened: {
             // Force keyboard focus on the textbox so keyboard navigation works
             editText.forceActiveFocus()
-            // 手柄插拔状态以对话框打开那一刻为准
-            oskHint.visible = SdlGamepadKeyNavigation.getConnectedGamepads() > 0
         }
 
         onClosed: {
@@ -828,15 +821,7 @@ ApplicationWindow {
                 }
             }
 
-            Text {
-                id: oskHint
-                visible: false
-                text: qsTr("No keyboard? Press %1 to open the on-screen keyboard.").arg(SdlGamepadKeyNavigation.faceButtonGlyph(2))
-                color: Theme.textFaint
-                font.family: Theme.fontMono
-                font.pointSize: Theme.fontBody
-                Layout.fillWidth: true
-            }
+
 
         }
     }

@@ -143,7 +143,7 @@ $provenance = [ordered]@{
     dotnet = (dotnet --version)
     prebuiltDependencies = (Get-Content (Join-Path $SourceRoot 'build/portable-deps.json') -Raw | ConvertFrom-Json)
     tests = $testResults
-    features = 'Lite: no updater, online wallpaper/promotion, Discord, STUN, USB/IP, or file mapping; bundled gamepad mappings and text/image clipboard retained; microphone disabled'
+    features = 'Lite: no updater, online wallpaper/promotion, Discord, STUN, USB/IP, or file mapping; bundled gamepad mappings and text/image clipboard retained; microphone disabled; Windows PC UI: zh-TW/zh-CN/en, no SBS stretch or controller on-screen keyboard; app hiding/direct launch retained'
     assurance = 'Source build with prebuilt third-party dependencies; not a full security audit or a bit-reproducibility claim'
 }
 $provenance | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $deploy 'build-provenance.json')

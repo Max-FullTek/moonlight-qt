@@ -102,13 +102,6 @@ Column {
         }
 
         ToggleRow {
-            title: qsTr("Stretch presentation")
-            description: qsTr("Ignores both client and host PC aspect ratios, which is required for displaying Half-SBS (Side-By-Side) 3D signals to AR/XR devices that only support Full-SBS (usually 1920x1080 per eye, meaning a total resolution of 3840x1080)")
-            checked: StreamingPreferences.ignoreAspectRatio
-            onToggled: function(value) { StreamingPreferences.ignoreAspectRatio = value }
-        }
-
-        ToggleRow {
             id: vsyncToggle
             title: qsTr("V-Sync")
             description: qsTr("Disabling V-Sync allows sub-frame rendering latency, but it can display visible tearing")

@@ -31,7 +31,7 @@ function DisplaySettings({ data, set, decisions }) { return <>
       <SelectField label="HDR 格式" value={data.hdrFormat} disabled={!data.hdr} onChange={v => set('hdrFormat', v)} options={[["pq", "HDR10（PQ）"], ["hlg", "HLG"]]}/>
       <SelectField label="HDR 亮度設定" description="控制傳送給 Foundation Sunshine 虛擬顯示器的亮度中繼資料。" value={data.hdrBrightnessMode} disabled={!data.hdr} onChange={v => set('hdrBrightnessMode', v)} options={[["host", "使用主機預設"], ["auto", "自動偵測用戶端顯示器"], ["manual", "手動設定亮度"]]}/>
       {data.hdr && data.hdrBrightnessMode === 'manual' ? <div className="inset-fields"><NumberField label="峰值亮度" value={data.hdrPeak} min={1} max={10000} step={0.001} suffix="nits" onChange={v => set('hdrPeak', v)}/><NumberField label="最低亮度" value={data.hdrMin} min={0} max={10} step={0.000001} suffix="nits" onChange={v => set('hdrMin', v)}/><NumberField label="全畫面亮度" value={data.hdrFullFrame} min={1} max={10000} step={0.001} suffix="nits" onChange={v => set('hdrFullFrame', v)}/><p className="help-text">最低 ≤ 全畫面 ≤ 峰值。原版 PQ 曲線拖曳校正尚未在 Web 原型重製，數值能力保留。</p></div> : <p className="help-text">{data.hdrBrightnessMode === 'auto' ? '正式版於開始串流時偵測 Windows HDR 顯示器；原型不偵測硬體。' : '使用主機預設時，不傳送自訂亮度。'}</p>}
-      {decisions.stretch !== 'remove' ? <ToggleField label="AR／XR 的 SBS 畫面延展" description="待確認保留；忽略長寬比，供特定 3D 裝置使用。" value={data.stretch} onChange={v => set('stretch', v)}/> : null}
+      {false ? <ToggleField label="AR／XR 的 SBS 畫面延展" description="待確認保留；忽略長寬比，供特定 3D 裝置使用。" value={data.stretch} onChange={v => set('stretch', v)}/> : null}
     </Section>
 </>; }
 function AudioSettings({ data, set }) { return <>
@@ -87,14 +87,15 @@ function OtherSettings({ data, set }) { return <>    <Section title="網路與�
     </Section>
 </>; }
 function InterfaceSettings({ data, set, decisions }) { return <>    <Section title="介面與通知">
-      <SelectField label="介面語言（選項預覽）" description="選擇會儲存於原型；本原型文字仍使用繁中，尚未接上翻譯。" value={data.language} onChange={v => set('language', v)} options={decisions.languages === 'remove' ? [['auto', '自動'], ['zh-TW', '繁體中文'], ['en', 'English']] : [['auto', '自動'], ['zh-TW', '繁體中文'], ['en', 'English'], ['other', '其他原版語言（待確認保留）']]}/>
+      <SelectField label="介面語言（選項預覽）" description="選擇會儲存於原型；本原型文字仍使用繁中，尚未接上翻譯。" value={data.language} onChange={v => set('language', v)} options={[[ 'zh-TW', '繁體中文'], ['zh-CN', '简体中文'], ['en', 'English']]}/>
+
 
       <SelectField label="啟動時的視窗模式" value={data.uiWindow} onChange={v => set('uiWindow', v)} options={[['window', '視窗'], ['maximized', '最大化'], ['fullscreen', '全螢幕']]}/>
       <ToggleField label="記住視窗位置與大小" value={data.rememberWindow} onChange={v => set('rememberWindow', v)}/>
       <ToggleField label="顯示連線品質警告" value={data.connectionWarnings} onChange={v => set('connectionWarnings', v)}/>
       <ToggleField label="顯示設定警告" value={data.configurationWarnings} onChange={v => set('configurationWarnings', v)}/>
       <ToggleField label="串流時保持螢幕喚醒" value={data.keepAwake} onChange={v => set('keepAwake', v)}/>
-      <p className="help-text">原型使用繁體中文。GPUI 版預計保留繁中／英文；其他語言：{decisions.languages === 'remove' ? '提議移除' : decisions.languages === 'keep' ? '提議保留' : '待確認'}。</p>
+      <p className="help-text">Windows PC 客戶端確定提供繁體中文、简体中文與 English；此 Web 對照原型仍使用繁中。</p>
     </Section>
 </>; }
 export default function Settings({ saved, draft, setDraft, onSave, decisions, category, setCategory, onCoverage }) {

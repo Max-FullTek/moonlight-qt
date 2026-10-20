@@ -1,6 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod core;
+mod i18n;
 mod input;
+
+#[cfg(not(target_os = "windows"))]
+compile_error!("This frontend targets Windows PC only.");
 mod settings;
 mod ui;
 use gpui::{prelude::*, *};
@@ -34,6 +38,12 @@ enum Page {
     Settings,
 }
 #[derive(Clone, Copy, PartialEq)]
+enum SettingsTab {
+    Stream,
+    Display,
+    Interface,
+}
+#[derive(Clone, Copy, PartialEq)]
 enum Field {
     Resolution,
     Fps,
@@ -41,13 +51,18 @@ enum Field {
     Fec,
     WindowMode,
     Decoder,
+    Language,
 }
 #[derive(Clone)]
 enum Action {
     Devices,
     Device(usize),
+    OpenApps(usize),
+    ShowHidden,
+    AppOptions(i32),
+    AppPreferences(i32, bool, bool),
     Settings,
-    SettingsTab(bool),
+    SettingsTab(SettingsTab),
     Hdr,
     Vsync,
     FramePacing,
@@ -75,6 +90,7 @@ enum Modal {
     Pair(String),
     Stream,
     Select(Field),
+    AppOptions(i32),
 }
 struct Prototype {
     page: Page,
@@ -90,7 +106,8 @@ struct Prototype {
     pending: bool,
     streaming: bool,
     stage: String,
-    display_settings: bool,
+    settings_tab: SettingsTab,
+    show_hidden: bool,
     slider_bounds: Rc<Cell<Bounds<Pixels>>>,
     dragging: bool,
     root_focus: FocusHandle,
@@ -118,29 +135,48 @@ impl Prototype {
             pending: false,
             streaming: false,
             stage: String::new(),
-            display_settings: false,
+            settings_tab: SettingsTab::Stream,
+            show_hidden: false,
             slider_bounds: Rc::new(Cell::new(Bounds::default())),
             dragging: false,
             root_focus: cx.focus_handle(),
             modal_focus: cx.focus_handle(),
         }
     }
+    fn tr(&self, text: &str) -> SharedString {
+        i18n::text(self.draft.language, text).into()
+    }
     fn act(&mut self, action: Action, window: &mut Window, cx: &mut Context<Self>) {
         let had_modal = self.modal.is_some();
         match action {
             Action::Devices => self.page = Page::Devices,
             Action::Settings => self.page = Page::Settings,
-            Action::SettingsTab(display) => { self.display_settings = display; }
+            Action::SettingsTab(tab) => { self.settings_tab = tab; }
             Action::Hdr => { self.draft.hdr = !self.draft.hdr; self.notice.clear(); }
             Action::Vsync => { self.draft.vsync = !self.draft.vsync; self.notice.clear(); }
             Action::FramePacing => { self.draft.frame_pacing = !self.draft.frame_pacing; self.notice.clear(); }
+            Action::ShowHidden => self.show_hidden = !self.show_hidden,
+            Action::OpenApps(index) => {
+                if let Some(host) = self.hosts.get(index) {
+                    self.selected = Some(host.id.clone()); self.page = Page::Apps;
+                }
+            }
+            Action::AppOptions(id) => self.modal = Some(Modal::AppOptions(id)),
+            Action::AppPreferences(app, hidden, direct_launch) => {
+                if let Some(host) = self.selected.clone() {
+                    if self.request(serde_json::json!({"command":"app_preferences","host":host,"app":app,"hidden":hidden,"direct_launch":direct_launch})) { self.modal = None; }
+                }
+            }
             Action::Device(_) if self.pending || self.streaming => {}
             Action::Device(index) => {
                 if let Some(host) = self.hosts.get(index).cloned() {
                     self.selected = Some(host.id.clone());
                     if !host.online {
                         self.modal = Some(Modal::Info("主機目前離線", "請確認主機與 Tailscale 網路，再重新選取裝置。".into()));
-                    } else if host.paired { self.page = Page::Apps; }
+                    } else if host.paired {
+                        self.page = Page::Apps;
+                        if let Some(app) = host.direct_app() { self.act(Action::Stream(app), window, cx); }
+                    }
                     else if self.request(serde_json::json!({"command":"pair","host":host.id})) {
                         self.pending = true;
                         self.modal = Some(Modal::Info("正在配對", "正在向主機要求配對 PIN…".into()));
@@ -188,6 +224,7 @@ impl Prototype {
                     Field::Fec => self.draft.fec = value,
                     Field::WindowMode => self.draft.window_mode = value,
                     Field::Decoder => self.draft.decoder = value,
+                    Field::Language => self.draft.language = value,
                 }
                 self.modal = None;
                 self.notice.clear();
@@ -414,7 +451,7 @@ impl Render for Prototype {
                     .border_color(rgb(BORDER))
                     .text_size(px(12.))
                     .text_color(rgb(MUTED))
-                    .child("GPUI 核心整合測試 · 手動連線 · SDL 串流"),
+                    .child(self.tr("GPUI 核心整合測試 · 手動連線 · SDL 串流")),
             )
             .child(
                 div()
@@ -469,12 +506,11 @@ impl Render for Prototype {
                         .border_color(rgb(BORDER))
                         .text_size(px(12.))
                         .text_color(rgb(MUTED))
-                        .child(if self.notice.is_empty() {
+                        .child(self.tr(if self.notice.is_empty() {
                             "區網自動搜尋已關閉。使用手動 IP／Tailscale；串流使用主螢幕。"
-                                .to_owned()
                         } else {
-                            self.notice.clone()
-                        }),
+                            &self.notice
+                        })),
                 )
             })
             .when(self.modal.is_some(), |d| d.child(self.modal(cx)))

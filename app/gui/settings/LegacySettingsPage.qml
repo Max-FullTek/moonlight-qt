@@ -117,31 +117,9 @@ Column {
             }
 
             model: ListModel {
-                ListElement { text: qsTr("Automatic"); val: StreamingPreferences.LANG_AUTO }
-                ListElement { text: "Deutsch"; val: StreamingPreferences.LANG_DE }
-                ListElement { text: "English"; val: StreamingPreferences.LANG_EN }
-                ListElement { text: "Français"; val: StreamingPreferences.LANG_FR }
-                ListElement { text: "简体中文"; val: StreamingPreferences.LANG_ZH_CN }
-                ListElement { text: "Norwegian Bokmål"; val: StreamingPreferences.LANG_NB_NO }
-                ListElement { text: "русский"; val: StreamingPreferences.LANG_RU }
-                ListElement { text: "Español"; val: StreamingPreferences.LANG_ES }
-                ListElement { text: "日本語"; val: StreamingPreferences.LANG_JA }
-                ListElement { text: "Tiếng Việt"; val: StreamingPreferences.LANG_VI }
-                ListElement { text: "ภาษาไทย"; val: StreamingPreferences.LANG_TH }
-                ListElement { text: "한국어"; val: StreamingPreferences.LANG_KO }
-                ListElement { text: "Magyar"; val: StreamingPreferences.LANG_HU }
-                ListElement { text: "Nederlands"; val: StreamingPreferences.LANG_NL }
-                ListElement { text: "Svenska"; val: StreamingPreferences.LANG_SV }
-                ListElement { text: "Türkçe"; val: StreamingPreferences.LANG_TR }
                 ListElement { text: "繁體中文"; val: StreamingPreferences.LANG_ZH_TW }
-                ListElement { text: "Português"; val: StreamingPreferences.LANG_PT }
-                ListElement { text: "Português do Brasil"; val: StreamingPreferences.LANG_PT_BR }
-                ListElement { text: "Ελληνικά"; val: StreamingPreferences.LANG_EL }
-                ListElement { text: "Italiano"; val: StreamingPreferences.LANG_IT }
-                ListElement { text: "Język polski"; val: StreamingPreferences.LANG_PL }
-                ListElement { text: "Čeština"; val: StreamingPreferences.LANG_CS }
-                ListElement { text: "Български"; val: StreamingPreferences.LANG_BG }
-                ListElement { text: "தமிழ்"; val: StreamingPreferences.LANG_TA }
+                ListElement { text: "简体中文"; val: StreamingPreferences.LANG_ZH_CN }
+                ListElement { text: "English"; val: StreamingPreferences.LANG_EN }
             }
         }
 

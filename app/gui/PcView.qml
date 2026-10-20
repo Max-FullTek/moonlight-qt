@@ -530,8 +530,6 @@ CenteredGridView {
         }
     }
 
-    // 屏幕键盘由 main.qml 的 gamepadOsk 单例提供,HardTextField 自动接入
-
     // 和 AppView 的地址选择框是同一个组件，只有提示语和落地方式不同
     SelectAddressDialog {
         id: selectAddressDialog
