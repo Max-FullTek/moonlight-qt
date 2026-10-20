@@ -646,6 +646,8 @@ impl Prototype {
                     .child(
                         div()
                             .flex_1()
+                            .min_w_0()
+                            .text_ellipsis()
                             .text_size(px(12.))
                             .text_color(rgb(MUTED))
                             .child(self.tr(if !self.notice.is_empty() {
@@ -655,6 +657,20 @@ impl Prototype {
                             } else {
                                 "下次串流使用已儲存的設定"
                             })),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_shrink_0()
+                            .gap_3()
+                            .child(self.button(
+                                "defaults",
+                                "載入預設值",
+                                Action::Defaults,
+                                false,
+                                cx,
+                            ))
+                            .child(self.button("save", "儲存設定", Action::Save, true, cx)),
                     ),
             );
         div()
