@@ -170,7 +170,8 @@ pub fn stream_settings(s: &super::settings::Settings) -> Value {
     let (width, height) = [(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)][s.resolution];
     json!({"width":width,"height":height,"fps":([30,60,90,120,144][s.fps]),"codec":s.codec,
         "bitrate":s.bitrate,"abr":s.abr,"fec":match s.fec {0=>-2,1=>-1,_=>s.fec_percent as i32},
-        "enhancement":s.enhancement,"scale":s.scale,"scale_percent":s.scale_percent})
+        "enhancement":s.enhancement,"scale":s.scale,"scale_percent":s.scale_percent,
+        "display":{"window_mode":s.window_mode,"decoder":s.decoder,"hdr":s.hdr,"vsync":s.vsync,"frame_pacing":s.frame_pacing}})
 }
 #[cfg(test)]
 mod tests {
@@ -190,5 +191,17 @@ mod tests {
         assert_eq!(value["width"], 1920);
         assert_eq!(value["bitrate"], 20);
         assert_eq!(value["fec"], -2);
+        let configured = stream_settings(&super::super::settings::Settings {
+            window_mode: 1,
+            decoder: 2,
+            hdr: true,
+            vsync: false,
+            frame_pacing: true,
+            ..super::super::settings::Settings::default()
+        });
+        assert_eq!(
+            configured["display"],
+            json!({"window_mode":1,"decoder":2,"hdr":true,"vsync":false,"frame_pacing":true})
+        );
     }
 }

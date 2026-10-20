@@ -14,10 +14,17 @@ pub struct Settings {
     pub enhancement: bool,
     pub scale: bool,
     pub scale_percent: u32,
+    pub window_mode: usize,
+    pub decoder: usize,
+    pub hdr: bool,
+    pub vsync: bool,
+    pub frame_pacing: bool,
 }
 pub const RESOLUTIONS: &[&str] = &["1280 × 720", "1920 × 1080", "2560 × 1440", "3840 × 2160"];
 pub const FPS: &[&str] = &["30 FPS", "60 FPS", "90 FPS", "120 FPS", "144 FPS"];
 pub const CODECS: &[&str] = &["自動", "H.264", "HEVC（H.265）", "AV1"];
+pub const WINDOW_MODES: &[&str] = &["全螢幕", "無邊框全螢幕", "視窗"];
+pub const DECODERS: &[&str] = &["自動", "僅硬體解碼", "僅軟體解碼"];
 pub const FEC: &[&str] = &["跟隨主機", "自動", "固定百分比"];
 impl Default for Settings {
     fn default() -> Self {
@@ -32,6 +39,11 @@ impl Default for Settings {
             enhancement: false,
             scale: false,
             scale_percent: 100,
+            window_mode: 2,
+            decoder: 0,
+            hdr: false,
+            vsync: true,
+            frame_pacing: false,
         }
     }
 }
@@ -41,6 +53,8 @@ impl Settings {
             && self.fps < FPS.len()
             && self.codec < CODECS.len()
             && self.fec < FEC.len()
+            && self.window_mode < WINDOW_MODES.len()
+            && self.decoder < DECODERS.len()
             && (1..=150).contains(&self.bitrate)
             && self.fec_percent <= 100
             && (20..=100).contains(&self.scale_percent)
@@ -124,6 +138,24 @@ mod tests {
             }
             .validate()
         );
+    }
+    #[test]
+    fn migrate_existing_settings_and_validate_display_choices() {
+        let old: Settings = serde_json::from_str(r#"{"bitrate":42,"resolution":2}"#).unwrap();
+        assert_eq!(old.bitrate, 42);
+        assert_eq!(old.resolution, 2);
+        assert_eq!(old.window_mode, 2);
+        assert!(old.vsync);
+        assert!(!old.hdr);
+        assert!(old.validate());
+        assert!(
+            !Settings {
+                window_mode: 3,
+                ..old.clone()
+            }
+            .validate()
+        );
+        assert!(!Settings { decoder: 3, ..old }.validate());
     }
     #[test]
     fn bitrate_matches_native_policy_for_available_presets() {

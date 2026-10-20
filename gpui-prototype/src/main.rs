@@ -39,12 +39,18 @@ enum Field {
     Fps,
     Codec,
     Fec,
+    WindowMode,
+    Decoder,
 }
 #[derive(Clone)]
 enum Action {
     Devices,
     Device(usize),
     Settings,
+    SettingsTab(bool),
+    Hdr,
+    Vsync,
+    FramePacing,
     About,
     Add,
     Close,
@@ -84,6 +90,7 @@ struct Prototype {
     pending: bool,
     streaming: bool,
     stage: String,
+    display_settings: bool,
     slider_bounds: Rc<Cell<Bounds<Pixels>>>,
     dragging: bool,
     root_focus: FocusHandle,
@@ -111,6 +118,7 @@ impl Prototype {
             pending: false,
             streaming: false,
             stage: String::new(),
+            display_settings: false,
             slider_bounds: Rc::new(Cell::new(Bounds::default())),
             dragging: false,
             root_focus: cx.focus_handle(),
@@ -122,6 +130,10 @@ impl Prototype {
         match action {
             Action::Devices => self.page = Page::Devices,
             Action::Settings => self.page = Page::Settings,
+            Action::SettingsTab(display) => { self.display_settings = display; }
+            Action::Hdr => { self.draft.hdr = !self.draft.hdr; self.notice.clear(); }
+            Action::Vsync => { self.draft.vsync = !self.draft.vsync; self.notice.clear(); }
+            Action::FramePacing => { self.draft.frame_pacing = !self.draft.frame_pacing; self.notice.clear(); }
             Action::Device(_) if self.pending || self.streaming => {}
             Action::Device(index) => {
                 if let Some(host) = self.hosts.get(index).cloned() {
@@ -136,7 +148,7 @@ impl Prototype {
                 }
             }
             Action::About => self.modal = Some(Modal::Info("關於 GPUI 整合版",
-                "Rust + GPUI 原生啟動器；C++ 核心暫時保留 Qt 後端及 SDL/D3D11 串流。核心模式不載入 QML。此階段先整合手動主機、配對、程式清單與視窗串流；其餘設定尚未移植。".into())),
+                "Rust + GPUI 原生啟動器；C++ 核心暫時保留 Qt 後端及 SDL/D3D11 串流。核心模式不載入 QML。此階段先整合手動主機、配對、程式清單與串流／顯示設定；其餘設定尚未移植。".into())),
             Action::Add => {
                 if self.ready && !self.pending {
                     self.address.clear(); self.modal = Some(Modal::Add);
@@ -174,6 +186,8 @@ impl Prototype {
                     Field::Fps => self.draft.fps = value,
                     Field::Codec => self.draft.codec = value,
                     Field::Fec => self.draft.fec = value,
+                    Field::WindowMode => self.draft.window_mode = value,
+                    Field::Decoder => self.draft.decoder = value,
                 }
                 self.modal = None;
                 self.notice.clear();
@@ -349,12 +363,20 @@ impl Render for Prototype {
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if matches!(this.modal, Some(Modal::Add)) && this.modal_focus.is_focused(window) {
                     let key = &event.keystroke;
-                    if key.key == "backspace" { this.address.pop(); }
-                    else if key.modifiers.control && key.key == "v" {
+                    if key.key == "backspace" {
+                        this.address.pop();
+                    } else if key.modifiers.control && key.key == "v" {
                         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                            this.address = text.trim().chars().filter(|c| c.is_ascii_graphic()).take(260).collect();
+                            this.address = text
+                                .trim()
+                                .chars()
+                                .filter(|c| c.is_ascii_graphic())
+                                .take(260)
+                                .collect();
                         }
-                    } else if key.modifiers.control && key.key == "a" { this.address.clear(); }
+                    } else if key.modifiers.control && key.key == "a" {
+                        this.address.clear();
+                    }
                     cx.notify();
                 }
                 if event.keystroke.key == "tab" {
@@ -427,7 +449,9 @@ impl Render for Prototype {
                         cx,
                     ))
                     .child(div().flex_1())
-                    .when(self.streaming, |d| d.child(self.button("header-stop", "結束連線", Action::Stop, false, cx)))
+                    .when(self.streaming, |d| {
+                        d.child(self.button("header-stop", "結束連線", Action::Stop, false, cx))
+                    })
                     .when(!narrow, |d| {
                         d.child(self.button("about", "關於", Action::About, false, cx))
                     }),
@@ -445,7 +469,12 @@ impl Render for Prototype {
                         .border_color(rgb(BORDER))
                         .text_size(px(12.))
                         .text_color(rgb(MUTED))
-                        .child(if self.notice.is_empty() { "區網自動搜尋已關閉。使用手動 IP／Tailscale；串流暫以主螢幕視窗模式啟動。".to_owned() } else { self.notice.clone() }),
+                        .child(if self.notice.is_empty() {
+                            "區網自動搜尋已關閉。使用手動 IP／Tailscale；串流使用主螢幕。"
+                                .to_owned()
+                        } else {
+                            self.notice.clone()
+                        }),
                 )
             })
             .when(self.modal.is_some(), |d| d.child(self.modal(cx)))

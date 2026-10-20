@@ -1,5 +1,5 @@
 use crate::*;
-use settings::{CODECS, FEC, FPS, RESOLUTIONS};
+use settings::{CODECS, DECODERS, FEC, FPS, RESOLUTIONS, WINDOW_MODES};
 
 impl Prototype {
     pub fn navigation(
@@ -226,6 +226,8 @@ impl Prototype {
             Field::Fps => ("fps", FPS, self.draft.fps),
             Field::Codec => ("codec", CODECS, self.draft.codec),
             Field::Fec => ("fec", FEC, self.draft.fec),
+            Field::WindowMode => ("window-mode", WINDOW_MODES, self.draft.window_mode),
+            Field::Decoder => ("decoder", DECODERS, self.draft.decoder),
         };
         self.button(
             id,
@@ -364,33 +366,31 @@ impl Prototype {
             .bg(rgb(0x131b24))
             .border_r_1()
             .border_color(rgb(BORDER))
-            .child(
-                div()
-                    .p_3()
-                    .rounded(px(5.))
-                    .bg(rgb(0x193139))
-                    .text_color(rgb(ACCENT))
-                    .child("串流"),
-            )
+            .child(self.button(
+                "stream-tab",
+                "串流",
+                Action::SettingsTab(false),
+                !self.display_settings,
+                cx,
+            ))
+            .child(self.button(
+                "display-tab",
+                "顯示",
+                Action::SettingsTab(true),
+                self.display_settings,
+                cx,
+            ))
             .children(
-                [
-                    "顯示",
-                    "音效",
-                    "主機",
-                    "鍵盤與滑鼠",
-                    "手把",
-                    "相容性與診斷",
-                    "介面",
-                ]
-                .into_iter()
-                .map(|label| div().p_3().text_color(rgb(0x647384)).child(label)),
+                ["音效", "主機", "鍵盤與滑鼠", "手把", "相容性與診斷", "介面"]
+                    .into_iter()
+                    .map(|label| div().p_3().text_color(rgb(0x647384)).child(label)),
             )
             .child(
                 div()
                     .mt_4()
                     .text_size(px(11.))
                     .text_color(rgb(MUTED))
-                    .child("初版僅開放串流設定，其餘分類待後續移植。"),
+                    .child("已開放串流與顯示設定，其餘分類待後續移植。"),
             );
         let content = div()
             .flex_1()
@@ -406,6 +406,28 @@ impl Prototype {
                     .min_h_0()
                     .p_7()
                     .child(div().text_size(px(27.)).mb_2().child("設定"))
+                    .when(narrow, |d| {
+                        d.child(
+                            div()
+                                .flex()
+                                .gap_3()
+                                .mb_4()
+                                .child(self.button(
+                                    "narrow-stream-tab",
+                                    "串流",
+                                    Action::SettingsTab(false),
+                                    !self.display_settings,
+                                    cx,
+                                ))
+                                .child(self.button(
+                                    "narrow-display-tab",
+                                    "顯示",
+                                    Action::SettingsTab(true),
+                                    self.display_settings,
+                                    cx,
+                                )),
+                        )
+                    })
                     .child(
                         div()
                             .text_size(px(12.))
@@ -413,108 +435,118 @@ impl Prototype {
                             .mb_6()
                             .child("GPUI 整合版 · 儲存後套用至下次串流"),
                     )
-                    .child(div().text_size(px(18.)).mb_2().child("畫面"))
-                    .child(self.field(
-                        "解析度",
-                        "初版提供常用預設；自訂輸入待補。",
-                        self.select(Field::Resolution, cx),
-                        narrow,
-                    ))
-                    .child(self.field("影格率", "", self.select(Field::Fps, cx), narrow))
-                    .child(self.field("視訊編碼", "", self.select(Field::Codec, cx), narrow))
-                    .child(self.field(
-                        if self.draft.abr {
-                            "位元率上限"
-                        } else {
-                            "位元率"
-                        },
-                        "",
-                        self.bitrate(cx),
-                        narrow,
-                    ))
-                    .child(div().mt_6().text_size(px(18.)).child("連線穩定性"))
-                    .child(self.field(
-                        "自動調整位元率（ABR）",
-                        "需要相容的 Sunshine 主機。",
-                        self.toggle("abr", self.draft.abr, Action::Abr, cx),
-                        narrow,
-                    ))
-                    .child(self.field(
-                        "封包遺失保護（FEC）",
-                        "與 ABR 可獨立使用；取決於主機支援。",
-                        self.select(Field::Fec, cx),
-                        narrow,
-                    ))
-                    .when(self.draft.fec == 2, |d| {
-                        d.child(
-                            self.field(
-                                "固定 FEC 百分比",
-                                "",
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .child(self.button(
-                                        "fec-minus",
-                                        "−",
-                                        Action::FecPercent(-1),
-                                        false,
-                                        cx,
-                                    ))
-                                    .child(format!("{}%", self.draft.fec_percent))
-                                    .child(self.button(
-                                        "fec-plus",
-                                        "+",
-                                        Action::FecPercent(1),
-                                        false,
-                                        cx,
-                                    ))
-                                    .into_any_element(),
-                                narrow,
-                            ),
-                        )
+                    .when(self.display_settings, |d| {
+                        d.child(self.display_fields(narrow, cx))
                     })
-                    .child(div().mt_6().text_size(px(18.)).child("畫質增強"))
-                    .child(self.field(
-                        "AI 畫質增強",
-                        "由現有核心選擇解碼器；尚未在此頁偵測 GPU 支援。",
-                        self.toggle("enhance", self.draft.enhancement, Action::Enhance, cx),
-                        narrow,
-                    ))
-                    .child(self.field(
-                        "串流渲染比例",
-                        "",
-                        self.toggle("scale", self.draft.scale, Action::Scale, cx),
-                        narrow,
-                    ))
-                    .when(self.draft.scale, |d| {
-                        d.child(
-                            self.field(
-                                "渲染比例",
-                                "",
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .child(self.button(
-                                        "scale-minus",
-                                        "−",
-                                        Action::ScalePercent(-5),
-                                        false,
-                                        cx,
-                                    ))
-                                    .child(format!("{}%", self.draft.scale_percent))
-                                    .child(self.button(
-                                        "scale-plus",
-                                        "+",
-                                        Action::ScalePercent(5),
-                                        false,
-                                        cx,
-                                    ))
-                                    .into_any_element(),
+                    .when(!self.display_settings, |d| {
+                        d.child(div().text_size(px(18.)).mb_2().child("畫面"))
+                            .child(self.field(
+                                "解析度",
+                                "初版提供常用預設；自訂輸入待補。",
+                                self.select(Field::Resolution, cx),
                                 narrow,
-                            ),
-                        )
+                            ))
+                            .child(self.field("影格率", "", self.select(Field::Fps, cx), narrow))
+                            .child(self.field(
+                                "視訊編碼",
+                                "",
+                                self.select(Field::Codec, cx),
+                                narrow,
+                            ))
+                            .child(self.field(
+                                if self.draft.abr {
+                                    "位元率上限"
+                                } else {
+                                    "位元率"
+                                },
+                                "",
+                                self.bitrate(cx),
+                                narrow,
+                            ))
+                            .child(div().mt_6().text_size(px(18.)).child("連線穩定性"))
+                            .child(self.field(
+                                "自動調整位元率（ABR）",
+                                "需要相容的 Sunshine 主機。",
+                                self.toggle("abr", self.draft.abr, Action::Abr, cx),
+                                narrow,
+                            ))
+                            .child(self.field(
+                                "封包遺失保護（FEC）",
+                                "與 ABR 可獨立使用；取決於主機支援。",
+                                self.select(Field::Fec, cx),
+                                narrow,
+                            ))
+                            .when(self.draft.fec == 2, |d| {
+                                d.child(
+                                    self.field(
+                                        "固定 FEC 百分比",
+                                        "",
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap_3()
+                                            .child(self.button(
+                                                "fec-minus",
+                                                "−",
+                                                Action::FecPercent(-1),
+                                                false,
+                                                cx,
+                                            ))
+                                            .child(format!("{}%", self.draft.fec_percent))
+                                            .child(self.button(
+                                                "fec-plus",
+                                                "+",
+                                                Action::FecPercent(1),
+                                                false,
+                                                cx,
+                                            ))
+                                            .into_any_element(),
+                                        narrow,
+                                    ),
+                                )
+                            })
+                            .child(div().mt_6().text_size(px(18.)).child("畫質增強"))
+                            .child(self.field(
+                                "AI 畫質增強",
+                                "由現有核心選擇解碼器；尚未在此頁偵測 GPU 支援。",
+                                self.toggle("enhance", self.draft.enhancement, Action::Enhance, cx),
+                                narrow,
+                            ))
+                            .child(self.field(
+                                "串流渲染比例",
+                                "",
+                                self.toggle("scale", self.draft.scale, Action::Scale, cx),
+                                narrow,
+                            ))
+                            .when(self.draft.scale, |d| {
+                                d.child(
+                                    self.field(
+                                        "渲染比例",
+                                        "",
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap_3()
+                                            .child(self.button(
+                                                "scale-minus",
+                                                "−",
+                                                Action::ScalePercent(-5),
+                                                false,
+                                                cx,
+                                            ))
+                                            .child(format!("{}%", self.draft.scale_percent))
+                                            .child(self.button(
+                                                "scale-plus",
+                                                "+",
+                                                Action::ScalePercent(5),
+                                                false,
+                                                cx,
+                                            ))
+                                            .into_any_element(),
+                                        narrow,
+                                    ),
+                                )
+                            })
                     }),
             )
             .child(
@@ -561,6 +593,52 @@ impl Prototype {
             .min_h_0()
             .when(!narrow, |d| d.child(nav))
             .child(content)
+            .into_any_element()
+    }
+    fn display_fields(&self, narrow: bool, cx: &Context<Self>) -> AnyElement {
+        div()
+            .child(div().text_size(px(18.)).mb_2().child("顯示模式"))
+            .child(self.field(
+                "啟動顯示模式",
+                "串流中按 Ctrl + Alt + Shift + X 切換全螢幕／視窗。",
+                self.select(Field::WindowMode, cx),
+                narrow,
+            ))
+            .child(self.field(
+                "HDR",
+                "需要相容的主機、編碼器與 HDR 螢幕；由現有核心檢查支援。",
+                self.toggle("hdr", self.draft.hdr, Action::Hdr, cx),
+                narrow,
+            ))
+            .child(self.field(
+                "垂直同步（V-Sync）",
+                "減少畫面撕裂，可能增加延遲。",
+                self.toggle("vsync", self.draft.vsync, Action::Vsync, cx),
+                narrow,
+            ))
+            .child(self.field(
+                "影格平順處理",
+                "只在垂直同步開啟時生效。",
+                self.toggle(
+                    "frame-pacing",
+                    self.draft.frame_pacing,
+                    Action::FramePacing,
+                    cx,
+                ),
+                narrow,
+            ))
+            .child(self.field(
+                "視訊解碼器",
+                "優先使用自動；強制硬體模式不支援時由核心回報錯誤。",
+                self.select(Field::Decoder, cx),
+                narrow,
+            ))
+            .child(
+                div()
+                    .mt_6()
+                    .text_color(rgb(MUTED))
+                    .child("目前串流在主螢幕啟動；螢幕選擇與其他進階顯示設定尚未移植。"),
+            )
             .into_any_element()
     }
     pub fn modal(&self, cx: &Context<Self>) -> AnyElement {
@@ -636,6 +714,8 @@ impl Prototype {
                     Field::Fps => ("影格率", FPS, self.draft.fps),
                     Field::Codec => ("視訊編碼", CODECS, self.draft.codec),
                     Field::Fec => ("封包遺失保護（FEC）", FEC, self.draft.fec),
+                    Field::WindowMode => ("啟動顯示模式", WINDOW_MODES, self.draft.window_mode),
+                    Field::Decoder => ("視訊解碼器", DECODERS, self.draft.decoder),
                 };
                 title = t;
                 let field = *field;

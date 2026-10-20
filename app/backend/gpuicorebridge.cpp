@@ -27,6 +27,17 @@ bool applySettings(const QJsonObject& value, StreamingPreferences* prefs) {
         !integer(value, "fec", -2, 100) || !integer(value, "scale_percent", 20, 100) ||
         !integer(value, "codec", 0, 3) || !value["abr"].isBool() ||
         !value["enhancement"].isBool() || !value["scale"].isBool()) return false;
+    // Display options are additive in protocol 1. Older frontends retain the
+    // first integration's explicit defaults; malformed new options are rejected
+    // before any preferences are changed.
+    QJsonObject display{{"window_mode", 2}, {"decoder", 0}, {"hdr", false},
+                        {"vsync", true}, {"frame_pacing", false}};
+    if (value.contains("display")) {
+        if (!value["display"].isObject()) return false;
+        display = value["display"].toObject();
+        if (!integer(display, "window_mode", 0, 2) || !integer(display, "decoder", 0, 2) ||
+            !display["hdr"].isBool() || !display["vsync"].isBool() || !display["frame_pacing"].isBool()) return false;
+    }
     prefs->width = value["width"].toInt();
     prefs->height = value["height"].toInt();
     prefs->fps = value["fps"].toInt();
@@ -41,11 +52,13 @@ bool applySettings(const QJsonObject& value, StreamingPreferences* prefs) {
     prefs->videoEnhancement = value["enhancement"].toBool();
     prefs->streamResolutionScale = value["scale"].toBool();
     prefs->streamResolutionScaleRatio = value["scale_percent"].toInt();
-    // First integration uses the primary display and a window. No host app is
-    // ever quit implicitly, including on parent disconnect or launch failure.
-    prefs->windowMode = StreamingPreferences::WM_WINDOWED;
+    prefs->windowMode = static_cast<StreamingPreferences::WindowMode>(display["window_mode"].toInt());
+    prefs->videoDecoderSelection = static_cast<StreamingPreferences::VideoDecoderSelection>(display["decoder"].toInt());
+    prefs->enableVsync = display["vsync"].toBool();
+    prefs->framePacing = display["frame_pacing"].toBool();
+    // No host app is ever quit implicitly, including on parent disconnect.
     prefs->quitAppAfter = false;
-    prefs->enableHdr = false;
+    prefs->enableHdr = display["hdr"].toBool();
     return true;
 }
 }
