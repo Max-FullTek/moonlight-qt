@@ -168,7 +168,7 @@ fn decode(line: &str) -> anyhow::Result<Event> {
 }
 pub fn stream_settings(s: &super::settings::Settings) -> Value {
     let (width, height) = [(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)][s.resolution];
-    json!({"width":width,"height":height,"fps":[30,60,90,120,144][s.fps],"codec":s.codec,
+    json!({"width":width,"height":height,"fps":([30,60,90,120,144][s.fps]),"codec":s.codec,
         "bitrate":s.bitrate,"abr":s.abr,"fec":match s.fec {0=>-2,1=>-1,_=>s.fec_percent as i32},
         "enhancement":s.enhancement,"scale":s.scale,"scale_percent":s.scale_percent})
 }
