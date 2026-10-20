@@ -19,6 +19,8 @@
 #include <QLocale>
 #include <QFile>
 #include <QFileInfo>
+#include <QTimer>
+#include <memory>
 #include <QStandardPaths>
 
 #ifdef Q_OS_UNIX
@@ -86,6 +88,7 @@ static QString getStartupApplicationDir(const char* argv0)
 #include "gui/computermodel.h"
 #include "gui/appmodel.h"
 #include "backend/computermanager.h"
+#include "backend/gpuicorebridge.h"
 #include "backend/systemproperties.h"
 #include "streaming/session.h"
 #ifdef HAS_QT_SDL_WAYLAND_BRIDGE
@@ -773,6 +776,10 @@ int main(int argc, char *argv[])
     SDL_SetMainReady();
 
     const QString startupApplicationDir = getStartupApplicationDir(argc > 0 ? argv[0] : nullptr);
+    bool gpuiCoreMode = false;
+#ifdef Q_OS_WIN32
+    gpuiCoreMode = argc == 2 && QByteArray(argv[1]) == "--gpui-core";
+#endif
 
     // Set the app version for the QCommandLineParser's showVersion() command
     QCoreApplication::setApplicationVersion(VERSION_STR);
@@ -784,7 +791,18 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationDomain("moonlight-stream.com");
     QCoreApplication::setApplicationName("Moonlight");
 
-    if (QFile(QDir(startupApplicationDir).filePath("portable.dat")).exists()) {
+    if (gpuiCoreMode) {
+        // Isolate certificates, hosts and preferences from both installed and
+        // portable Qt clients. The frontend supplies this private profile path.
+        const QString profile = qEnvironmentVariable("MOONLIGHT_GPUI_PROFILE");
+        if (profile.isEmpty() || !QDir::isAbsolutePath(profile) || !QDir().mkpath(profile)) return 2;
+        QCoreApplication::setApplicationName("MoonlightGPUI");
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, profile);
+        QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, profile);
+        Path::initialize(true, profile);
+    }
+    else if (QFile(QDir(startupApplicationDir).filePath("portable.dat")).exists()) {
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, startupApplicationDir);
         QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, startupApplicationDir);
@@ -1203,7 +1221,8 @@ int main(int argc, char *argv[])
 #endif
 
     GlobalCommandLineParser parser;
-    GlobalCommandLineParser::ParseResult commandLineParserResult = parser.parse(app.arguments());
+    GlobalCommandLineParser::ParseResult commandLineParserResult = gpuiCoreMode
+            ? GlobalCommandLineParser::NormalStartRequested : parser.parse(app.arguments());
     switch (commandLineParserResult) {
     case GlobalCommandLineParser::ListRequested:
         // Don't log to the console since it will jumble the command output
@@ -1516,90 +1535,100 @@ int main(int argc, char *argv[])
         app.setFont(uiFont);
     }
 
-    QQmlApplicationEngine engine;
-    QString initialView;
-    bool hasGUI = true;
-
-    switch (commandLineParserResult) {
-    case GlobalCommandLineParser::NormalStartRequested:
-        initialView = "qrc:/gui/PcView.qml";
-        break;
-    case GlobalCommandLineParser::StreamRequested:
-        {
-            initialView = "qrc:/gui/CliStartStreamSegue.qml";
-            StreamingPreferences* preferences = StreamingPreferences::get();
-            StreamCommandLineParser streamParser;
-            streamParser.parse(app.arguments(), preferences);
-            QString host    = streamParser.getHost();
-            QString appName = streamParser.getAppName();
-            auto launcher   = new CliStartStream::Launcher(host, appName, preferences, &app);
-            engine.rootContext()->setContextProperty("launcher", launcher);
-            break;
-        }
-    case GlobalCommandLineParser::QuitRequested:
-        {
-            initialView = "qrc:/gui/CliQuitStreamSegue.qml";
-            QuitCommandLineParser quitParser;
-            quitParser.parse(app.arguments());
-            auto launcher = new CliQuitStream::Launcher(quitParser.getHost(), &app);
-            engine.rootContext()->setContextProperty("launcher", launcher);
-            break;
-        }
-    case GlobalCommandLineParser::PairRequested:
-        {
-            initialView = "qrc:/gui/CliPair.qml";
-            PairCommandLineParser pairParser;
-            pairParser.parse(app.arguments());
-            auto launcher = new CliPair::Launcher(pairParser.getHost(), pairParser.getPredefinedPin(), &app);
-            engine.rootContext()->setContextProperty("launcher", launcher);
-            break;
-        }
-    case GlobalCommandLineParser::ListRequested:
-        {
-            ListCommandLineParser listParser;
-            listParser.parse(app.arguments());
-            auto launcher = new CliListApps::Launcher(listParser.getHost(), listParser, &app);
-            launcher->execute(new ComputerManager(StreamingPreferences::get()));
-            hasGUI = false;
-            break;
-        }
+    std::unique_ptr<QQmlApplicationEngine> engineStorage;
+    if (gpuiCoreMode) {
+        app.setQuitOnLastWindowClosed(false);
+        auto* bridge = new GpuiCoreBridge(&app);
+        QTimer::singleShot(0, bridge, &GpuiCoreBridge::start);
     }
+    else {
+        engineStorage = std::make_unique<QQmlApplicationEngine>();
+        auto& engine = *engineStorage;
+        QString initialView;
+        bool hasGUI = true;
 
-    // Help, version, and argument errors (including subcommand parsers above)
-    // exit without unwinding automatic objects. Retain the shared SDL/EGL
-    // resources only after those paths, and before QML can probe SDL video.
+        switch (commandLineParserResult) {
+        case GlobalCommandLineParser::NormalStartRequested:
+            initialView = "qrc:/gui/PcView.qml";
+            break;
+        case GlobalCommandLineParser::StreamRequested:
+            {
+                initialView = "qrc:/gui/CliStartStreamSegue.qml";
+                StreamingPreferences* preferences = StreamingPreferences::get();
+                StreamCommandLineParser streamParser;
+                streamParser.parse(app.arguments(), preferences);
+                QString host    = streamParser.getHost();
+                QString appName = streamParser.getAppName();
+                auto launcher   = new CliStartStream::Launcher(host, appName, preferences, &app);
+                engine.rootContext()->setContextProperty("launcher", launcher);
+                break;
+            }
+        case GlobalCommandLineParser::QuitRequested:
+            {
+                initialView = "qrc:/gui/CliQuitStreamSegue.qml";
+                QuitCommandLineParser quitParser;
+                quitParser.parse(app.arguments());
+                auto launcher = new CliQuitStream::Launcher(quitParser.getHost(), &app);
+                engine.rootContext()->setContextProperty("launcher", launcher);
+                break;
+            }
+        case GlobalCommandLineParser::PairRequested:
+            {
+                initialView = "qrc:/gui/CliPair.qml";
+                PairCommandLineParser pairParser;
+                pairParser.parse(app.arguments());
+                auto launcher = new CliPair::Launcher(pairParser.getHost(), pairParser.getPredefinedPin(), &app);
+                engine.rootContext()->setContextProperty("launcher", launcher);
+                break;
+            }
+        case GlobalCommandLineParser::ListRequested:
+            {
+                ListCommandLineParser listParser;
+                listParser.parse(app.arguments());
+                auto launcher = new CliListApps::Launcher(listParser.getHost(), listParser, &app);
+                launcher->execute(new ComputerManager(StreamingPreferences::get()));
+                hasGUI = false;
+                break;
+            }
+        }
+
+        // Help, version, and argument errors (including subcommand parsers above)
+        // exit without unwinding automatic objects. Retain the shared SDL/EGL
+        // resources only after those paths, and before QML can probe SDL video.
 #ifdef HAS_QT_SDL_WAYLAND_BRIDGE
-    if (QGuiApplication::platformName().startsWith("wayland")) {
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Detected Wayland");
-        qputenv("SDL_VIDEODRIVER", "wayland");
-        qputenv("SDL_VIDEO_WAYLAND_WMCLASS", "com.moonlight_stream.Moonlight");
-        if (!waylandSdlVideoLifetime.initialize()) {
-            return -1;
+        if (QGuiApplication::platformName().startsWith("wayland")) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Detected Wayland");
+            qputenv("SDL_VIDEODRIVER", "wayland");
+            qputenv("SDL_VIDEO_WAYLAND_WMCLASS", "com.moonlight_stream.Moonlight");
+            if (!waylandSdlVideoLifetime.initialize()) {
+                return -1;
+            }
         }
-    }
 #endif
 
-    if (hasGUI) {
-        engine.rootContext()->setContextProperty("initialView", initialView);
-        engine.rootContext()->setContextProperty("runConfigChecks", commandLineParserResult == GlobalCommandLineParser::NormalStartRequested);
+        if (hasGUI) {
+            engine.rootContext()->setContextProperty("initialView", initialView);
+            engine.rootContext()->setContextProperty("runConfigChecks", commandLineParserResult == GlobalCommandLineParser::NormalStartRequested);
 
-        // Load the main.qml file
-        engine.load(QUrl(QStringLiteral("qrc:/gui/main.qml")));
-        if (engine.rootObjects().isEmpty())
-            return -1;
+            // Load the main.qml file
+            engine.load(QUrl(QStringLiteral("qrc:/gui/main.qml")));
+            if (engine.rootObjects().isEmpty())
+                return -1;
 
 #ifdef Q_OS_DARWIN
-        // 主界面去掉了系统标题栏的底色，那条 56px 的工具栏就是标题栏。但系统的标题栏
-        // 带子仍然只有 28~32pt 高：红绿灯挤在最上面一小条里，而 AppKit 也只在那条带子
-        // 里提供窗口拖动和双击缩放，工具栏下半部分是拖不动的。把带子拉高到 56，
-        // 红绿灯落到 bar 的中线上，拖动区也就覆盖了整条 bar。
-        //
-        // 56 要和 main.qml 里 toolBar 的 height 保持一致。
-        if (auto* rootWindow = qobject_cast<QWindow*>(engine.rootObjects().first())) {
-            MacWindowChrome::useTallTitleBar(rootWindow, 56);
-        }
+            // 主界面去掉了系统标题栏的底色，那条 56px 的工具栏就是标题栏。但系统的标题栏
+            // 带子仍然只有 28~32pt 高：红绿灯挤在最上面一小条里，而 AppKit 也只在那条带子
+            // 里提供窗口拖动和双击缩放，工具栏下半部分是拖不动的。把带子拉高到 56，
+            // 红绿灯落到 bar 的中线上，拖动区也就覆盖了整条 bar。
+            //
+            // 56 要和 main.qml 里 toolBar 的 height 保持一致。
+            if (auto* rootWindow = qobject_cast<QWindow*>(engine.rootObjects().first())) {
+                MacWindowChrome::useTallTitleBar(rootWindow, 56);
+            }
 #endif
-    }
+        }
+
+    } // Normal Qt/QML client startup; GPUI core never creates a QML engine.
 
     int err = app.exec();
 

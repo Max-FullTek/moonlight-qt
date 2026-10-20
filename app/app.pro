@@ -225,6 +225,7 @@ macx {
 
 SOURCES += \
     backend/nvaddress.cpp \
+    backend/gpuicorebridge.cpp \
     backend/nvapp.cpp \
     cli/pair.cpp \
     main.cpp \
@@ -277,6 +278,7 @@ SOURCES += \
     streaming/video/videoenhancement.cpp
 
 HEADERS += \
+    backend/gpuicorebridge.h \
     versionutils.h \
     backend/pairedcertificate.h \
     SDL_compat.h \

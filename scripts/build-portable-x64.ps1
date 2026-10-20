@@ -73,6 +73,11 @@ Copy-Item -LiteralPath (Join-Path $build 'clipboard-helper/release/moonlight-cli
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'app/SDL_GameControllerDB/gamecontrollerdb.txt') -Destination $deploy
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'LICENSE') -Destination $deploy
 
+# Bundle the matching Rust frontend; hashes cover both executables and notices.
+Copy-Item -LiteralPath (Join-Path $SourceRoot 'build/gpui-package/moonlight-lite-gpui-prototype.exe') -Destination $deploy
+Copy-Item -LiteralPath (Join-Path $SourceRoot 'build/gpui-package/THIRD-PARTY-NOTICES.txt') -Destination (Join-Path $deploy 'GPUI-THIRD-PARTY-NOTICES.txt')
+Copy-Item -LiteralPath (Join-Path $SourceRoot 'gpui-prototype/Cargo.lock') -Destination (Join-Path $deploy 'GPUI-Cargo.lock')
+
 # Match the existing Qt 6 deployment flags, retaining all remaining plugins.
 Invoke-Checked $windeployqt @(
     '--dir', $deploy, '--release', '--qmldir', (Join-Path $SourceRoot 'app/gui'),
@@ -115,6 +120,9 @@ foreach ($test in @('keyboard_state', 'shared_helpers', 'clipboard_payload_routi
     -TestRoot (Join-Path $root 'gui-smoke') -QtPlugins (& $qmake -query QT_INSTALL_PLUGINS)
 $testResults += @{ name = 'gui-qml-startup'; result = 'passed-offscreen-no-host' }
 
+Invoke-Checked 'python' @((Join-Path $PSScriptRoot 'smoke-gpui-core.py'), $deploy, (Join-Path $root 'core-smoke'))
+$testResults += @{ name = 'gpui-core-protocol-lifecycle'; result = 'passed-offscreen-no-host' }
+
 $provenance = [ordered]@{
     schemaVersion = 1
     repository = $env:GITHUB_REPOSITORY
@@ -127,6 +135,7 @@ $provenance = [ordered]@{
     runAttempt = $env:GITHUB_RUN_ATTEMPT
     runnerImage = "$env:ImageOS/$env:ImageVersion"
     qt = @{ version = $qtVersion; qmakeSha256 = (Get-FileHash $qmake -Algorithm SHA256).Hash; origin = 'Qt official prebuilt SDK, installer hash verification enabled' }
+    gpui = @{ version = '0.2.2'; rust = '1.99.1'; protocol = 1; qmlInWorker = $false }
     qtInstaller = @{ repository = 'jdpurcell/naqt'; commit = $env:NAQT_COMMIT }
     msvc = (Get-Item (Get-Command cl.exe).Source).VersionInfo.FileVersion
     windowsSDK = $env:WindowsSDKVersion

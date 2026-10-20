@@ -1981,7 +1981,12 @@ void Session::getWindowDimensions(int& x, int& y,
     // Create our window on the same display that Qt's UI
     // was being displayed on.
     else {
+        // Windows GPUI core mode has no Qt frontend window. SDL display 0 is
+        // the first integration's explicit fallback; existing Qt window-based
+        // monitor selection below remains unchanged.
+#ifndef Q_OS_WIN32
         Q_ASSERT(m_QtWindow != nullptr);
+#endif
         if (m_QtWindow != nullptr) {
             QScreen* screen = m_QtWindow->screen();
             if (screen != nullptr) {

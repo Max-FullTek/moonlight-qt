@@ -8,7 +8,7 @@ Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination $outDir
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Cargo.lock') -Destination $outDir
 $commit = (git -C $repoRoot rev-parse HEAD).Trim()
 $rust = (rustc +1.99.1 --version).Trim()
-@{ commit = $commit; rust = $rust; gpui = '0.2.2'; target = 'x86_64-pc-windows-msvc'; tests = @('settings validation and persistence round trip', 'native recommended bitrate presets'); scope = 'Native UI prototype only. No network, pairing, streaming or input forwarding.' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outDir 'build-provenance.json') -Encoding utf8
+@{ commit = $commit; rust = $rust; gpui = '0.2.2'; target = 'x86_64-pc-windows-msvc'; tests = @('settings validation and persistence round trip', 'native recommended bitrate presets', 'worker protocol validation', 'stream settings mapping'); scope = 'Native GPUI frontend. Pairing and streaming require the matching Moonlight.exe worker from the integrated portable package.' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outDir 'build-provenance.json') -Encoding utf8
 $metadata = cargo +1.99.1 metadata --locked --format-version 1 --manifest-path (Join-Path $PSScriptRoot 'Cargo.toml') | ConvertFrom-Json
 if ($LASTEXITCODE) { throw 'Cannot collect dependency provenance' }
 $licenseText = [Collections.Generic.List[string]]::new()

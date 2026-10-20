@@ -48,7 +48,10 @@ impl Prototype {
             .tab_index(0)
             .tab_stop(
                 self.modal.is_none()
-                    || matches!(action, Action::Close | Action::Pair | Action::Choose(_, _)),
+                    || matches!(
+                        action,
+                        Action::Close | Action::SubmitAddress | Action::Stop | Action::Choose(_, _)
+                    ),
             )
             .cursor_pointer()
             .px_4()
@@ -83,64 +86,73 @@ impl Prototype {
                     .child(div().text_size(px(27.)).child("裝置"))
                     .child(self.button("add", "+ 新增裝置", Action::Add, false, cx)),
             )
-            .child(
-                div().flex().flex_wrap().justify_center().gap_7().children(
-                    HOSTS
-                        .iter()
-                        .enumerate()
-                        .map(|(i, (name, address, status))| {
-                            let status = if i == 1 && self.paired {
-                                "已配對 · 在線"
-                            } else {
-                                *status
-                            };
+            .when(self.hosts.is_empty(), |d| {
+                d.child(
+                    div()
+                        .mb_6()
+                        .text_color(rgb(MUTED))
+                        .child("尚未新增裝置。按「新增裝置」輸入主機 IP。"),
+                )
+            })
+            .child(div().flex().flex_wrap().justify_center().gap_7().children(
+                self.hosts.iter().enumerate().map(|(i, host)| {
+                    let status = if !host.online {
+                        "離線"
+                    } else if host.paired {
+                        "已配對 · 在線"
+                    } else {
+                        "尚未配對 · 在線"
+                    };
+                    div()
+                        .id(("device", i))
+                        .tab_index(0)
+                        .tab_stop(self.modal.is_none())
+                        .cursor_pointer()
+                        .w(px(240.))
+                        .h(px(256.))
+                        .rounded(px(6.))
+                        .border_1()
+                        .border_color(rgb(BORDER))
+                        .bg(rgb(0x131b24))
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .gap_2()
+                        .hover(|s| s.border_color(rgb(ACCENT)).bg(rgb(0x192730)))
+                        .focus(|s| s.border_color(rgb(ACCENT)))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.act(Action::Device(i), window, cx)
+                        }))
+                        .child(
+                            svg()
+                                .path("monitor")
+                                .size(px(80.))
+                                .mb_4()
+                                .text_color(rgb(if !host.online { MUTED } else { TEXT })),
+                        )
+                        .child(div().text_size(px(18.)).child(host.name.clone()))
+                        .child(
                             div()
-                                .id(("device", i))
-                                .tab_index(0)
-                                .tab_stop(self.modal.is_none())
-                                .cursor_pointer()
-                                .w(px(240.))
-                                .h(px(256.))
-                                .rounded(px(6.))
-                                .border_1()
-                                .border_color(rgb(BORDER))
-                                .bg(rgb(0x131b24))
-                                .flex()
-                                .flex_col()
-                                .items_center()
-                                .justify_center()
-                                .gap_2()
-                                .hover(|s| s.border_color(rgb(ACCENT)).bg(rgb(0x192730)))
-                                .focus(|s| s.border_color(rgb(ACCENT)))
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.act(Action::Device(i), window, cx)
-                                }))
-                                .child(
-                                    svg()
-                                        .path("monitor")
-                                        .size(px(80.))
-                                        .mb_4()
-                                        .text_color(rgb(if i == 2 { MUTED } else { TEXT })),
-                                )
-                                .child(div().text_size(px(18.)).child(*name))
-                                .child(
-                                    div()
-                                        .text_size(px(12.))
-                                        .text_color(rgb(MUTED))
-                                        .child(status),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(12.))
-                                        .text_color(rgb(MUTED))
-                                        .child(*address),
-                                )
-                        }),
-                ),
-            )
+                                .text_size(px(12.))
+                                .text_color(rgb(MUTED))
+                                .child(status),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(12.))
+                                .text_color(rgb(MUTED))
+                                .child(host.address.clone()),
+                        )
+                }),
+            ))
             .into_any_element()
     }
-    pub fn apps(&self, index: usize, cx: &Context<Self>) -> AnyElement {
+    pub fn apps(&self, cx: &Context<Self>) -> AnyElement {
+        let host = self
+            .hosts
+            .iter()
+            .find(|host| Some(&host.id) == self.selected.as_ref());
         div()
             .flex_1()
             .min_h_0()
@@ -148,42 +160,38 @@ impl Prototype {
             .overflow_y_scroll()
             .p_8()
             .child(self.button("back", "‹ 返回裝置", Action::Devices, false, cx))
-            .child(div().mt_6().mb_6().text_size(px(24.)).child(HOSTS[index].0))
+            .child(
+                div()
+                    .mt_6()
+                    .mb_6()
+                    .text_size(px(24.))
+                    .child(host.map(|h| h.name.clone()).unwrap_or_default()),
+            )
+            .when(host.is_none_or(|h| h.apps.is_empty()), |d| {
+                d.child("正在取得程式清單；請確認 Sunshine 已設定桌面或遊戲。")
+            })
             .children(
-                [
-                    ("桌面", "使用主機的完整桌面"),
-                    ("Steam Big Picture", "以手把瀏覽遊戲收藏"),
-                    ("Playnite", "開啟遊戲啟動器"),
-                ]
-                .into_iter()
-                .enumerate()
-                .map(|(i, (name, detail))| {
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_5()
-                        .p_6()
-                        .border_b_1()
-                        .border_color(rgb(BORDER))
-                        .child(
-                            svg()
-                                .path(if i == 0 { "monitor" } else { "gamepad" })
-                                .size(px(36.))
-                                .text_color(rgb(TEXT)),
-                        )
-                        .child(
-                            div()
-                                .flex_1()
-                                .child(div().text_size(px(18.)).child(name))
-                                .child(
-                                    div()
-                                        .text_size(px(12.))
-                                        .text_color(rgb(MUTED))
-                                        .child(detail),
-                                ),
-                        )
-                        .child(self.button(("start", i), "開始串流", Action::Stream, true, cx))
-                }),
+                host.into_iter()
+                    .flat_map(|h| h.apps.iter())
+                    .enumerate()
+                    .map(|(i, app)| {
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_5()
+                            .p_6()
+                            .border_b_1()
+                            .border_color(rgb(BORDER))
+                            .child(svg().path("monitor").size(px(36.)).text_color(rgb(TEXT)))
+                            .child(div().flex_1().text_size(px(18.)).child(app.name.clone()))
+                            .child(self.button(
+                                ("start", i),
+                                "開始串流",
+                                Action::Stream(app.id),
+                                true,
+                                cx,
+                            ))
+                    }),
             )
             .into_any_element()
     }
@@ -403,7 +411,7 @@ impl Prototype {
                             .text_size(px(12.))
                             .text_color(rgb(MUTED))
                             .mb_6()
-                            .child("GPUI 串流設定初版 · 僅儲存範例偏好，不影響正式用戶端"),
+                            .child("GPUI 整合版 · 儲存後套用至下次串流"),
                     )
                     .child(div().text_size(px(18.)).mb_2().child("畫面"))
                     .child(self.field(
@@ -469,7 +477,7 @@ impl Prototype {
                     .child(div().mt_6().text_size(px(18.)).child("畫質增強"))
                     .child(self.field(
                         "AI 畫質增強",
-                        "初版只預覽偏好；尚未偵測 GPU 支援。",
+                        "由現有核心選擇解碼器；尚未在此頁偵測 GPU 支援。",
                         self.toggle("enhance", self.draft.enhancement, Action::Enhance, cx),
                         narrow,
                     ))
@@ -530,7 +538,7 @@ impl Prototype {
                             } else if self.draft != self.saved {
                                 "有尚未儲存的變更".into()
                             } else {
-                                "初版設定不會套用到真實串流".into()
+                                "下次串流使用已儲存的設定".into()
                             }),
                     )
                     .child(
@@ -561,25 +569,49 @@ impl Prototype {
         match self.modal.as_ref().unwrap() {
             Modal::Info(t, body) => {
                 title = *t;
-                content = content.child(*body);
+                content = content.child(body.clone());
             }
-            Modal::Pair => {
-                title = "配對主機（模擬）";
+            Modal::Add => {
+                title = "新增裝置";
                 content = content
-                    .child("正式版需在 Sunshine 配對頁輸入 PIN；本初版不連線主機。")
+                    .child("輸入 IP／主機名稱，可附連接埠。支援貼上；Ctrl+A 清空。")
+                    .child(
+                        div()
+                            .id("address-input")
+                            .tab_index(0)
+                            .track_focus(&self.modal_focus)
+                            .on_click(
+                                cx.listener(|this, _, window, _| window.focus(&this.modal_focus)),
+                            )
+                            .p_4()
+                            .border_1()
+                            .border_color(rgb(ACCENT))
+                            .bg(rgb(BG))
+                            .child(format!("{}│", self.address)),
+                    )
+                    .child(self.notice.clone())
+                    .child(self.button("submit-address", "連線", Action::SubmitAddress, true, cx));
+            }
+            Modal::Pair(pin) => {
+                title = "配對主機";
+                content = content
+                    .child("請在 Sunshine 的 PIN 配對頁輸入下列驗證碼，並等待配對完成。")
                     .child(
                         div()
                             .text_size(px(40.))
                             .text_color(rgb(ACCENT))
-                            .child("1234"),
-                    )
-                    .child(self.button("pair-success", "模擬配對成功", Action::Pair, true, cx));
+                            .child(pin.clone()),
+                    );
             }
             Modal::Stream => {
-                title = "串流流程預覽";
-                content = content.child(
-                    "正式版會切換至現有 SDL 串流視窗。此初版尚未接入影片、音效、輸入或剪貼簿傳送。",
-                );
+                title = "串流連線";
+                content = content.child(self.stage.clone()).child(self.button(
+                    "stop-stream",
+                    "結束連線",
+                    Action::Stop,
+                    false,
+                    cx,
+                ));
             }
             Modal::Select(field) => {
                 let (t, options, current) = match field {

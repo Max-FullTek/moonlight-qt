@@ -13,6 +13,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 60
     env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/build/gpui-target
       QT_VERSION: 6.12.0
       NAQT_COMMIT: 43da90f1464edd4cf39cb001a02022117070640f
     steps:
@@ -43,6 +44,41 @@ jobs:
       - name: Verify and unpack x64 dependencies
         shell: pwsh
         run: ./scripts/prepare-portable-deps.ps1
+      - name: Install pinned Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        id: cache
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/gpui-target
+          key: gpui-windows-rust-1.99.1-${{ hashFiles('gpui-prototype/Cargo.lock') }}
+          restore-keys: gpui-windows-rust-1.99.1-
+      - name: Format, test and build
+        working-directory: gpui-prototype
+        shell: pwsh
+        run: |
+          cargo +1.99.1 fmt --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo +1.99.1 test --release --locked
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo +1.99.1 build --release --locked
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        if: always() && steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/gpui-target
+          key: gpui-windows-rust-1.99.1-${{ hashFiles('gpui-prototype/Cargo.lock') }}
+      - name: Package prototype and provenance
+        shell: pwsh
+        run: ./gpui-prototype/package.ps1
       - name: Compile, test and package
         shell: pwsh
         run: ./scripts/build-portable-x64.ps1
