@@ -8,8 +8,16 @@ import sys
 import threading
 
 
-def check(executable, profile, eof=False):
+def check(executable, profile, eof=False, seeded=False):
     profile.mkdir(parents=True, exist_ok=False)
+    if seeded:
+        settings = profile / "Moonlight Game Streaming Project" / "MoonlightGPUI.ini"
+        settings.parent.mkdir()
+        settings.write_text(
+            "[hosts]\nsize=1\n1\\hostname=CI Host\n1\\uuid=ci-offline-host\n"
+            "1\\localaddress=127.0.0.1\n1\\localport=1\n"
+            "1\\manualaddress=127.0.0.1\n1\\manualport=1\n",
+            encoding="utf-8")
     env = dict(os.environ, MOONLIGHT_GPUI_PROFILE=str(profile.resolve()),
                QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software")
     with (profile / "stderr.log").open("wb") as log:
@@ -31,6 +39,9 @@ def check(executable, profile, eof=False):
 
         def event(name):
             value = received.get(timeout=30)
+            # Polling may publish a host snapshot before a command completes.
+            while name != "hosts" and isinstance(value, dict) and value.get("event") == "hosts":
+                value = received.get(timeout=30)
             assert isinstance(value, dict), value
             assert value.get("protocol") == 1, value
             assert value.get("event") == name, value
@@ -42,8 +53,24 @@ def check(executable, profile, eof=False):
 
         try:
             assert event("ready")["qml_loaded"] is False
-            assert event("hosts")["hosts"] == []
-            if not eof:
+            hosts = event("hosts")["hosts"]
+            if seeded:
+                assert len(hosts) == 1 and hosts[0]["id"] == "ci-offline-host", hosts
+                send('{"command":"rename","host":"ci-offline-host","name":""}')
+                assert event("error")["code"] == "invalid_name"
+                send(json.dumps({"command": "rename", "host": "ci-offline-host", "name": "測試 Host 😀"}))
+                event("host_renamed")
+                send('{"command":"list"}')
+                assert event("hosts")["hosts"][0]["name"] == "測試 Host 😀"
+                for command in ("quit", "displays", "start"):
+                    send(json.dumps({"command": command, "host": "ci-offline-host"}))
+                    assert event("error")["code"] == "not_ready"
+                send('{"command":"remove","host":"ci-offline-host"}')
+                assert event("host_removed")["host"] == "ci-offline-host"
+                assert event("hosts")["hosts"] == []
+                send('{"command":"shutdown"}')
+            elif not eof:
+                assert hosts == []
                 send('{"command":"list"}')
                 assert event("hosts")["hosts"] == []
                 for request, code in [
@@ -74,4 +101,5 @@ if __name__ == "__main__":
     root = Path(sys.argv[2]).resolve()
     check(executable, root / "shutdown")
     check(executable, root / "parent-eof", eof=True)
-    print("GPUI worker handshake, validation, shutdown and parent EOF passed; no host used.")
+    check(executable, root / "host-management", seeded=True)
+    print("GPUI worker handshake, validation, offline host management, shutdown and parent EOF passed; no real host used.")

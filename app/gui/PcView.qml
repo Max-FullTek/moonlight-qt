@@ -480,7 +480,6 @@ CenteredGridView {
         onOpened: {
             // Force keyboard focus on the textbox so keyboard navigation works
             editText.forceActiveFocus()
-            oskHint.visible = SdlGamepadKeyNavigation.getConnectedGamepads() > 0
         }
 
         onClosed: {
@@ -518,15 +517,6 @@ CenteredGridView {
                 }
             }
 
-            Text {
-                id: oskHint
-                visible: false
-                text: qsTr("No keyboard? Press %1 to open the on-screen keyboard.").arg(SdlGamepadKeyNavigation.faceButtonGlyph(2))
-                color: Theme.textFaint
-                font.family: Theme.fontMono
-                font.pointSize: Theme.fontBody
-                Layout.fillWidth: true
-            }
         }
     }
 
