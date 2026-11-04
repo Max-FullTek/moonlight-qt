@@ -43,6 +43,18 @@
 
 ## 依赖升级的双轨问题
 
+Windows Lite 接受知名公开项目的官方预编译依赖：固定版本、确认官方发布地址并在
+`scripts/portable-dependencies.json` 固定 SHA256，不要求逐一从源码重编第三方组件。
+镜像保留官方原始压缩包、许可和来源记录，不重新打包；任何缓存或镜像文件在解压前仍需校验。
+来源和哈希校验不能代替已知漏洞检查，依赖升级按兼容性与安全需要进行。
+
+`scripts/prepare-portable-deps.ps1` 优先使用本地 `build/dependency-cache`，也可用
+`-ArchivePath` 指定已有原包；缓存命中时不访问网络。缓存缺失时，设置了
+`DEPENDENCY_MIRROR_TOKEN` 就从私有 `Max-FullTek/moonlight-qt-deps` 镜像下载，
+否则从固定官方地址下载。镜像鉴权失败不会静默切换来源。CI 可设置同名 Actions secret，
+使用仅能读取该依赖仓库 Contents 的专用 token；不要使用宽权限个人 token。
+CI 缓存可减少重复下载，但不是永久归档；私有镜像为保留副本，构建来源写入产物 provenance。
+
 上游会升 Qt/SDL/FFmpeg,我们也在 CI 脚本里钉自己的 REV(build.yml 的 Linux
 依赖、setup-deps 的 v-tag)。**同步时必看上游的依赖升级提交**:上游升了而我们
 没跟,评估是「跟上」「对齐我们的钉法」还是「skip + 记原因」,不要留悬案。

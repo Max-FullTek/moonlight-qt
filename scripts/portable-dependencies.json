@@ -1,0 +1,8 @@
+{
+  "version": "v19",
+  "asset": "Windows-x64.zip",
+  "sha256": "65ff1bd439222e1e2750054f960dcd6fac46190027da16db7403e345c295f10f",
+  "officialUrl": "https://github.com/moonlight-stream/moonlight-qt-deps/releases/download/v19/Windows-x64.zip",
+  "mirrorRepository": "Max-FullTek/moonlight-qt-deps",
+  "mirrorTag": "upstream-v19"
+}
