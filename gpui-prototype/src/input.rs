@@ -1,6 +1,7 @@
 //! Address and setting entry. Windows WM_CHAR/Unicode input must use GPUI's
 //! input handler; physical key-down events alone miss injected text and IMEs.
-use crate::*;
+use crate::{Modal, Prototype};
+use gpui::{Bounds, Context, EntityInputHandler, Pixels, Point, UTF16Selection, Window};
 use std::ops::Range;
 
 pub fn filter_text(text: &str, unicode: bool) -> String {
