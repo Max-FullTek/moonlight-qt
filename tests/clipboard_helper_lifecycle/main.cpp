@@ -6,6 +6,10 @@
 #include <QProcess>
 #include <QTextStream>
 #include <QThread>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QTemporaryDir>
 #include <SDL.h>
 #include <cstdio>
 #include <cstring>
@@ -91,6 +95,32 @@ public:
                 ok = false;
             }
         };
+#if defined(Q_OS_WIN) && defined(NDEBUG)
+        {
+            QTemporaryDir untrusted;
+            check(untrusted.isValid(), "isolated untrusted helper directory");
+            if (!untrusted.isValid()) return false;
+            const QString previousDirectory = QDir::currentPath();
+            const QByteArray previousOverride = qgetenv("MOONLIGHT_CLIPBOARD_HELPER");
+            const bool hadOverride = qEnvironmentVariableIsSet("MOONLIGHT_CLIPBOARD_HELPER");
+            const QString fakePath = untrusted.filePath("moonlight-clipboard-helper.exe");
+            QFile fake(fakePath);
+            check(fake.open(QIODevice::WriteOnly), "create harmless helper stand-in");
+            fake.close();
+            qputenv("MOONLIGHT_CLIPBOARD_HELPER", fakePath.toUtf8());
+            check(QDir::setCurrent(untrusted.path()), "enter untrusted working directory");
+            ClipboardHelperClient client(nullptr);
+            const QString expected = QDir(QCoreApplication::applicationDirPath())
+                .filePath("moonlight-clipboard-helper.exe");
+            const QString resolved = client.findHelperExecutable();
+            check(resolved != fakePath, "release helper ignores environment and working directory");
+            check(resolved == (QFileInfo(expected).isFile() ? expected : QString()),
+                  "release helper uses bundled executable or disables clipboard");
+            QDir::setCurrent(previousDirectory);
+            if (hadOverride) qputenv("MOONLIGHT_CLIPBOARD_HELPER", previousOverride);
+            else qunsetenv("MOONLIGHT_CLIPBOARD_HELPER");
+        }
+#endif
         {
             ClipboardHelperClient client(nullptr);
             if (!start(client, "--invalid-output"))

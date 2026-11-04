@@ -250,6 +250,12 @@ QString ClipboardHelperClient::findHelperExecutable() const
     const QString helperName = QStringLiteral("moonlight-clipboard-helper");
 #endif
 
+#if defined(Q_OS_WIN) && defined(NDEBUG)
+    // Release builds only trust the helper shipped beside the application.
+    // Never send paired credentials to an environment/CWD-selected executable.
+    const QFileInfo bundled(QDir(QCoreApplication::applicationDirPath()).filePath(helperName));
+    return bundled.isFile() ? bundled.absoluteFilePath() : QString();
+#else
     QString envPath = QString::fromLocal8Bit(qgetenv("MOONLIGHT_CLIPBOARD_HELPER"));
     if (!envPath.isEmpty() && QFileInfo::exists(envPath)) {
         return envPath;
@@ -275,6 +281,7 @@ QString ClipboardHelperClient::findHelperExecutable() const
     }
 
     return QString();
+#endif
 }
 
 bool ClipboardHelperClient::sendCurrentConfig()

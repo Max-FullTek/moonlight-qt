@@ -748,7 +748,7 @@ NvHTTP::openConnection(QUrl baseUrl,
         QTimer::singleShot(timeoutMs, &loop, &QEventLoop::quit);
     }
     if (logLevel >= NvLogLevel::NVLL_VERBOSE) {
-        qInfo() << "Executing request:" << url.toString();
+        qInfo() << "Executing request:" << url.adjusted(QUrl::RemoveQuery | QUrl::RemoveUserInfo | QUrl::RemoveFragment).toString();
     }
     loop.exec(QEventLoop::ExcludeUserInputEvents);
 
@@ -756,7 +756,7 @@ NvHTTP::openConnection(QUrl baseUrl,
     if (!reply->isFinished())
     {
         if (logLevel >= NvLogLevel::NVLL_ERROR) {
-            qWarning() << "Aborting timed out request for" << url.toString();
+            qWarning() << "Aborting timed out request for" << url.adjusted(QUrl::RemoveQuery | QUrl::RemoveUserInfo | QUrl::RemoveFragment).toString();
         }
         reply->abort();
     }
@@ -873,14 +873,14 @@ NvHTTP::openJsonConnection(QUrl baseUrl,
         QTimer::singleShot(timeoutMs, &loop, &QEventLoop::quit);
     }
     if (logLevel >= NvLogLevel::NVLL_VERBOSE) {
-        qInfo() << "Executing JSON request:" << url.toString();
+        qInfo() << "Executing JSON request:" << url.adjusted(QUrl::RemoveQuery | QUrl::RemoveUserInfo | QUrl::RemoveFragment).toString();
     }
     loop.exec(QEventLoop::ExcludeUserInputEvents);
 
     if (!reply->isFinished())
     {
         if (logLevel >= NvLogLevel::NVLL_ERROR) {
-            qWarning() << "Aborting timed out JSON request for" << url.toString();
+            qWarning() << "Aborting timed out JSON request for" << url.adjusted(QUrl::RemoveQuery | QUrl::RemoveUserInfo | QUrl::RemoveFragment).toString();
         }
         reply->abort();
     }
