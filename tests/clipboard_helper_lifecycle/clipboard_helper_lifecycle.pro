@@ -3,6 +3,7 @@ CONFIG += c++17 console
 CONFIG -= app_bundle
 TEMPLATE = app
 TARGET = clipboard_helper_lifecycle
+include(../../globaldefs.pri)
 INCLUDEPATH += ../../app ../../moonlight-common-c/moonlight-common-c/src
 SOURCES += main.cpp ../../app/streaming/clipboardhelperclient.cpp ../../app/streaming/clipboardipc.cpp
 HEADERS += ../../app/streaming/clipboardhelperclient.h ../../app/streaming/clipboardipc.h
