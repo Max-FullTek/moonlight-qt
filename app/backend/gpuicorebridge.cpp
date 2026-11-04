@@ -116,6 +116,7 @@ bool applySettings(const QJsonObject& value, StreamingPreferences* prefs) {
         !value["enhancement"].isBool() || !value["scale"].isBool()) return false;
     if (value.contains("advanced") && (!value["advanced"].isObject() || !validAdvanced(value["advanced"].toObject()))) return false;
     if (value.contains("auto_resolution") && !value["auto_resolution"].isBool()) return false;
+    if (value.contains("language") && !integer(value, "language", 0, 2)) return false;
     // Display options are additive in protocol 1. Older frontends retain the
     // first integration's explicit defaults; malformed new options are rejected
     // before any preferences are changed.
@@ -149,6 +150,16 @@ bool applySettings(const QJsonObject& value, StreamingPreferences* prefs) {
     prefs->quitAppAfter = false;
     prefs->enableHdr = display["hdr"].toBool();
     if (value.contains("advanced")) applyAdvanced(value["advanced"].toObject(),prefs);
+    if (value.contains("language")) {
+        const StreamingPreferences::Language languages[] = {
+            StreamingPreferences::LANG_ZH_TW, StreamingPreferences::LANG_ZH_CN, StreamingPreferences::LANG_EN
+        };
+        const auto language = languages[value["language"].toInt()];
+        if (prefs->language != language) {
+            prefs->language = language;
+            prefs->retranslate();
+        }
+    }
     // These features remain excluded even when an older profile enabled them.
     prefs->enableMicrophone=false; prefs->ignoreAspectRatio=false;
     return true;

@@ -221,7 +221,7 @@ pub fn stream_settings(s: &super::settings::Settings) -> Value {
     json!({"width":width,"height":height,"fps":s.frame_rate(),"codec":s.codec,
         "bitrate":s.bitrate,"abr":s.abr,"fec":match s.fec {0=>-2,1=>-1,_=>s.fec_percent as i32},
         "enhancement":s.enhancement,"scale":s.scale,"scale_percent":s.scale_percent,
-        "advanced":s.advanced_values(),"auto_resolution":s.resolution==5,
+        "advanced":s.advanced_values(),"auto_resolution":s.resolution==5,"language":s.language,
         "display":{"window_mode":s.window_mode,"decoder":s.decoder,"hdr":s.hdr,"vsync":s.vsync,"frame_pacing":s.frame_pacing}})
 }
 #[cfg(test)]
@@ -252,18 +252,21 @@ mod tests {
         assert_eq!(value["width"], 1920);
         assert_eq!(value["bitrate"], 20);
         assert_eq!(value["fec"], -2);
+        assert_eq!(value["language"], 0);
         let configured = stream_settings(&super::super::settings::Settings {
             window_mode: 1,
             decoder: 2,
             hdr: true,
             vsync: false,
             frame_pacing: true,
+            language: 2,
             ..super::super::settings::Settings::default()
         });
         assert_eq!(
             configured["display"],
             json!({"window_mode":1,"decoder":2,"hdr":true,"vsync":false,"frame_pacing":true})
         );
+        assert_eq!(configured["language"], 2);
     }
     #[test]
     fn custom_display_and_retained_options_reach_the_worker() {

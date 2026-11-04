@@ -345,3 +345,35 @@ impl OptionSpec {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn retained_options_have_valid_defaults_and_translated_labels_and_choices() {
+        let mut keys = std::collections::HashSet::new();
+        for spec in OPTIONS {
+            assert!(keys.insert(spec.key));
+            assert!(spec.accepts(&spec.default_value()), "{}", spec.key);
+            assert!(
+                crate::i18n::CATALOG
+                    .iter()
+                    .any(|(tw, _, _)| *tw == spec.label),
+                "{}",
+                spec.label
+            );
+            if let Kind::Choice(choices, _) = spec.kind {
+                for choice in choices.iter().filter(|choice| {
+                    choice
+                        .chars()
+                        .any(|c| ('\u{3400}'..='\u{9fff}').contains(&c))
+                }) {
+                    assert!(
+                        crate::i18n::CATALOG.iter().any(|(tw, _, _)| tw == choice),
+                        "{choice}"
+                    );
+                }
+            }
+        }
+    }
+}
