@@ -252,6 +252,7 @@ signals:
     void computerAddCompleted(QVariant success, QVariant detectedPortBlocking);
 
     void quitAppCompleted(QVariant error);
+    void hostDeleted(QString uuid);
 
 private slots:
     void handleAboutToQuit();

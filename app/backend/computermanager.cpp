@@ -506,6 +506,7 @@ public:
     void run()
     {
         ComputerPollingEntry* pollingEntry;
+        const QString uuid = m_Computer->uuid;
 
         // Only do the minimum amount of work while holding the writer lock.
         // We must release it before calling saveHosts().
@@ -532,6 +533,9 @@ public:
         // Finally, delete the computer itself. This must be done
         // last because the polling thread might be using it.
         delete m_Computer;
+        QMetaObject::invokeMethod(m_ComputerManager, [manager = m_ComputerManager, uuid] {
+            emit manager->hostDeleted(uuid);
+        }, Qt::QueuedConnection);
     }
 
 private:

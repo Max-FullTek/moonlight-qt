@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod advanced;
 mod core;
 mod i18n;
 mod input;
@@ -42,7 +43,36 @@ enum SettingsTab {
     Stream,
     Display,
     Interface,
+    Audio,
+    Host,
+    Input,
+    Gamepad,
+    Compatibility,
 }
+impl SettingsTab {
+    fn category(self) -> &'static str {
+        match self {
+            Self::Stream => "stream",
+            Self::Display => "display",
+            Self::Interface => "interface",
+            Self::Audio => "audio",
+            Self::Host => "host",
+            Self::Input => "input",
+            Self::Gamepad => "gamepad",
+            Self::Compatibility => "compatibility",
+        }
+    }
+}
+const TABS: &[(SettingsTab, &str)] = &[
+    (SettingsTab::Stream, "串流"),
+    (SettingsTab::Display, "顯示"),
+    (SettingsTab::Audio, "音效"),
+    (SettingsTab::Host, "主機"),
+    (SettingsTab::Input, "鍵盤與滑鼠"),
+    (SettingsTab::Gamepad, "手把"),
+    (SettingsTab::Compatibility, "相容性與診斷"),
+    (SettingsTab::Interface, "介面"),
+];
 #[derive(Clone, Copy, PartialEq)]
 enum Field {
     Resolution,
@@ -83,6 +113,17 @@ enum Action {
     Recommend,
     Defaults,
     Save,
+    Advanced(&'static str),
+    SetAdvanced(&'static str, serde_json::Value),
+    SubmitValue(&'static str),
+    FetchDisplays,
+    HostOptions(String),
+    RenameHost(String),
+    SubmitHostName(String),
+    ConfirmRemove(String),
+    RemoveHost(String),
+    ConfirmQuit,
+    QuitHostApp,
 }
 enum Modal {
     Info(&'static str, String),
@@ -91,6 +132,12 @@ enum Modal {
     Stream,
     Select(Field),
     AppOptions(i32),
+    Advanced(&'static str),
+    EditValue(&'static str),
+    HostOptions(String),
+    RenameHost(String),
+    ConfirmRemove(String),
+    ConfirmQuit,
 }
 struct Prototype {
     page: Page,
@@ -101,8 +148,10 @@ struct Prototype {
     core: Option<core::Client>,
     ready: bool,
     hosts: Vec<core::Host>,
+    host_displays: Vec<core::HostDisplay>,
     selected: Option<String>,
     address: String,
+    input_marked: Option<std::ops::Range<usize>>,
     pending: bool,
     streaming: bool,
     stage: String,
@@ -130,8 +179,10 @@ impl Prototype {
             core: client,
             ready: false,
             hosts: vec![],
+            host_displays: vec![],
             selected: None,
             address: String::new(),
+            input_marked: None,
             pending: false,
             streaming: false,
             stage: String::new(),
@@ -148,7 +199,56 @@ impl Prototype {
     }
     fn act(&mut self, action: Action, window: &mut Window, cx: &mut Context<Self>) {
         let had_modal = self.modal.is_some();
+        self.input_marked = None;
         match action {
+            Action::HostOptions(host) => self.modal = Some(Modal::HostOptions(host)),
+            Action::RenameHost(host) => {
+                if let Some(h) = self.hosts.iter().find(|h| h.id == host) {
+                    self.address = h.name.clone(); self.modal = Some(Modal::RenameHost(host));
+                }
+            }
+            Action::SubmitHostName(host) => {
+                let name = self.address.trim().to_owned();
+                if name.is_empty() || name.encode_utf16().count() > 128 || name.chars().any(char::is_control) {
+                    self.notice = "主機名稱須為 1～128 個字元。".into();
+                } else if !self.pending && !self.streaming && self.request(serde_json::json!({"command":"rename","host":host,"name":name})) { self.pending = true; }
+            }
+            Action::ConfirmRemove(host) => self.modal = Some(Modal::ConfirmRemove(host)),
+            Action::RemoveHost(host) => {
+                if !self.pending && !self.streaming && self.request(serde_json::json!({"command":"remove","host":host})) { self.pending = true; }
+            }
+            Action::ConfirmQuit => self.modal = Some(Modal::ConfirmQuit),
+            Action::QuitHostApp => {
+                if let Some(host) = self.selected.clone() {
+                    if !self.pending && !self.streaming && self.request(serde_json::json!({"command":"quit","host":host})) { self.pending = true; self.modal = Some(Modal::Info("正在結束程式", "等待主機結束程式…".into())); }
+                }
+            }
+            Action::FetchDisplays => {
+                if !self.pending && !self.streaming {
+                    if let Some(host) = self.selected.clone() {
+                        if self.request(serde_json::json!({"command":"displays","host":host})) { self.pending=true; self.notice="正在讀取主機螢幕清單…".into(); }
+                    } else { self.notice="請先在裝置頁選取已配對的主機。".into(); }
+                }
+            }
+            Action::Advanced(key) => {
+                let spec=advanced::spec(key).unwrap();
+                if let advanced::Kind::Toggle(_) = spec.kind {
+                    let value=!self.draft.option(key).as_bool().unwrap();
+                    self.draft.advanced.insert(key.into(),serde_json::json!(value));
+                } else if matches!(spec.kind,advanced::Kind::Choice(..)) { self.modal=Some(Modal::Advanced(key)); }
+                else { self.address= match self.draft.option(key) { serde_json::Value::String(s)=>s,v=>v.to_string() };self.modal=Some(Modal::EditValue(key)); }
+                self.notice.clear();
+            }
+            Action::SetAdvanced(key,value) => {
+                if advanced::spec(key).is_some_and(|s| s.accepts(&value)) { self.draft.advanced.insert(key.into(),value);self.modal=None;self.notice.clear(); }
+            }
+            Action::SubmitValue(key) => {
+                let spec=advanced::spec(key).unwrap();
+                let value=if matches!(spec.kind,advanced::Kind::Text) { serde_json::Value::String(self.address.trim().into()) }
+                  else { self.address.trim().parse::<f64>().ok().filter(|v|v.is_finite()).map(serde_json::Value::from).unwrap_or(serde_json::Value::Null) };
+                if spec.accepts(&value) { self.draft.advanced.insert(key.into(),value);self.modal=None;self.notice.clear(); }
+                else { self.notice="輸入值超出有效範圍。".into(); }
+            }
             Action::Devices => self.page = Page::Devices,
             Action::Settings => self.page = Page::Settings,
             Action::SettingsTab(tab) => { self.settings_tab = tab; }
@@ -158,6 +258,7 @@ impl Prototype {
             Action::ShowHidden => self.show_hidden = !self.show_hidden,
             Action::OpenApps(index) => {
                 if let Some(host) = self.hosts.get(index) {
+                    if self.selected.as_ref() != Some(&host.id) { self.host_displays.clear(); }
                     self.selected = Some(host.id.clone()); self.page = Page::Apps;
                 }
             }
@@ -170,6 +271,7 @@ impl Prototype {
             Action::Device(_) if self.pending || self.streaming => {}
             Action::Device(index) => {
                 if let Some(host) = self.hosts.get(index).cloned() {
+                    if self.selected.as_ref() != Some(&host.id) { self.host_displays.clear(); }
                     self.selected = Some(host.id.clone());
                     if !host.online {
                         self.modal = Some(Modal::Info("主機目前離線", "請確認主機與 Tailscale 網路，再重新選取裝置。".into()));
@@ -184,7 +286,7 @@ impl Prototype {
                 }
             }
             Action::About => self.modal = Some(Modal::Info("關於 GPUI 整合版",
-                "Rust + GPUI 原生啟動器；C++ 核心暫時保留 Qt 後端及 SDL/D3D11 串流。核心模式不載入 QML。此階段先整合手動主機、配對、程式清單與串流／顯示設定；其餘設定尚未移植。".into())),
+                "Windows PC 客戶端：GPUI 介面搭配 C++／SDL 串流核心。僅手動連線；不提供 USB/IP、檔案傳送或自動下載更新。".into())),
             Action::Add => {
                 if self.ready && !self.pending {
                     self.address.clear(); self.modal = Some(Modal::Add);
@@ -207,7 +309,7 @@ impl Prototype {
             Action::Stream(app) => {
                 if !self.pending && !self.streaming {
                     if let Some(host) = self.selected.clone() {
-                        if self.request(serde_json::json!({"command":"start","host":host,"app":app,"settings":core::stream_settings(&self.saved)})) {
+                        if self.request(serde_json::json!({"command":"start","host":host,"app":app,"settings":core::stream_settings(&self.saved),"client_center":{"x":f32::from(window.bounds().center().x)*window.scale_factor(),"y":f32::from(window.bounds().center().y)*window.scale_factor()}})) {
                             self.pending = true;
                             self.stage = "正在啟動串流…".into();
                             self.modal = Some(Modal::Stream);
@@ -306,6 +408,7 @@ impl Prototype {
         .detach();
     }
     fn poll_core(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        settings::remember_bounds(&self.saved, window);
         let events = self
             .core
             .as_ref()
@@ -317,6 +420,38 @@ impl Prototype {
         let had_modal = self.modal.is_some();
         for event in events {
             match event {
+                core::Event::HostRenamed => {
+                    self.pending = false;
+                    self.modal = None;
+                    self.notice = "主機名稱已更新。".into();
+                }
+                core::Event::HostRemoved { host } => {
+                    self.pending = false;
+                    self.modal = None;
+                    self.notice = "已移除此客戶端的主機記錄。".into();
+                    if self.selected.as_ref() == Some(&host) {
+                        self.selected = None;
+                        self.host_displays.clear();
+                        self.page = Page::Devices;
+                    }
+                }
+                core::Event::AppQuit => {
+                    self.pending = false;
+                    self.modal = None;
+                    self.notice = "主機程式已結束。".into();
+                }
+                core::Event::Displays { host, displays } => {
+                    self.pending = false;
+                    if Some(&host) == self.selected.as_ref() {
+                        self.host_displays = displays;
+                        self.notice = if self.host_displays.is_empty() {
+                            "主機未回報螢幕，可跟隨主機設定或手動輸入識別碼。"
+                        } else {
+                            "已讀取主機螢幕清單。"
+                        }
+                        .into();
+                    }
+                }
                 core::Event::Ready { .. } => {
                     self.ready = true;
                     self.notice = "核心已就緒，請新增或選取裝置。".into();
@@ -327,7 +462,7 @@ impl Prototype {
                 core::Event::Added => {
                     self.pending = false;
                     self.modal = None;
-                    self.notice = "主機已新增，請點選卡片配對。".into();
+                    self.notice = "主機已新增，請按「開始 PIN 碼配對」。".into();
                 }
                 core::Event::Pairing { host, pin } => {
                     self.selected = Some(host);
@@ -358,7 +493,7 @@ impl Prototype {
                     if matches!(self.modal, Some(Modal::Stream)) {
                         self.modal = None;
                     }
-                    self.notice = "串流已結束；主機上的程式保持開啟。".into();
+                    self.notice = "串流已結束。".into();
                     window.activate_window();
                 }
                 core::Event::Error { code, message } => {
@@ -398,18 +533,17 @@ impl Render for Prototype {
             .tab_group()
             .tab_stop(false)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if matches!(this.modal, Some(Modal::Add)) && this.modal_focus.is_focused(window) {
+                if matches!(
+                    this.modal,
+                    Some(Modal::Add | Modal::EditValue(_) | Modal::RenameHost(_))
+                ) && this.modal_focus.is_focused(window)
+                {
                     let key = &event.keystroke;
                     if key.key == "backspace" {
                         this.address.pop();
                     } else if key.modifiers.control && key.key == "v" {
                         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                            this.address = text
-                                .trim()
-                                .chars()
-                                .filter(|c| c.is_ascii_graphic())
-                                .take(260)
-                                .collect();
+                            this.address = input::filter_text(text.trim(), this.unicode_input());
                         }
                     } else if key.modifiers.control && key.key == "a" {
                         this.address.clear();
@@ -507,7 +641,7 @@ impl Render for Prototype {
                         .text_size(px(12.))
                         .text_color(rgb(MUTED))
                         .child(self.tr(if self.notice.is_empty() {
-                            "區網自動搜尋已關閉。使用手動 IP／Tailscale；串流使用主螢幕。"
+                            "使用手動 IP／Tailscale 連線；串流依已儲存的顯示設定啟動。"
                         } else {
                             &self.notice
                         })),
@@ -516,12 +650,28 @@ impl Render for Prototype {
             .when(self.modal.is_some(), |d| d.child(self.modal(cx)))
     }
 }
+impl Prototype {
+    fn unicode_input(&self) -> bool {
+        matches!(
+            self.modal,
+            Some(Modal::RenameHost(_) | Modal::EditValue("host_display"))
+        )
+    }
+}
 fn main() {
     Application::new().with_assets(Assets).run(|cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
+        let (startup, _) = settings::load();
+        let bounds = settings::launcher_bounds(&startup)
+            .filter(|b| cx.displays().iter().any(|d| d.bounds().intersects(b)))
+            .unwrap_or_else(|| Bounds::centered(None, size(px(1280.), px(800.)), cx));
+        let startup_bounds = match startup.option("ui_window").as_u64().unwrap() {
+            1 => WindowBounds::Maximized(bounds),
+            2 => WindowBounds::Fullscreen(bounds),
+            _ => WindowBounds::Windowed(bounds),
+        };
         cx.open_window(
             WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                window_bounds: Some(startup_bounds),
                 window_min_size: Some(size(px(600.), px(500.))),
                 titlebar: Some(TitlebarOptions {
                     title: Some("Moonlight V+ Lite — GPUI Integration".into()),

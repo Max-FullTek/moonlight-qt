@@ -1266,6 +1266,12 @@ bool Session::initialize(QQuickWindow* qtWindow)
         return false;
     }
 
+#ifdef Q_OS_WIN32
+    if (m_GpuiClientDisplay>=0) {
+        QScreen* screen=qtScreenForSdlDisplay(m_GpuiClientDisplay);
+        if (screen) m_ClientDisplayName=screen->name();
+    }
+#endif
     // Stop text input. SDL enables it by default
     // when we initialize the video subsystem, but this
     // causes an IME popup when certain keys are held down
@@ -1972,7 +1978,7 @@ private:
 void Session::getWindowDimensions(int& x, int& y,
                                   int& width, int& height)
 {
-    int displayIndex = 0;
+    int displayIndex = m_GpuiClientDisplay>=0 ? m_GpuiClientDisplay : 0;
 
     if (m_Window != nullptr) {
         displayIndex = SDL_GetWindowDisplayIndex(m_Window);
@@ -1981,9 +1987,7 @@ void Session::getWindowDimensions(int& x, int& y,
     // Create our window on the same display that Qt's UI
     // was being displayed on.
     else {
-        // Windows GPUI core mode has no Qt frontend window. SDL display 0 is
-        // the first integration's explicit fallback; existing Qt window-based
-        // monitor selection below remains unchanged.
+        // GPUI supplies a native SDL display index; Qt callers use their window.
 #ifndef Q_OS_WIN32
         Q_ASSERT(m_QtWindow != nullptr);
 #endif
@@ -4143,6 +4147,10 @@ void Session::exec()
     m_MenuPanel = new OverlayMenuPanel(m_WaylandStreamWindow, overlayWindowMode);
     m_MenuButton = nullptr;
     m_Toast = new OverlayToast(m_WaylandStreamWindow, overlayWindowMode);
+    // The GPUI worker has no QML StreamSegue to present launch warnings.
+    if (m_GpuiClientDisplay >= 0 && !m_LaunchWarnings.isEmpty()) {
+        showStreamingToast(m_LaunchWarnings.join(QLatin1Char('\n')), 5000);
+    }
 #ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS
     // Developer-only harness: Session supplies integration callbacks while
     // the test class owns the panel, picker, replay scheduler, and cleanup.

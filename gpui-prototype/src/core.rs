@@ -38,19 +38,45 @@ impl Host {
             .map(|app| app.id)
     }
 }
+#[derive(Clone, Debug, Deserialize)]
+pub struct HostDisplay {
+    pub name: String,
+    pub target: String,
+}
 #[derive(Debug, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
-    Ready { qml_loaded: bool },
-    Hosts { hosts: Vec<Host> },
-    Pairing { host: String, pin: String },
+    Ready {
+        qml_loaded: bool,
+    },
+    Hosts {
+        hosts: Vec<Host>,
+    },
+    Displays {
+        host: String,
+        displays: Vec<HostDisplay>,
+    },
+    Pairing {
+        host: String,
+        pin: String,
+    },
     Paired,
     Added,
+    HostRenamed,
+    HostRemoved {
+        host: String,
+    },
+    AppQuit,
     Launching,
-    Stage { stage: String },
+    Stage {
+        stage: String,
+    },
     StreamStarted,
     StreamFinished,
-    Error { code: String, message: String },
+    Error {
+        code: String,
+        message: String,
+    },
 }
 pub struct Client {
     commands: Option<mpsc::Sender<Value>>,
@@ -123,6 +149,18 @@ impl Client {
             let mut ready = false;
             for line in BufReader::new(stdout).lines() {
                 let event = line.ok().and_then(|line| decode(&line).ok());
+                if let Some(Event::Error { code, .. }) = &event {
+                    if let Ok(mut log) = std::fs::OpenOptions::new().create(true).append(true).open(
+                        super::settings::preferences_path().with_file_name("operation-errors.log"),
+                    ) {
+                        let _ = writeln!(
+                            log,
+                            "{:?} core_error={}",
+                            std::time::SystemTime::now(),
+                            code
+                        );
+                    }
+                }
                 match event {
                     Some(Event::Ready { qml_loaded: false }) if !ready => {
                         ready = true;
@@ -179,10 +217,11 @@ fn decode(line: &str) -> anyhow::Result<Event> {
     Ok(serde_json::from_value(value)?)
 }
 pub fn stream_settings(s: &super::settings::Settings) -> Value {
-    let (width, height) = [(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)][s.resolution];
-    json!({"width":width,"height":height,"fps":([30,60,90,120,144][s.fps]),"codec":s.codec,
+    let (width, height) = s.dimensions();
+    json!({"width":width,"height":height,"fps":s.frame_rate(),"codec":s.codec,
         "bitrate":s.bitrate,"abr":s.abr,"fec":match s.fec {0=>-2,1=>-1,_=>s.fec_percent as i32},
         "enhancement":s.enhancement,"scale":s.scale,"scale_percent":s.scale_percent,
+        "advanced":s.advanced_values(),"auto_resolution":s.resolution==5,
         "display":{"window_mode":s.window_mode,"decoder":s.decoder,"hdr":s.hdr,"vsync":s.vsync,"frame_pacing":s.frame_pacing}})
 }
 #[cfg(test)]
@@ -225,5 +264,40 @@ mod tests {
             configured["display"],
             json!({"window_mode":1,"decoder":2,"hdr":true,"vsync":false,"frame_pacing":true})
         );
+    }
+    #[test]
+    fn custom_display_and_retained_options_reach_the_worker() {
+        let mut settings = super::super::settings::Settings {
+            resolution: 4,
+            fps: 5,
+            ..Default::default()
+        };
+        for (key, value) in [
+            ("custom_width", json!(3440)),
+            ("custom_height", json!(1440)),
+            ("custom_fps", json!(165)),
+            ("host_display", json!("螢幕-2")),
+            ("vdd", json!(2)),
+            ("quit_host", json!(true)),
+            ("hdr_min", json!(0.01)),
+        ] {
+            settings.advanced.insert(key.into(), value);
+        }
+        let request = stream_settings(&settings);
+        assert_eq!(request["width"], 3440);
+        assert_eq!(request["height"], 1440);
+        assert_eq!(request["fps"], 165);
+        assert_eq!(request["advanced"]["host_display"], "螢幕-2");
+        assert_eq!(request["advanced"]["vdd"], 2);
+        assert_eq!(request["advanced"]["quit_host"], true);
+        assert_eq!(request["advanced"]["hdr_min"], 0.01);
+        assert!(request["advanced"].get("microphone").is_none());
+        settings.resolution = 5;
+        assert_eq!(stream_settings(&settings)["auto_resolution"], true);
+        assert!(matches!(decode(r#"{"protocol":1,"event":"displays","host":"h","displays":[{"name":"Display 2","target":"id-2"}]}"#).unwrap(), Event::Displays { .. }));
+        assert!(matches!(
+            decode(r#"{"protocol":1,"event":"host_removed","host":"h"}"#).unwrap(),
+            Event::HostRemoved { .. }
+        ));
     }
 }

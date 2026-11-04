@@ -58,6 +58,13 @@ impl Prototype {
                             | Action::Stop
                             | Action::Choose(_, _)
                             | Action::AppPreferences(_, _, _)
+                            | Action::SetAdvanced(_, _)
+                            | Action::SubmitValue(_)
+                            | Action::SubmitHostName(_)
+                            | Action::RenameHost(_)
+                            | Action::ConfirmRemove(_)
+                            | Action::RemoveHost(_)
+                            | Action::QuitHostApp
                     ),
             )
             .cursor_pointer()
@@ -156,8 +163,23 @@ impl Prototype {
                         )
                         .child(self.button(
                             ("host-apps", i),
-                            "開啟程式清單",
-                            Action::OpenApps(i),
+                            if host.paired {
+                                "開啟程式清單"
+                            } else {
+                                "開始 PIN 碼配對"
+                            },
+                            if host.paired {
+                                Action::OpenApps(i)
+                            } else {
+                                Action::Device(i)
+                            },
+                            false,
+                            cx,
+                        ))
+                        .child(self.button(
+                            ("host-options", i),
+                            "裝置選項",
+                            Action::HostOptions(host.id.clone()),
                             false,
                             cx,
                         ))
@@ -177,6 +199,15 @@ impl Prototype {
             .overflow_y_scroll()
             .p_8()
             .child(self.button("back", "‹ 返回裝置", Action::Devices, false, cx))
+            .when(host.is_some_and(|h| h.current_app != 0), |d| {
+                d.child(self.button(
+                    "quit-host-app",
+                    "結束主機程式",
+                    Action::ConfirmQuit,
+                    false,
+                    cx,
+                ))
+            })
             .child(
                 div()
                     .mt_6()
@@ -236,7 +267,11 @@ impl Prototype {
                             ))
                             .child(self.button(
                                 ("start", i),
-                                "開始串流",
+                                if host.is_some_and(|h| h.current_app == app.id) {
+                                    "恢復串流"
+                                } else {
+                                    "開始串流"
+                                },
                                 Action::Stream(app.id),
                                 true,
                                 cx,
@@ -427,39 +462,15 @@ impl Prototype {
             .bg(rgb(0x131b24))
             .border_r_1()
             .border_color(rgb(BORDER))
-            .child(self.button(
-                "stream-tab",
-                "串流",
-                Action::SettingsTab(SettingsTab::Stream),
-                self.settings_tab == SettingsTab::Stream,
-                cx,
-            ))
-            .child(self.button(
-                "display-tab",
-                "顯示",
-                Action::SettingsTab(SettingsTab::Display),
-                self.settings_tab == SettingsTab::Display,
-                cx,
-            ))
-            .child(self.button(
-                "interface-tab",
-                "介面",
-                Action::SettingsTab(SettingsTab::Interface),
-                self.settings_tab == SettingsTab::Interface,
-                cx,
-            ))
-            .children(
-                ["音效", "主機", "鍵盤與滑鼠", "手把", "相容性與診斷"]
-                    .into_iter()
-                    .map(|label| div().p_3().text_color(rgb(0x647384)).child(self.tr(&label))),
-            )
-            .child(
-                div()
-                    .mt_4()
-                    .text_size(px(11.))
-                    .text_color(rgb(MUTED))
-                    .child(self.tr("已開放串流、顯示與介面語言，其餘分類待後續移植。")),
-            );
+            .children(TABS.iter().enumerate().map(|(i, (tab, label))| {
+                self.button(
+                    ("settings-tab", i),
+                    *label,
+                    Action::SettingsTab(*tab),
+                    self.settings_tab == *tab,
+                    cx,
+                )
+            }));
         let content = div()
             .flex_1()
             .min_w_0()
@@ -475,33 +486,17 @@ impl Prototype {
                     .p_7()
                     .child(div().text_size(px(27.)).mb_2().child(self.tr("設定")))
                     .when(narrow, |d| {
-                        d.child(
-                            div()
-                                .flex()
-                                .gap_3()
-                                .mb_4()
-                                .child(self.button(
-                                    "narrow-stream-tab",
-                                    "串流",
-                                    Action::SettingsTab(SettingsTab::Stream),
-                                    self.settings_tab == SettingsTab::Stream,
+                        d.child(div().flex().flex_wrap().gap_2().mb_4().children(
+                            TABS.iter().enumerate().map(|(i, (tab, label))| {
+                                self.button(
+                                    ("narrow-tab", i),
+                                    *label,
+                                    Action::SettingsTab(*tab),
+                                    self.settings_tab == *tab,
                                     cx,
-                                ))
-                                .child(self.button(
-                                    "narrow-display-tab",
-                                    "顯示",
-                                    Action::SettingsTab(SettingsTab::Display),
-                                    self.settings_tab == SettingsTab::Display,
-                                    cx,
-                                ))
-                                .child(self.button(
-                                    "narrow-interface-tab",
-                                    "介面",
-                                    Action::SettingsTab(SettingsTab::Interface),
-                                    self.settings_tab == SettingsTab::Interface,
-                                    cx,
-                                )),
-                        )
+                                )
+                            }),
+                        ))
                     })
                     .child(
                         div()
@@ -525,7 +520,7 @@ impl Prototype {
                         d.child(div().text_size(px(18.)).mb_2().child(self.tr("畫面")))
                             .child(self.field(
                                 "解析度",
-                                "初版提供常用預設；自訂輸入待補。",
+                                "可使用預設、自訂解析度或跟隨客戶端所在螢幕。",
                                 self.select(Field::Resolution, cx),
                                 narrow,
                             ))
@@ -630,7 +625,8 @@ impl Prototype {
                                     ),
                                 )
                             })
-                    }),
+                    })
+                    .child(self.advanced_fields(narrow, cx)),
             )
             .child(
                 div()
@@ -719,28 +715,145 @@ impl Prototype {
                 self.select(Field::Decoder, cx),
                 narrow,
             ))
-            .child(
-                div()
-                    .mt_6()
-                    .text_color(rgb(MUTED))
-                    .child(self.tr("目前串流在主螢幕啟動；螢幕選擇與其他進階顯示設定尚未移植。")),
-            )
             .into_any_element()
+    }
+    fn advanced_fields(&self, narrow: bool, cx: &Context<Self>) -> AnyElement {
+        let mut fields = div();
+        if self.settings_tab == SettingsTab::Host {
+            fields = fields.child(self.button(
+                "refresh-displays",
+                "讀取已選主機的螢幕清單",
+                Action::FetchDisplays,
+                false,
+                cx,
+            ));
+            for (i, display) in self.host_displays.iter().enumerate() {
+                fields = fields.child(self.button(
+                    ("host-display", i),
+                    display.name.clone(),
+                    Action::SetAdvanced("host_display", serde_json::json!(display.target)),
+                    self.draft.option("host_display") == serde_json::json!(display.target),
+                    cx,
+                ));
+            }
+        }
+        for spec in advanced::OPTIONS
+            .iter()
+            .filter(|s| s.category == self.settings_tab.category())
+        {
+            if (spec.key.starts_with("hdr_")
+                && (!self.draft.hdr
+                    || (matches!(spec.key, "hdr_peak" | "hdr_min" | "hdr_average")
+                        && self.draft.option("hdr_brightness") != 2)))
+                || (matches!(spec.key, "custom_width" | "custom_height")
+                    && self.draft.resolution != 4)
+                || (spec.key == "custom_fps" && self.draft.fps != 5)
+            {
+                continue;
+            }
+            let value = self.draft.option(spec.key);
+            let control = match spec.kind {
+                advanced::Kind::Toggle(_) => self.toggle(
+                    spec.key,
+                    value.as_bool().unwrap(),
+                    Action::Advanced(spec.key),
+                    cx,
+                ),
+                _ => {
+                    let text = match spec.kind {
+                        advanced::Kind::Choice(options, _) => {
+                            self.tr(options[value.as_u64().unwrap() as usize])
+                        }
+                        advanced::Kind::Text => {
+                            let v = value.as_str().unwrap();
+                            SharedString::from(if v.is_empty() {
+                                self.tr("跟隨主機").to_string()
+                            } else {
+                                v.to_owned()
+                            })
+                        }
+                        _ => SharedString::from(value.to_string()),
+                    };
+                    self.button(spec.key, text, Action::Advanced(spec.key), false, cx)
+                        .into_any_element()
+                }
+            };
+            fields = fields.child(self.field(spec.label, spec.hint, control, narrow));
+        }
+        fields.into_any_element()
     }
     pub fn modal(&self, cx: &Context<Self>) -> AnyElement {
         let mut content = div().flex().flex_col().gap_4();
         let title;
         match self.modal.as_ref().unwrap() {
+            Modal::HostOptions(host) => {
+                title = "裝置選項";
+                content = content
+                    .child(self.button(
+                        "rename-host",
+                        "重新命名",
+                        Action::RenameHost(host.clone()),
+                        false,
+                        cx,
+                    ))
+                    .child(self.button(
+                        "remove-host",
+                        "移除裝置",
+                        Action::ConfirmRemove(host.clone()),
+                        false,
+                        cx,
+                    ));
+            }
+            Modal::ConfirmRemove(host) => {
+                title = "移除裝置";
+                content = content
+                    .child(self.tr("僅移除此客戶端的主機記錄；之後可重新新增並配對。"))
+                    .child(self.button(
+                        "confirm-remove",
+                        "確認移除",
+                        Action::RemoveHost(host.clone()),
+                        true,
+                        cx,
+                    ));
+            }
+            Modal::ConfirmQuit => {
+                title = "結束主機程式";
+                content = content
+                    .child(self.tr("未儲存的進度可能遺失。確定要結束主機上正在執行的程式？"))
+                    .child(self.button(
+                        "confirm-quit",
+                        "確認結束程式",
+                        Action::QuitHostApp,
+                        true,
+                        cx,
+                    ));
+            }
             Modal::Info(t, body) => {
                 title = *t;
                 content = content.child(self.tr(body));
             }
-            Modal::Add => {
+            Modal::Add | Modal::EditValue(_) | Modal::RenameHost(_) => {
                 let entity = cx.entity();
                 let focus = self.modal_focus.clone();
-                title = "新增裝置";
+                let edit_key = match self.modal {
+                    Some(Modal::EditValue(key)) => Some(key),
+                    _ => None,
+                };
+                title = edit_key
+                    .map(|k| advanced::spec(k).unwrap().label)
+                    .unwrap_or(if matches!(self.modal, Some(Modal::RenameHost(_))) {
+                        "重新命名"
+                    } else {
+                        "新增裝置"
+                    });
                 content = content
-                    .child(self.tr("輸入 IP／主機名稱，可附連接埠。支援貼上；Ctrl+A 清空。"))
+                    .child(self.tr(
+                        if edit_key.is_some() || matches!(self.modal, Some(Modal::RenameHost(_))) {
+                            "輸入新值；支援貼上，Ctrl+A 清空。"
+                        } else {
+                            "輸入 IP／主機名稱，可附連接埠。支援貼上；Ctrl+A 清空。"
+                        },
+                    ))
                     .child(
                         div()
                             .id("address-input")
@@ -771,7 +884,23 @@ impl Prototype {
                             ),
                     )
                     .child(self.tr(&self.notice))
-                    .child(self.button("submit-address", "連線", Action::SubmitAddress, true, cx));
+                    .child(self.button(
+                        "submit-address",
+                        if edit_key.is_some() || matches!(self.modal, Some(Modal::RenameHost(_))) {
+                            "套用"
+                        } else {
+                            "新增主機"
+                        },
+                        if let Some(Modal::RenameHost(host)) = &self.modal {
+                            Action::SubmitHostName(host.clone())
+                        } else {
+                            edit_key
+                                .map(Action::SubmitValue)
+                                .unwrap_or(Action::SubmitAddress)
+                        },
+                        true,
+                        cx,
+                    ));
             }
             Modal::Pair(pin) => {
                 title = "配對主機";
@@ -829,6 +958,21 @@ impl Prototype {
                         ));
                 }
             }
+            Modal::Advanced(key) => {
+                let spec = advanced::spec(key).unwrap();
+                title = spec.label;
+                if let advanced::Kind::Choice(options, _) = spec.kind {
+                    content = content.children(options.iter().enumerate().map(|(i, v)| {
+                        self.button(
+                            ("advanced-choice", i),
+                            self.tr(v),
+                            Action::SetAdvanced(key, serde_json::json!(i)),
+                            self.draft.option(key) == serde_json::json!(i),
+                            cx,
+                        )
+                    }));
+                }
+            }
             Modal::Select(field) => {
                 let (t, options, current) = match field {
                     Field::Resolution => ("解析度", RESOLUTIONS, self.draft.resolution),
@@ -870,6 +1014,9 @@ impl Prototype {
             .p_5()
             .child(
                 div()
+                    .id("modal-scroll")
+                    .overflow_y_scroll()
+                    .max_h(relative(0.90))
                     .w(px(500.))
                     .max_w_full()
                     .p_6()

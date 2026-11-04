@@ -1,5 +1,10 @@
 #include "gpuicorebridge.h"
 #include "computermanager.h"
+#include "nvhttp.h"
+#include "streaming/streamutils.h"
+#include "SDL_compat.h"
+#include <cmath>
+#include <QDebug>
 #include "streaming/session.h"
 #include "settings/streamingpreferences.h"
 
@@ -10,7 +15,7 @@
 #include <QReadLocker>
 #include <QWriteLocker>
 #include <QRegularExpression>
-#include <QThread>
+#include <QThreadPool>
 #include <QTimer>
 #include <cstdio>
 #include <thread>
@@ -22,12 +27,95 @@ bool integer(const QJsonObject& object, const char* key, int low, int high) {
     return value.isDouble() && value.toDouble() == value.toInt(-999999) &&
             value.toInt() >= low && value.toInt() <= high;
 }
+// Validate all retained settings before mutating preferences. Older protocol-1
+// frontends may omit the advanced object and retain their existing defaults.
+bool validAdvanced(const QJsonObject& a) {
+    const QStringList allowed = {"host_audio","audio","mute_background","screen_mode","vdd","optimize","quit_host","desktop_mouse","local_cursor","capture","swap_mouse","swap_alt","reverse_scroll","touchpad","precision_touchpad","swap_face","deadzone","quit_combo","force_gamepad","gamepad_mouse","background_gamepad","haptics","stats","overlay","yuv444","connection_warnings","configuration_warnings","keep_awake","ui_window","remember_window","hdr_format","hdr_brightness","hdr_peak","hdr_min","hdr_average","client_display","custom_width","custom_height","custom_fps","host_display"};
+    for (auto it=a.begin();it!=a.end();++it) if (!allowed.contains(it.key())) return false;
+    if (!(a["host_audio"].isBool())) return false;
+    if (!(integer(a,"audio",0,3))) return false;
+    if (!(a["mute_background"].isBool())) return false;
+    if (!(integer(a,"screen_mode",0,5))) return false;
+    if (!(integer(a,"vdd",0,2))) return false;
+    if (!(a["optimize"].isBool())) return false;
+    if (!(a["quit_host"].isBool())) return false;
+    if (!(a["desktop_mouse"].isBool())) return false;
+    if (!(a["local_cursor"].isBool())) return false;
+    if (!(integer(a,"capture",0,2))) return false;
+    if (!(a["swap_mouse"].isBool())) return false;
+    if (!(a["swap_alt"].isBool())) return false;
+    if (!(a["reverse_scroll"].isBool())) return false;
+    if (!(a["touchpad"].isBool())) return false;
+    if (!(a["precision_touchpad"].isBool())) return false;
+    if (!(a["swap_face"].isBool())) return false;
+    if (!(integer(a,"deadzone",0,30))) return false;
+    if (!(integer(a,"quit_combo",0,5))) return false;
+    if (!(a["force_gamepad"].isBool())) return false;
+    if (!(a["gamepad_mouse"].isBool())) return false;
+    if (!(a["background_gamepad"].isBool())) return false;
+    if (!(integer(a,"haptics",0,1))) return false;
+    if (!(a["stats"].isBool())) return false;
+    if (!(integer(a,"overlay",0,4))) return false;
+    if (!(a["yuv444"].isBool())) return false;
+    if (!(a["connection_warnings"].isBool())) return false;
+    if (!(a["configuration_warnings"].isBool())) return false;
+    if (!(a["keep_awake"].isBool())) return false;
+    if (!(integer(a,"ui_window",0,2))) return false;
+    if (!(a["remember_window"].isBool())) return false;
+    if (!(integer(a,"hdr_format",0,1))) return false;
+    if (!(integer(a,"hdr_brightness",0,2))) return false;
+    if (!((a["hdr_peak"].isDouble() && std::isfinite(a["hdr_peak"].toDouble()) && a["hdr_peak"].toDouble()>=1 && a["hdr_peak"].toDouble()<=10000))) return false;
+    if (!((a["hdr_min"].isDouble() && std::isfinite(a["hdr_min"].toDouble()) && a["hdr_min"].toDouble()>=0 && a["hdr_min"].toDouble()<=10))) return false;
+    if (!((a["hdr_average"].isDouble() && std::isfinite(a["hdr_average"].toDouble()) && a["hdr_average"].toDouble()>=1 && a["hdr_average"].toDouble()<=10000))) return false;
+    if (!(integer(a,"client_display",0,16))) return false;
+    if (!(integer(a,"custom_width",256,8192))) return false;
+    if (!(integer(a,"custom_height",256,8192))) return false;
+    if (!(integer(a,"custom_fps",1,512))) return false;
+    if (!((a["host_display"].isString() && a["host_display"].toString().size()<=256 && !a["host_display"].toString().contains(QRegularExpression("[\\x00-\\x1f\\x7f]"))))) return false;
+    return a["hdr_min"].toDouble()<=a["hdr_average"].toDouble() && a["hdr_average"].toDouble()<=a["hdr_peak"].toDouble();
+}
+void applyAdvanced(const QJsonObject& a, StreamingPreferences* prefs) {
+    prefs->playAudioOnHost = a["host_audio"].toBool();
+    prefs->audioConfig = static_cast<decltype(prefs->audioConfig)>(a["audio"].toInt());
+    prefs->muteOnFocusLoss = a["mute_background"].toBool();
+    prefs->screenCombinationMode = static_cast<decltype(prefs->screenCombinationMode)>(a["screen_mode"].toInt()-1);
+    prefs->gameOptimizations = a["optimize"].toBool();
+    prefs->quitAppAfter = a["quit_host"].toBool();
+    prefs->absoluteMouseMode = a["desktop_mouse"].toBool();
+    prefs->showLocalCursor = a["local_cursor"].toBool();
+    prefs->captureSysKeysMode = static_cast<decltype(prefs->captureSysKeysMode)>(a["capture"].toInt());
+    prefs->swapMouseButtons = a["swap_mouse"].toBool();
+    prefs->swapWinAltKeys = a["swap_alt"].toBool();
+    prefs->reverseScrollDirection = a["reverse_scroll"].toBool();
+    prefs->absoluteTouchMode = !a["touchpad"].toBool();
+    prefs->enableNativeTouchpad = a["precision_touchpad"].toBool();
+    prefs->swapFaceButtons = a["swap_face"].toBool();
+    prefs->gamepadDeadzone = a["deadzone"].toInt();
+    prefs->gamepadQuitCombo = static_cast<decltype(prefs->gamepadQuitCombo)>((a["quit_combo"].toInt()==0 ? 0 : a["quit_combo"].toInt()+1));
+    prefs->multiController = !a["force_gamepad"].toBool();
+    prefs->gamepadMouse = a["gamepad_mouse"].toBool();
+    prefs->backgroundGamepad = a["background_gamepad"].toBool();
+    prefs->dualSenseHapticsMode = static_cast<decltype(prefs->dualSenseHapticsMode)>(a["haptics"].toInt());
+    prefs->showPerformanceOverlay = a["stats"].toBool();
+    prefs->setOverlayMenuPosition(static_cast<StreamingPreferences::OverlayMenuPosition>(a["overlay"].toInt()));
+    prefs->enableYUV444 = a["yuv444"].toBool();
+    prefs->connectionWarnings = a["connection_warnings"].toBool();
+    prefs->configurationWarnings = a["configuration_warnings"].toBool();
+    prefs->keepAwake = a["keep_awake"].toBool();
+    prefs->hdrMode = static_cast<decltype(prefs->hdrMode)>(a["hdr_format"].toInt()+1);
+    prefs->hdrBrightnessMode = static_cast<decltype(prefs->hdrBrightnessMode)>(a["hdr_brightness"].toInt());
+    prefs->hdrMaxBrightness = a["hdr_peak"].toDouble();
+    prefs->hdrMinBrightness = a["hdr_min"].toDouble();
+    prefs->hdrMaxAverageBrightness = a["hdr_average"].toDouble();
+}
 bool applySettings(const QJsonObject& value, StreamingPreferences* prefs) {
     if (!integer(value, "width", 256, 8192) || !integer(value, "height", 256, 8192) ||
-        !integer(value, "fps", 1, 240) || !integer(value, "bitrate", 1, 150) ||
+        !integer(value, "fps", 1, 512) || !integer(value, "bitrate", 1, 150) ||
         !integer(value, "fec", -2, 100) || !integer(value, "scale_percent", 20, 100) ||
         !integer(value, "codec", 0, 3) || !value["abr"].isBool() ||
         !value["enhancement"].isBool() || !value["scale"].isBool()) return false;
+    if (value.contains("advanced") && (!value["advanced"].isObject() || !validAdvanced(value["advanced"].toObject()))) return false;
+    if (value.contains("auto_resolution") && !value["auto_resolution"].isBool()) return false;
     // Display options are additive in protocol 1. Older frontends retain the
     // first integration's explicit defaults; malformed new options are rejected
     // before any preferences are changed.
@@ -57,9 +145,12 @@ bool applySettings(const QJsonObject& value, StreamingPreferences* prefs) {
     prefs->videoDecoderSelection = static_cast<StreamingPreferences::VideoDecoderSelection>(display["decoder"].toInt());
     prefs->enableVsync = display["vsync"].toBool();
     prefs->framePacing = display["frame_pacing"].toBool();
-    // No host app is ever quit implicitly, including on parent disconnect.
+    // Quit-after-stream is opt-in through the retained advanced setting.
     prefs->quitAppAfter = false;
     prefs->enableHdr = display["hdr"].toBool();
+    if (value.contains("advanced")) applyAdvanced(value["advanced"].toObject(),prefs);
+    // These features remain excluded even when an older profile enabled them.
+    prefs->enableMicrophone=false; prefs->ignoreAspectRatio=false;
     return true;
 }
 }
@@ -72,6 +163,18 @@ GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent) {
     prefs->quitAppAfter = false;
     m_Manager = new ComputerManager(prefs);
     m_Manager->setParent(this);
+    connect(m_Manager, &ComputerManager::hostDeleted, this, [this](const QString& uuid) {
+        m_DeletingHost = nullptr;
+        send({{"event", "host_removed"}, {"host", uuid}});
+        publishHosts();
+    });
+    connect(m_Manager, &ComputerManager::quitAppCompleted, this, [this](QVariant error) {
+        if (!m_QuitPending) return;
+        m_QuitPending = false;
+        if (error.isNull() || error.toString().isEmpty()) send({{"event", "app_quit"}});
+        else fail("quit_failed", error.toString());
+        publishHosts();
+    });
     connect(m_Manager, &ComputerManager::computerStateChanged, this, [this] { publishHosts(); });
     connect(m_Manager, &ComputerManager::computerAddCompleted, this, [this](QVariant success, QVariant) {
         m_AddPending = false;
@@ -82,7 +185,10 @@ GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent) {
     connect(m_Manager, &ComputerManager::pairingCompleted, this, [this](NvComputer*, QString error) {
         m_PairingHost.clear();
         if (error.isEmpty()) send({{"event", "paired"}});
-        else fail("pair_failed", error);
+        else {
+            const auto code=error.contains("PIN",Qt::CaseInsensitive)?"pair_pin_mismatch":error.contains("already",Qt::CaseInsensitive)?"pair_already_active":error.contains("timed out",Qt::CaseInsensitive)?"pair_timeout":"pair_failed";
+            fail(code, error);
+        }
         publishHosts();
     });
 }
@@ -95,6 +201,7 @@ void GpuiCoreBridge::send(QJsonObject event) {
     }
 }
 void GpuiCoreBridge::fail(const QString& code, const QString& message) {
+    qWarning() << "GPUI operation failed:" << code;
     send({{"event", "error"}, {"code", code}, {"message", message}});
 }
 void GpuiCoreBridge::start() {
@@ -125,6 +232,7 @@ void GpuiCoreBridge::start() {
 void GpuiCoreBridge::publishHosts() {
     QJsonArray hosts;
     for (auto* host : m_Manager->getComputers()) {
+        if (host == m_DeletingHost) continue;
         QReadLocker lock(&host->lock);
         QJsonArray apps;
         for (const auto& app : host->appList) apps.append(QJsonObject{{"id", app.id}, {"name", app.name}, {"hidden", app.hidden}, {"direct_launch", app.directLaunch}});
@@ -137,7 +245,7 @@ void GpuiCoreBridge::publishHosts() {
     send({{"event", "hosts"}, {"hosts", hosts}});
 }
 NvComputer* GpuiCoreBridge::findHost(const QString& uuid) {
-    for (auto* host : m_Manager->getComputers()) if (host->uuid == uuid) return host;
+    for (auto* host : m_Manager->getComputers()) if (host != m_DeletingHost && host->uuid == uuid) return host;
     return nullptr;
 }
 void GpuiCoreBridge::shutdown() {
@@ -158,7 +266,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
     if (name == "shutdown") { shutdown(); return; }
     if (name == "list") { publishHosts(); return; }
     if (name == "stop") { if (m_Session) m_Session->interrupt(); return; }
-    if (m_Session || m_AddPending || !m_PairingHost.isEmpty()) { fail("busy", tr("Another operation is still active.")); return; }
+    if (m_Session || m_AddPending || m_DeletingHost || m_QuitPending || !m_PairingHost.isEmpty()) { fail("busy", tr("Another operation is still active.")); return; }
     if (name == "add") {
         const auto address = request.value("address").toString().trimmed();
         if (address.isEmpty() || address.size() > 260 || address.contains(QRegularExpression("[\\s/\\\\?#@]"))) {
@@ -168,9 +276,65 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         m_Manager->addNewHostManually(address);
         return;
     }
-    if (name != "pair" && name != "start" && name != "app_preferences") { fail("unknown_command", tr("Unknown command.")); return; }
+    if (name != "pair" && name != "start" && name != "app_preferences" && name != "displays" &&
+            name != "rename" && name != "remove" && name != "quit") { fail("unknown_command", tr("Unknown command.")); return; }
     auto* host = findHost(request.value("host").toString());
     if (!host) { fail("host_not_found", tr("Host not found.")); return; }
+    if (name == "rename") {
+        const auto label = request["name"].toString().trimmed();
+        if (label.isEmpty() || label.size() > 128 || label.contains(QRegularExpression("[\\x00-\\x1f\\x7f]"))) {
+            fail("invalid_name", tr("Enter a host name between 1 and 128 characters.")); return;
+        }
+        m_Manager->renameHost(host, label);
+        send({{"event", "host_renamed"}});
+        return;
+    }
+    if (name == "remove") {
+        m_DeletingHost = host;
+        m_Manager->deleteHost(host);
+        return;
+    }
+    if (name == "quit") {
+        { QReadLocker lock(&host->lock);
+          if (host->pairState != NvComputer::PS_PAIRED || host->state != NvComputer::CS_ONLINE) {
+              fail("not_ready", tr("Host must be online and paired.")); return;
+          }
+          if (host->currentGameId == 0) { send({{"event", "app_quit"}}); return; }
+        }
+        m_QuitPending = true;
+        m_Manager->quitRunningApp(host);
+        return;
+    }
+    if (name == "displays") {
+        NvAddress address;
+        uint16_t httpsPort;
+        QSslCertificate certificate;
+        QString uuid;
+        bool useTrueUid;
+        {
+            QReadLocker lock(&host->lock);
+            if (host->pairState != NvComputer::PS_PAIRED || host->state != NvComputer::CS_ONLINE) {
+                fail("not_ready", tr("Host must be online and paired.")); return;
+            }
+            address = host->activeAddress;
+            httpsPort = host->activeHttpsPort;
+            certificate = host->serverCert;
+            uuid = host->uuid;
+            useTrueUid = !host->isNvidiaServerSoftware;
+        }
+        m_AddPending = true;
+        // The existing application shutdown waits for this pool. Snapshot the
+        // connection under the host lock; the HTTP worker owns no host pointer.
+        QThreadPool::globalInstance()->start(QRunnable::create([this, address, httpsPort, certificate, uuid, useTrueUid] {
+            NvHTTP http(address, httpsPort, certificate, useTrueUid, nullptr, uuid);
+            const auto displays = QJsonArray::fromVariantList(http.getDisplays());
+            QMetaObject::invokeMethod(this, [this, uuid, displays] {
+                m_AddPending = false;
+                send({{"event", "displays"}, {"host", uuid}, {"displays", displays}});
+            }, Qt::QueuedConnection);
+        }));
+        return;
+    }
     if (name == "app_preferences") {
         if (!request["hidden"].isBool() || !request["direct_launch"].isBool() ||
             !integer(request, "app", 1, 2147483647) ||
@@ -218,7 +382,28 @@ void GpuiCoreBridge::command(const QByteArray& line) {
     if (!applySettings(request.value("settings").toObject(), preferences)) {
         fail("invalid_settings", tr("Streaming settings are invalid.")); return;
     }
-    auto* session = new Session(host, selected, preferences);
+    const auto settings=request["settings"].toObject();
+    const auto advanced=settings["advanced"].toObject();
+    int clientDisplay=advanced.value("client_display").toInt(0)-1;
+    if (clientDisplay<0) {
+        clientDisplay=0;
+        const auto center=request["client_center"].toObject();
+        if (center.contains("x") && center.contains("y")) {
+            const double x=center["x"].toDouble(),y=center["y"].toDouble();
+            for (int i=0;i<SDL_GetNumVideoDisplays();++i) {SDL_Rect r;if (SDL_GetDisplayBounds(i,&r)==0 && x>=r.x && x<r.x+r.w && y>=r.y && y<r.y+r.h) {clientDisplay=i;break;}}
+        }
+    }
+    if (clientDisplay>=SDL_GetNumVideoDisplays()) {fail("display_unavailable",tr("Selected client monitor is no longer available."));return;}
+    if (settings["auto_resolution"].toBool()) {
+        SDL_DisplayMode mode;SDL_Rect safeArea;
+        if (!StreamUtils::getNativeDesktopMode(clientDisplay,&mode,&safeArea) || mode.w<256 || mode.h<256 || mode.w>8192 || mode.h>8192) {fail("display_mode_unavailable",tr("Unable to read the selected client monitor resolution."));return;}
+        preferences->width=mode.w;preferences->height=mode.h;
+        // Existing launch mode negotiation requests the matching host/VDD mode.
+        preferences->remoteResolution=false;
+    }
+    const int vdd=advanced["vdd"].toInt();
+    auto* session = new Session(host, selected, preferences,advanced["host_display"].toString(),vdd==0?std::nullopt:std::optional<bool>(vdd==2));
+    session->setClientDisplay(clientDisplay);
     m_Session = session;
     connect(session, &Session::stageStarting, this, [this](QString stage) { send({{"event", "stage"}, {"stage", stage}}); });
     connect(session, &Session::stageFailed, this, [this](QString stage, int code, QString) {

@@ -127,6 +127,8 @@ public:
                      std::optional<bool> launchUseVdd = std::nullopt);
     virtual ~Session();
 
+    // Set only by the Windows GPUI bridge before initialize(). Qt callers retain -1.
+    void setClientDisplay(int display) { m_GpuiClientDisplay = display; }
     Q_INVOKABLE bool initialize(QQuickWindow* qtWindow);
     Q_INVOKABLE void start();
     Q_INVOKABLE void interrupt();
@@ -176,6 +178,7 @@ signals:
     void launchWarningsChanged();
 
 private:
+    int m_GpuiClientDisplay = -1;
     struct WaylandWindowSnapshot
     {
         QSize size;

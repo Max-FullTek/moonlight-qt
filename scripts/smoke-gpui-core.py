@@ -52,6 +52,10 @@ def check(executable, profile, eof=False):
                     ('{"command":"start","host":"missing"}', 'host_not_found'),
                     ('{"command":"add","address":"https://invalid/"}', 'invalid_address'),
                     ('{"command":"app_preferences","host":"missing","app":1,"hidden":false,"direct_launch":true}', 'host_not_found'),
+                    ('{"command":"rename","host":"missing","name":"Test"}', 'host_not_found'),
+                    ('{"command":"remove","host":"missing"}', 'host_not_found'),
+                    ('{"command":"quit","host":"missing"}', 'host_not_found'),
+                    ('{"command":"displays","host":"missing"}', 'host_not_found'),
                     ('x' * (64 * 1024 + 1), 'request_too_large'),
                 ]:
                     send(request)

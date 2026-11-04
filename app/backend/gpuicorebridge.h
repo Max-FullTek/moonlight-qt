@@ -9,8 +9,8 @@ class NvComputer;
 class Session;
 
 // Protocol 1: newline-delimited JSON on inherited anonymous stdio pipes only.
-// Commands: list, add(address), pair(host), start(host, app, settings), stop,
-// shutdown. All host/session work runs on Qt's main thread. No QML engine is
+// Commands: list, add, pair, rename, remove, quit, displays, app_preferences,
+// start, stop, shutdown. All host/session work is dispatched on Qt's main thread. No QML engine is
 // created. stdout is reserved for protocol events; diagnostics stay on stderr.
 class GpuiCoreBridge : public QObject
 {
@@ -28,6 +28,8 @@ private:
     ComputerManager* m_Manager;
     QPointer<Session> m_Session;
     QString m_PairingHost;
+    NvComputer* m_DeletingHost = nullptr;
+    bool m_QuitPending = false;
     bool m_ShuttingDown = false;
     bool m_AddPending = false;
 };
