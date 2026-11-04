@@ -366,6 +366,14 @@ void SdlInputHandler::updatePointerRegionLock()
             Uint32 fullscreenFlags = SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN_DESKTOP;
             m_PointerRegionLockActive = (fullscreenFlags == SDL_WINDOW_FULLSCREEN) ||
                                         (fullscreenFlags != 0 && SDL_GetNumVideoDisplays() == 1);
+#ifdef Q_OS_WIN32
+            // Borderless desktop sessions behave like a maximized desktop
+            // window, including on a single monitor. Keep the pointer free to
+            // cross the video edges; the explicit lock shortcut still wins.
+            if (m_AbsoluteMouseMode && fullscreenFlags == SDL_WINDOW_FULLSCREEN_DESKTOP) {
+                m_PointerRegionLockActive = false;
+            }
+#endif
         }
     }
 

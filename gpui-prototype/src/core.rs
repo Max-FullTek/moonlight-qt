@@ -253,6 +253,8 @@ mod tests {
         assert_eq!(value["bitrate"], 20);
         assert_eq!(value["fec"], -2);
         assert_eq!(value["language"], 0);
+        assert_eq!(value["display"]["window_mode"], 1);
+        assert_eq!(value["advanced"]["desktop_mouse"], true);
         let configured = stream_settings(&super::super::settings::Settings {
             window_mode: 1,
             decoder: 2,

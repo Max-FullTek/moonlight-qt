@@ -80,7 +80,7 @@ pub const OPTIONS: &[OptionSpec] = &[
         category: "input",
         label: "遠端桌面滑鼠模式",
         hint: "",
-        kind: Toggle(false),
+        kind: Toggle(true),
     },
     OptionSpec {
         key: "local_cursor",

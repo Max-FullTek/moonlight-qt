@@ -14,6 +14,7 @@ pub struct Settings {
     pub enhancement: bool,
     pub scale: bool,
     pub scale_percent: u32,
+    #[serde(default = "legacy_window_mode")]
     pub window_mode: usize,
     pub decoder: usize,
     pub hdr: bool,
@@ -21,6 +22,8 @@ pub struct Settings {
     pub frame_pacing: bool,
     pub language: usize,
     pub advanced: std::collections::BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub desktop_defaults_version: u8,
 }
 pub const RESOLUTIONS: &[&str] = &[
     "1280 × 720",
@@ -43,6 +46,9 @@ pub const WINDOW_MODES: &[&str] = &["全螢幕", "無邊框全螢幕", "視窗"]
 pub const DECODERS: &[&str] = &["自動", "僅硬體解碼", "僅軟體解碼"];
 pub const LANGUAGES: &[&str] = &["繁體中文", "简体中文", "English"];
 pub const FEC: &[&str] = &["跟隨主機", "自動", "固定百分比"];
+fn legacy_window_mode() -> usize {
+    2
+}
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -56,17 +62,38 @@ impl Default for Settings {
             enhancement: false,
             scale: false,
             scale_percent: 100,
-            window_mode: 2,
+            window_mode: 1,
             decoder: 0,
             hdr: false,
             vsync: true,
             frame_pacing: false,
             language: 0,
             advanced: Default::default(),
+            desktop_defaults_version: 1,
         }
     }
 }
 impl Settings {
+    fn migrate_desktop_defaults(mut self) -> Self {
+        if self.desktop_defaults_version == 0 {
+            // Upgrade the previous windowed/relative default together. Retain
+            // other display/input combinations that the user has selected.
+            let old_mouse = self
+                .advanced
+                .get("desktop_mouse")
+                .is_none_or(|v| v.as_bool() == Some(false));
+            if self.window_mode == 2 && old_mouse {
+                self.window_mode = 1;
+                self.advanced
+                    .insert("desktop_mouse".into(), serde_json::json!(true));
+            } else if !self.advanced.contains_key("desktop_mouse") {
+                self.advanced
+                    .insert("desktop_mouse".into(), serde_json::json!(false));
+            }
+            self.desktop_defaults_version = 1;
+        }
+        self
+    }
     pub fn option(&self, key: &str) -> serde_json::Value {
         self.advanced.get(key).cloned().unwrap_or_else(|| {
             crate::advanced::spec(key)
@@ -177,7 +204,9 @@ pub fn load() -> (Settings, String) {
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Settings>(&bytes).ok())
     {
-        Some(settings) if settings.validate() => (settings, String::new()),
+        Some(settings) if settings.validate() => {
+            (settings.migrate_desktop_defaults(), String::new())
+        }
         _ => (
             Settings::default(),
             "原型設定無法讀取，已使用預設值；原檔保留。".into(),
@@ -232,10 +261,12 @@ mod tests {
     }
     #[test]
     fn migrate_existing_settings_and_validate_display_choices() {
-        let old: Settings = serde_json::from_str(r#"{"bitrate":42,"resolution":2}"#).unwrap();
+        let old: Settings = serde_json::from_str::<Settings>(r#"{"bitrate":42,"resolution":2}"#)
+            .unwrap()
+            .migrate_desktop_defaults();
         assert_eq!(old.bitrate, 42);
         assert_eq!(old.resolution, 2);
-        assert_eq!(old.window_mode, 2);
+        assert_eq!(old.window_mode, 1);
         assert!(old.vsync);
         assert!(!old.hdr);
         assert!(old.validate());
@@ -275,6 +306,33 @@ mod tests {
             .recommended_bitrate(),
             28
         );
+    }
+    #[test]
+    fn desktop_defaults_upgrade_old_baseline_and_preserve_explicit_modes() {
+        let defaults = Settings::default();
+        assert_eq!(defaults.window_mode, 1);
+        assert_eq!(defaults.option("desktop_mouse"), true);
+        assert_eq!(defaults.option("client_display"), 0.0);
+        let old: Settings = serde_json::from_str(
+            r#"{"window_mode":2,"bitrate":37,"advanced":{"desktop_mouse":false}}"#,
+        )
+        .unwrap();
+        let upgraded = old.migrate_desktop_defaults();
+        assert_eq!(upgraded.window_mode, 1);
+        assert_eq!(upgraded.option("desktop_mouse"), true);
+        assert_eq!(upgraded.bitrate, 37);
+        assert_eq!(upgraded.desktop_defaults_version, 1);
+        let custom: Settings = serde_json::from_str(r#"{"window_mode":0}"#).unwrap();
+        let custom = custom.migrate_desktop_defaults();
+        assert_eq!(custom.window_mode, 0);
+        assert_eq!(custom.option("desktop_mouse"), false);
+        let selected: Settings = serde_json::from_str(
+            r#"{"window_mode":2,"desktop_defaults_version":1,"advanced":{"desktop_mouse":false}}"#,
+        )
+        .unwrap();
+        let selected = selected.migrate_desktop_defaults();
+        assert_eq!(selected.window_mode, 2);
+        assert_eq!(selected.option("desktop_mouse"), false);
     }
     #[test]
     fn custom_settings_validate_persist_and_use_native_bitrate_interpolation() {
