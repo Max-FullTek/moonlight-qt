@@ -473,6 +473,9 @@ void ComputerManager::saveHost(NvComputer *computer)
 
 void ComputerManager::handleComputerStateChanged(NvComputer* computer)
 {
+    // A poll signal may already be queued when asynchronous deletion begins.
+    // Do not dereference its pointer after ownership passes to the deletion task.
+    if (m_DeletingHosts.contains(computer)) return;
     emit computerStateChanged(computer);
 
     if (computer->pendingQuit && computer->currentGameId == 0) {
@@ -533,7 +536,8 @@ public:
         // Finally, delete the computer itself. This must be done
         // last because the polling thread might be using it.
         delete m_Computer;
-        QMetaObject::invokeMethod(m_ComputerManager, [manager = m_ComputerManager, uuid] {
+        QMetaObject::invokeMethod(m_ComputerManager, [manager = m_ComputerManager, computer = m_Computer, uuid] {
+            manager->m_DeletingHosts.remove(computer);
             emit manager->hostDeleted(uuid);
         }, Qt::QueuedConnection);
     }
@@ -545,6 +549,8 @@ private:
 
 void ComputerManager::deleteHost(NvComputer* computer)
 {
+    if (m_DeletingHosts.contains(computer)) return;
+    m_DeletingHosts.insert(computer);
     // Punt to a worker thread to avoid stalling the
     // UI while waiting for the polling thread to die
     QThreadPool::globalInstance()->start(new DeferredHostDeletionTask(this, computer));

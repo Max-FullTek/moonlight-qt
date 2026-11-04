@@ -17,6 +17,7 @@
 #include <QTimer>
 #include <QMutex>
 #include <QWaitCondition>
+#include <QSet>
 
 class ComputerManager;
 
@@ -274,6 +275,7 @@ private:
     int m_PollingRef;
     QReadWriteLock m_Lock;
     QMap<QString, NvComputer*> m_KnownHosts;
+    QSet<NvComputer*> m_DeletingHosts; // Main-thread tombstones for queued polling events
     QMap<QString, ComputerPollingEntry*> m_PollEntries;
     QHash<QString, NvComputer> m_LastSerializedHosts; // Protected by m_DelayedFlushMutex
     QSharedPointer<QMdnsEngine::Server> m_MdnsServer;
