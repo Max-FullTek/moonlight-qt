@@ -30,6 +30,7 @@
 
 ## 约定
 
+- Windows Lite 的 Qt 移除与 Rust／GPUI 迁移遵循 [迁移开发准则](qt-migration-guidelines.md)，其中记录已确认的 SA 边界、需讨论的取舍与无 Qt 验收定义。新建置路线仍需由对应 Work 确立；以下 qmake 约定继续适用于现有 Qt 路线。
 - **新增顶层模块默认 qmake** 并注册进 `moonlight-qt.pro` 的 SUBDIRS;仅当「上游不存在 + 依赖 CMake-only + 纯新增目录」三条件同时满足才允许 CMake(现例:usb-helper)。
 - 语言标准:C++17 为 app 地板(SteamLink 工具链上限),usb-helper 为 C++23 孤岛,不再引入第三种。
 - 依赖钉值:Linux 源码依赖在 build.yml;Win/Mac 预编译组在 setup-deps(v-tag);升级要与上游对齐(见 upstream-sync.md 的依赖双轨一节)。
