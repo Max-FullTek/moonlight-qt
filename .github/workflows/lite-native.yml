@@ -1,0 +1,46 @@
+name: Windows Lite native libraries without Qt
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/self-build-v6.5.0]
+    paths:
+      - windows-lite/**
+      - tests/lite_native/**
+      - moonlight-common-c/**
+      - h264bitstream/**
+      - AntiHooking/**
+      - scripts/build-lite-native.ps1
+      - scripts/prepare-portable-deps.ps1
+      - scripts/portable-dependencies.json
+      - scripts/verify-pe-machine.ps1
+      - .github/workflows/lite-native.yml
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: build/dependency-cache
+          key: native-windows-x64-${{ hashFiles('scripts/portable-dependencies.json') }}
+      - name: Verify and unpack pinned native dependencies
+        shell: pwsh
+        env:
+          DEPENDENCY_MIRROR_TOKEN: ${{ secrets.DEPENDENCY_MIRROR_TOKEN }}
+        run: ./scripts/prepare-portable-deps.ps1
+      # No Qt SDK installation or qmake/windeployqt step belongs in this job.
+      - name: Build and test native libraries
+        shell: pwsh
+        run: ./scripts/build-lite-native.ps1

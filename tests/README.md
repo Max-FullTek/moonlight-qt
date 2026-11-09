@@ -37,6 +37,8 @@ main() 短、被测逻辑走生产源文件直编(见各 .pro 的 SOURCES)。
 | settings_localization | 中文翻译 .qm + 设置页布局(qmltestrunner) | Windows |
 | linux_display_event_monitor | Linux 显示事件唤醒 | Linux |
 
+Windows Lite 原生库另有无 Qt 入口 `scripts/build-lite-native.ps1`（CI：`lite-native.yml`），构建并执行协议库已有 CTest，以及 `lite_native` 的实际静态链接／API／H.264 NAL 解析检查。此入口不需要 qmake，不连接真实主机，不读取用户设置或凭证；范围与前提见 [架构文档](../docs/architecture.md#windows-lite-原生库建置)。其余下表与上面的 qmake 测试仍属于旧路径。
+
 ## 仅本地/手动
 
 | 目录 | 说明 |

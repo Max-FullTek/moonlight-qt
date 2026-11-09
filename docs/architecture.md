@@ -21,6 +21,7 @@
 | 目录/文件 | 用途 |
 |---|---|
 | `clipboard-helper/` | 剪贴板同步 helper(独立进程) |
+| `windows-lite/` | Windows Lite 的无 Qt CMake 入口，目前仅构建原生库；不包含仍依赖 Qt 的串流 app 与剪贴板 helper |
 | `usb-helper/` | macOS USB/IP 后端 helper(moonlight-usbd,C++23 + CMake,内嵌自己的 third_party 子模块) |
 | `file-mapping/` | 主机文件共享:mount / protocol / vfs 三层(`FileMapping` 命名空间);`smoke/` 是手工冒烟二进制(不在 CI) |
 | `tests/` | 测试目录,CI 覆盖矩阵与约定见 [../tests/README.md](../tests/README.md) |
@@ -35,6 +36,18 @@
 - 语言标准:C++17 为 app 地板(SteamLink 工具链上限),usb-helper 为 C++23 孤岛,不再引入第三种。
 - 依赖钉值:Linux 源码依赖在 build.yml;Win/Mac 预编译组在 setup-deps(v-tag);升级要与上游对齐(见 upstream-sync.md 的依赖双轨一节)。
 - 本地产物(build/、libs/、IDE 目录、.DS_Store)一律 gitignore,不入库。
+
+## Windows Lite 原生库建置
+
+迁移新路径采用 Cargo（GPUI 前端）与 CMake／MSVC（原生核心），保留独立核心与 IPC 方向。旧 qmake 路径继续保留；`windows-lite/` 是此迁移路径的建置例外，不适用上面的新增模块默认 qmake 约定。
+
+当前入口为 `./scripts/build-lite-native.ps1`，需要 Windows x64、VS 2022 C++ Build Tools、CMake 3.24+，以及既有 `libs/windows` 依赖。干净 checkout 可先执行 `./scripts/prepare-portable-deps.ps1`，按现有固定 SHA256 校验并解包；已有依赖目录时不要重复解包。脚本优先使用 PATH 中的 CMake，否则寻找 VS 随附版本，不安装工具。
+
+入口构建 `moonlight-common-c`（含 ENet／nanors）、`h264bitstream` 与 `AntiHooking`，执行协议库既有 CTest 和原生链接测试。默认产物放在 `build/lite-native`；可传入 `-BuildDirectory`。Release 已通过九项测试，独立 CI 为 `.github/workflows/lite-native.yml`。`-Configuration Debug` 可构建，但 `pyrowave-decode-unit-tests` 在本地验证中逾时，原因未确定，Debug 尚未完成验收；脚本会如实返回失败，不跳过此测试。
+
+测试 PATH 仅包含原生依赖与 Windows 系统目录，不借用开发机 Qt 路径。
+
+这仅完成原生库建置阶段：GPUI 前端仍由其 Cargo 路径构建，串流 worker、浮动介面与剪贴板 helper 仍需 Qt；现有 portable 封装仍走 qmake／windeployqt。不得把本入口通过视为 Windows Lite 已完成无 Qt 交付。
 
 ## 历史
 
