@@ -1,5 +1,16 @@
 //! UI catalog for the Windows PC client. Host/app names bypass this catalog.
 pub(crate) const CATALOG: &[(&str, &str, &str)] = &[
+    ("正在套用位元率：", "正在应用码率：", "Applying bitrate:"),
+    (
+        "位元率請求完成：",
+        "码率请求完成：",
+        "Bitrate request completed:",
+    ),
+    (
+        "位元率調整失敗：",
+        "码率调整失败：",
+        "Bitrate change failed:",
+    ),
     ("串流控制", "串流控制", "Stream controls"),
     ("返回串流", "返回串流", "Return to stream"),
     ("暫時斷線", "暂时断开", "Disconnect and keep session"),

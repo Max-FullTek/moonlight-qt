@@ -53,6 +53,47 @@ pub struct Controls {
     pub has_gamepad: bool,
     pub active: bool,
     pub bitrate: u32,
+    pub bitrate_feedback: BitrateFeedback,
+}
+
+// Runtime requests coalesce in the worker. An older result can update the last
+// applied value, but cannot clear or fail a newer pending request.
+#[derive(Default)]
+pub struct BitrateFeedback {
+    sequence: u32,
+    pending_id: Option<u32>,
+    pub pending_kbps: Option<u32>,
+    pub applied_kbps: Option<u32>,
+    pub error: Option<String>,
+}
+impl BitrateFeedback {
+    pub fn next_id(&self) -> u32 {
+        if self.sequence == i32::MAX as u32 {
+            1
+        } else {
+            self.sequence + 1
+        }
+    }
+    pub fn request(&mut self, kbps: u32) -> u32 {
+        self.sequence = self.next_id();
+        self.pending_id = Some(self.sequence);
+        self.pending_kbps = Some(kbps);
+        self.error = None;
+        self.sequence
+    }
+    pub fn result(&mut self, request_id: u32, kbps: u32, success: bool, message: String) {
+        if !(1000..=150_000).contains(&kbps) {
+            return;
+        }
+        if success {
+            self.applied_kbps = Some(kbps);
+        }
+        if self.pending_id == Some(request_id) {
+            self.pending_id = None;
+            self.pending_kbps = None;
+            self.error = (!success).then_some(message);
+        }
+    }
 }
 impl Controls {
     pub fn move_selection(&mut self, down: bool) {
@@ -84,6 +125,32 @@ impl Controls {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bitrate_results_preserve_newer_requests_and_failed_changes() {
+        let mut feedback = BitrateFeedback::default();
+        feedback.request(20_000);
+        feedback.request(25_000);
+        feedback.result(1, 20_000, true, String::new());
+        assert_eq!(feedback.applied_kbps, Some(20_000));
+        assert_eq!(feedback.pending_kbps, Some(25_000));
+        feedback.result(2, 25_000, false, "Host rejected change".into());
+        assert_eq!(feedback.applied_kbps, Some(20_000));
+        assert_eq!(feedback.pending_kbps, None);
+        assert_eq!(feedback.error.as_deref(), Some("Host rejected change"));
+        feedback.request(30_000);
+        feedback.result(2, 25_000, false, "Old failure".into());
+        assert!(feedback.error.is_none());
+        assert_eq!(feedback.pending_kbps, Some(30_000));
+        feedback.result(3, 30_000, true, String::new());
+        assert_eq!(feedback.applied_kbps, Some(30_000));
+        assert_eq!(feedback.pending_kbps, None);
+        feedback.result(3, 0, true, String::new());
+        assert_eq!(feedback.applied_kbps, Some(30_000));
+        feedback.request(30_000);
+        feedback.result(3, 30_000, false, "Previous identical target".into());
+        assert_eq!(feedback.pending_kbps, Some(30_000));
+        assert!(feedback.error.is_none());
+    }
     #[test]
     fn end_needs_confirmation_and_navigation_cancels_it() {
         let mut controls = Controls {

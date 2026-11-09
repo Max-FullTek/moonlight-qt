@@ -281,10 +281,11 @@ void GpuiCoreBridge::command(const QByteArray& line) {
     if (name == "stop") { if (m_Session) m_Session->interrupt(); return; }
     if (name == "controls") {
         if (!request["action"].isString() ||
-                (request.contains("value") && !integer(request, "value", 1000, 150000))) {
+                (request.contains("value") && !integer(request, "value", 1000, 150000)) ||
+                (request.contains("request_id") && !integer(request, "request_id", 1, 2147483647))) {
             fail("invalid_controls", tr("Invalid control action.")); return;
         }
-        if (!m_Session || !m_Session->handleGpuiControl(request["action"].toString(), request["value"].toInt())) {
+        if (!m_Session || !m_Session->handleGpuiControl(request["action"].toString(), request["value"].toInt(), request["request_id"].toInt())) {
             fail("controls_unavailable", tr("Controls are unavailable or stream focus could not be restored."));
         }
         return;
@@ -440,6 +441,11 @@ void GpuiCoreBridge::command(const QByteArray& line) {
     });
     connect(session, &Session::gpuiControlsNavigate, this, [this](const QString& direction) {
         send({{"event", "controls_navigate"}, {"direction", direction}});
+    });
+    connect(session, &Session::gpuiBitrateResult, this, [this, session](int requestId, int requested, bool success, const QString& error) {
+        if (m_Session != session) return;
+        send({{"event", "bitrate_result"}, {"request_id", requestId}, {"requested_kbps", requested},
+              {"success", success}, {"message", error}});
     });
     connect(session, &Session::stageStarting, this, [this](QString stage) { send({{"event", "stage"}, {"stage", stage}}); });
     connect(session, &Session::stageFailed, this, [this](QString stage, int code, QString) {

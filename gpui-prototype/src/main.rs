@@ -328,7 +328,11 @@ impl Prototype {
                         let step = if action == ControlAction::BitrateDown { -1 } else { 1 };
                         let bitrate = (self.controls.bitrate as i32 + step).clamp(1, 150) as u32;
                         request["value"] = serde_json::json!(bitrate * 1000);
-                        if self.request(request) { self.controls.bitrate = bitrate; }
+                        request["request_id"] = serde_json::json!(self.controls.bitrate_feedback.next_id());
+                        if self.request(request) {
+                            self.controls.bitrate = bitrate;
+                            self.controls.bitrate_feedback.request(bitrate * 1000);
+                        }
                     } else if self.request(request) && matches!(action, ControlAction::Disconnect | ControlAction::End) {
                         self.pending = true;
                     }
@@ -542,6 +546,11 @@ impl Prototype {
                     } else {
                         self.modal = Some(Modal::Stream);
                         window.minimize_window();
+                    }
+                }
+                core::Event::BitrateResult { request_id, requested_kbps, success, message } => {
+                    if self.streaming {
+                        self.controls.bitrate_feedback.result(request_id, requested_kbps, success, message);
                     }
                 }
                 core::Event::ControlsNavigate { direction } => {

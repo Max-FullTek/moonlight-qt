@@ -80,6 +80,8 @@ def check(executable, profile, eof=False, seeded=False):
                     ('{"command":"controls","action":"end"}', 'controls_unavailable'),
                     ('{"command":"controls","action":42}', 'invalid_controls'),
                     ('{"command":"controls","action":"bitrate","value":0}', 'invalid_controls'),
+                    ('{"command":"controls","action":"bitrate","value":20000,"request_id":0}', 'invalid_controls'),
+                    ('{"command":"controls","action":"bitrate","value":20000,"request_id":"one"}', 'invalid_controls'),
                     ('{"command":"start","host":"missing"}', 'host_not_found'),
                     ('{"command":"add","address":"https://invalid/"}', 'invalid_address'),
                     ('{"command":"app_preferences","host":"missing","app":1,"hidden":false,"direct_launch":true}', 'host_not_found'),

@@ -132,7 +132,7 @@ public:
     void setGpuiControlsClient(unsigned long processId) { m_GpuiControlsClient = processId; }
     bool usesGpuiControls() const { return m_GpuiControlsClient != 0; }
     void openGpuiControls();
-    bool handleGpuiControl(const QString& action, int value = 0);
+    bool handleGpuiControl(const QString& action, int value = 0, int requestId = 0);
     static void wakeForCoreCommands();
     Q_INVOKABLE bool initialize(QQuickWindow* qtWindow);
     Q_INVOKABLE void start();
@@ -167,6 +167,7 @@ public:
 signals:
     void gpuiControlsChanged(bool active, bool gamepadMouse, bool hasGamepad);
     void gpuiControlsNavigate(QString direction);
+    void gpuiBitrateResult(int requestId, int requestedKbps, bool success, QString error);
     void hostQuitFailed(QString message);
     void stageStarting(QString stage);
 
@@ -249,7 +250,7 @@ private:
     void syncWaylandSdlWindowState();
 #endif
     void dispatchQtMenuAction(OverlayMenuPanel::MenuAction action);
-    void requestRuntimeBitrateChange(int bitrateKbps);
+    void requestRuntimeBitrateChange(int bitrateKbps, int requestId = 0);
     void startRuntimeBitrateWorker();
     void showStreamingToast(const QString& message, int durationMs = 2000);
     void processQtOverlayEvents();
@@ -433,6 +434,7 @@ private:
     // Runtime bitrate requests coalesce here; a single background worker
     // applies the newest value so HTTP never blocks the stream loop.
     std::atomic_int m_PendingRuntimeBitrateKbps { 0 };
+    int m_PendingRuntimeBitrateRequestId = 0; // Owner thread only, coalesces with bitrate.
     std::atomic_bool m_RuntimeBitrateInFlight { false };
     OverlayMenuPanel* m_MenuPanel; // Qt-based overlay menu window
     OverlayMenuButton* m_MenuButton = nullptr; // Qt-based floating menu button

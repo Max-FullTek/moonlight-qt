@@ -933,6 +933,17 @@ impl Prototype {
             }
             Modal::Controls => {
                 title = "串流控制";
+                let feedback = &self.controls.bitrate_feedback;
+                if let Some(pending) = feedback.pending_kbps {
+                    content = content.child(format!("{} {} Mbps", self.tr("正在套用位元率："), pending / 1000));
+                }
+                if let Some(applied) = feedback.applied_kbps {
+                    content = content.child(format!("{} {} Mbps", self.tr("位元率請求完成："), applied / 1000));
+                }
+                if let Some(error) = &feedback.error {
+                    content = content.child(div().text_color(rgb(0xff9b85))
+                        .child(format!("{} {}", self.tr("位元率調整失敗："), error)));
+                }
                 content = content
                     .child(self.tr("方向鍵／手把十字鍵選擇，Enter／A 確認，Esc／B 返回串流。"))
                     .child(self.tr("暫時斷線會保留 Desktop 工作階段；結束工作階段會請主機清理並依設定還原顯示。"))

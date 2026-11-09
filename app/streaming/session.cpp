@@ -2512,7 +2512,7 @@ void Session::openGpuiControls()
                              m_InputHandler->hasConnectedGamepads());
 }
 
-bool Session::handleGpuiControl(const QString& action, int value)
+bool Session::handleGpuiControl(const QString& action, int value, int requestId)
 {
     if (!usesGpuiControls() || !m_InputHandler || !m_Window) return false;
     if (action == QStringLiteral("open")) {
@@ -2566,7 +2566,7 @@ bool Session::handleGpuiControl(const QString& action, int value)
         m_Preferences->autoAdjustBitrate = false;
         m_Preferences->bitrateKbps = value;
         m_Preferences->save();
-        requestRuntimeBitrateChange(value);
+        requestRuntimeBitrateChange(value, requestId);
     }
     else {
         SdlInputHandler::KeyCombo combo;
@@ -2820,7 +2820,7 @@ void Session::processQtOverlayEvents()
 #endif
 }
 
-void Session::requestRuntimeBitrateChange(int bitrateKbps)
+void Session::requestRuntimeBitrateChange(int bitrateKbps, int requestId)
 {
     if (!m_Computer) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
@@ -2831,6 +2831,7 @@ void Session::requestRuntimeBitrateChange(int bitrateKbps)
     // Coalesce rapid slider commits. A worker applying earlier values picks
     // up the newest pending one via startRuntimeBitrateWorker() on finish,
     // so the synchronous HTTP request never runs on the stream loop.
+    m_PendingRuntimeBitrateRequestId = requestId;
     m_PendingRuntimeBitrateKbps.store(bitrateKbps, std::memory_order_release);
     if (m_RuntimeBitrateInFlight.exchange(true, std::memory_order_acq_rel)) {
         return;
@@ -2864,9 +2865,11 @@ void Session::startRuntimeBitrateWorker()
 
     auto bitrateToApply = std::make_shared<int>(
         m_PendingRuntimeBitrateKbps.exchange(0, std::memory_order_acq_rel));
+    const int requestId = m_PendingRuntimeBitrateRequestId;
     auto appliedBitrate = std::make_shared<std::atomic_int>(-1);
+    auto applyError = std::make_shared<QString>();
 
-    auto worker = QThread::create([bitrateToApply, appliedBitrate, address, httpsPort,
+    auto worker = QThread::create([bitrateToApply, appliedBitrate, applyError, address, httpsPort,
                                    uuid, certificate, clientname] {
         try {
             NvHTTP http(address, httpsPort, certificate, true, nullptr, uuid);
@@ -2886,26 +2889,34 @@ void Session::startRuntimeBitrateWorker()
             appliedBitrate->store(*bitrateToApply);
         }
         catch (const GfeHttpResponseException& e) {
+            *applyError = e.toQString();
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "Runtime bitrate change failed (HTTP): %s",
                          e.toQString().toUtf8().constData());
         }
         catch (const QtNetworkReplyException& e) {
+            *applyError = e.toQString();
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "Runtime bitrate change failed (Network): %s",
                          e.toQString().toUtf8().constData());
         }
         catch (...) {
+            *applyError = tr("Runtime bitrate change failed: unknown error");
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "Runtime bitrate change failed: unknown error");
         }
     });
-    connect(worker, &QThread::finished, this, [this, appliedBitrate]() {
+    connect(worker, &QThread::finished, this, [this, requestId, bitrateToApply, appliedBitrate, applyError]() {
         const int applied = appliedBitrate->load();
         if (applied > 0) {
             m_AbrCurrentBitrateKbps->store(applied);
-            showStreamingToast(tr("Bitrate: %1").arg(
-                    OverlayMenuPanel::formatBitrateKbps(applied)));
+            if (!usesGpuiControls()) {
+                showStreamingToast(tr("Bitrate: %1").arg(
+                        OverlayMenuPanel::formatBitrateKbps(applied)));
+            }
+        }
+        if (usesGpuiControls()) {
+            emit gpuiBitrateResult(requestId, *bitrateToApply, applied > 0, *applyError);
         }
         // Commits that landed mid-flight are still pending; apply the
         // newest one before going idle.

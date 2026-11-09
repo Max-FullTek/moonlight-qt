@@ -79,6 +79,8 @@ Windows Lite 的 GPUI 串流入口使用现有前端视窗中的有焦点控制�
 
 「暂时断线」明确保留 host 工作阶段；「结束工作阶段」在断线后沿用 `NvHTTP::quitApp()` 的 `cancel` 请求，要求主机结束 Desktop／应用程式工作阶段。主机显示还原依 Sunshine／VDD 设定，client 不自行切换 host 萤幕；请求失败会回报错误。控制页另保留统计、全萤幕、滑鼠模式、游标、文字贴上、范围锁定与即时位元率操作。
 
+GPUI 位元率操作结果只显示在控制页，不再触发游戏画面的 Qt toast。既有协议 1 的 `controls` 请求新增可选 `request_id`，核心在原 HTTP worker 完成后回报 `bitrate_result`（编号、请求 kbps、成功旗标及错误）；旧调用省略编号仍可使用。编号随原位元率槽位一起合并，前端不会以旧请求结果清除新请求的等待／错误状态，重复选择同一数值也适用；关闭控制页后结果只更新资料，不启用视窗或抢焦点。Session 结束即清理前端状态，bridge 不转发已结束 Session 的延迟结果。「请求完成」沿用既有 HTTP 完成判定，不是实测网络位元率，也未增加新的主机回复格式要求。旧 Qt 前端保留原 toast 行为。
+
 此控制页尚需真实 Sunshine／Desktop 串流验证 Windows 焦点、全萤幕、手把输入交接及两种断线结果；模擬核心的介面检查不能代替此验收。GPUI 前端仍由其 Cargo 路径构建，串流 worker、被动 toast、字型资源查找与剪贴板 helper 仍需 Qt；现有 portable 封装仍走 qmake／windeployqt。不得把原生库或控制页编译通过视为 Windows Lite 已完成无 Qt 交付。
 
 被动通知的替代模块 `video/nativenotification.*` 采用已确认的 C++／DirectComposition 路线，由 CMake 的 `lite-native-notification` 构建，目前尚未接入 Session，也尚未停用 Qt toast。模块在 owner 的既有 SDL HWND 合成小型半透明 DirectWrite 繁中文字层，独立于影片 swapchain／decoder，不读取或传输游戏影像。第一次显示才建立绘制装置；owner 负责消息与到期事件，模块不建立视窗、输入处理器、计时器、执行绪或轮询。owner 必须在同一执行绪调用，并先销毁模块再销毁 SDL 视窗；失败以 HRESULT 回报，不另开提示或静默改用其他窗口。尺寸／DPI 改变由 owner 呼叫 `refresh()`，不是持续重绘。

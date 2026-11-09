@@ -81,6 +81,12 @@ pub enum Event {
     ControlsNavigate {
         direction: String,
     },
+    BitrateResult {
+        request_id: u32,
+        requested_kbps: u32,
+        success: bool,
+        message: String,
+    },
     Error {
         code: String,
         message: String,
@@ -261,6 +267,16 @@ mod tests {
         assert!(matches!(decode(r#"{"protocol":1,"event":"controls","active":true,"gamepad_mouse":true,"has_gamepad":true}"#).unwrap(),
             Event::Controls { active: true, gamepad_mouse: true, has_gamepad: true }));
         assert!(decode(r#"{"protocol":1,"event":"controls","active":true}"#).is_err());
+        assert!(
+            matches!(decode(r#"{"protocol":1,"event":"bitrate_result","request_id":7,"requested_kbps":24000,"success":false,"message":"拒絕變更"}"#).unwrap(),
+            Event::BitrateResult { request_id: 7, requested_kbps: 24000, success: false, message } if message == "拒絕變更")
+        );
+        assert!(
+            decode(
+                r#"{"protocol":1,"event":"bitrate_result","request_id":7,"requested_kbps":24000}"#
+            )
+            .is_err()
+        );
     }
     #[test]
     fn old_snapshots_default_to_visible_and_direct_launch_excludes_hidden_apps() {
