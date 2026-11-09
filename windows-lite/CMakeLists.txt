@@ -186,6 +186,13 @@ set_source_files_properties(
     PROPERTIES COMPILE_OPTIONS /wd4244)
 target_link_libraries(lite-d3d11-video PUBLIC lite-stream-utils lite-avcodec lite-amf moonlight-common-c d3d11 dxgi dwmapi)
 
+add_library(lite-native-notification STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/video/nativenotification.cpp")
+target_compile_features(lite-native-notification PUBLIC cxx_std_17)
+target_compile_options(lite-native-notification PRIVATE /W3 /WX)
+target_include_directories(lite-native-notification PUBLIC "${LITE_SOURCE_ROOT}/app")
+target_link_libraries(lite-native-notification PUBLIC lite-sdl2 d3d11 dxgi dcomp d2d1 dwrite user32)
+
 if(BUILD_TESTING)
     # The pinned fork's decode fixture omits stopVideoDepacketizer() before
     # destroying a used queue. Patch a build-directory copy only: the fork is
@@ -236,6 +243,12 @@ if(BUILD_TESTING)
     target_link_libraries(d3d11_video_renderer PRIVATE lite-d3d11-video)
     add_test(NAME d3d11_video_renderer COMMAND d3d11_video_renderer)
     set_tests_properties(d3d11_video_renderer PROPERTIES TIMEOUT 15)
+
+    add_executable(native_notification "${LITE_SOURCE_ROOT}/tests/native_notification/main.cpp")
+    target_compile_definitions(native_notification PRIVATE SDL_MAIN_HANDLED)
+    target_compile_options(native_notification PRIVATE /W3 /WX)
+    target_link_libraries(native_notification PRIVATE lite-native-notification)
+    # GPU/desktop composition is explicit, never required by headless CTest.
 
     # These state/placement tests compile the production helpers directly and have
     # no Qt, SDL window, streaming host, or user-data dependency.

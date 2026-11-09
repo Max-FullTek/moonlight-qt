@@ -81,6 +81,10 @@ Windows Lite 的 GPUI 串流入口使用现有前端视窗中的有焦点控制�
 
 此控制页尚需真实 Sunshine／Desktop 串流验证 Windows 焦点、全萤幕、手把输入交接及两种断线结果；模擬核心的介面检查不能代替此验收。GPUI 前端仍由其 Cargo 路径构建，串流 worker、被动 toast、字型资源查找与剪贴板 helper 仍需 Qt；现有 portable 封装仍走 qmake／windeployqt。不得把原生库或控制页编译通过视为 Windows Lite 已完成无 Qt 交付。
 
+被动通知的替代模块 `video/nativenotification.*` 采用已确认的 C++／DirectComposition 路线，由 CMake 的 `lite-native-notification` 构建，目前尚未接入 Session，也尚未停用 Qt toast。模块在 owner 的既有 SDL HWND 合成小型半透明 DirectWrite 繁中文字层，独立于影片 swapchain／decoder，不读取或传输游戏影像。第一次显示才建立绘制装置；owner 负责消息与到期事件，模块不建立视窗、输入处理器、计时器、执行绪或轮询。owner 必须在同一执行绪调用，并先销毁模块再销毁 SDL 视窗；失败以 HRESULT 回报，不另开提示或静默改用其他窗口。尺寸／DPI 改变由 owner 呼叫 `refresh()`，不是持续重绘。
+
+显式执行 `native_notification` 可验证实际 GPU 合成与 SDL 影片 swapchain 共存：只 Present 一次影片，隐藏后重新显示通知、释放影片装置后更新、缩放、期限替换与到期隐藏、跨执行绪拒绝、无效 owner 及销毁后重建。`--visible` 展示五个阶段便于目视确认繁中与半透明；不自动加入可能没有桌面合成器的 CTest。此验证不等于真实串流、全萤幕、HDR、跨萤幕 DPI 或效能验收；正式切换尚需完成这些检查与已确认的警告／操作回馈流程迁移。
+
 ## 历史
 
 - 2026-09 目录清理:移除空壳目录(src/、streaming/、include/、soundio/ 上游遗留)与误跟踪的 .DS_Store;filemapping-smoke 并入 file-mapping/smoke;DS5 探针脚本并入 scripts/。
