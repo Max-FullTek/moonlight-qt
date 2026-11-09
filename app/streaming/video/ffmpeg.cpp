@@ -3,6 +3,7 @@
 #include "utils.h"
 #include "streaming/session.h"
 #include "streaming/network/bandwidth.h"
+#include "path.h"
 
 extern "C" {
 #include <libavutil/mastering_display_metadata.h>
@@ -83,6 +84,24 @@ public:
     }
 };
 SessionSdlRendererHost s_SdlRendererHost;
+#ifdef Q_OS_WIN32
+class SessionD3D11RendererHost final : public ID3D11RendererHost {
+public:
+    std::string readShader(const char* name) override
+    {
+        return Path::readDataFile(QString::fromLatin1(name)).toStdString();
+    }
+    bool isOverlayEnabled(Overlay::OverlayType type) override
+    {
+        return Session::get()->getOverlayManager().isOverlayEnabled(type);
+    }
+    SDL_Surface* getUpdatedOverlaySurface(Overlay::OverlayType type) override
+    {
+        return Session::get()->getOverlayManager().getUpdatedOverlaySurface(type);
+    }
+};
+SessionD3D11RendererHost s_D3D11RendererHost;
+#endif
 }
 
 bool FFmpegVideoDecoder::isHardwareAccelerated()
@@ -1060,7 +1079,7 @@ IFFmpegRenderer* FFmpegVideoDecoder::createHwAccelRenderer(const AVCodecHWConfig
         // DXVA2 appears in the hwaccel list before D3D11VA, so we only check for D3D11VA
         // on the first pass to ensure we prefer D3D11VA over DXVA2.
         case AV_HWDEVICE_TYPE_D3D11VA:
-            return new D3D11VARenderer(pass);
+            return new D3D11VARenderer(pass, s_D3D11RendererHost);
 #endif
 #ifdef Q_OS_DARWIN
         case AV_HWDEVICE_TYPE_VIDEOTOOLBOX:
@@ -1122,7 +1141,7 @@ IFFmpegRenderer* FFmpegVideoDecoder::createHwAccelRenderer(const AVCodecHWConfig
         case AV_HWDEVICE_TYPE_DXVA2:
             return new DXVA2Renderer(pass);
         case AV_HWDEVICE_TYPE_D3D11VA:
-            return new D3D11VARenderer(pass);
+            return new D3D11VARenderer(pass, s_D3D11RendererHost);
 #endif
 #ifdef Q_OS_DARWIN
         case AV_HWDEVICE_TYPE_VIDEOTOOLBOX:

@@ -3,11 +3,10 @@
 
 #include "d3d11va.h"
 #include "dxutil.h"
-#include "path.h"
-#include "utils.h"
+#include "streaming/environment.h"
+#include <cmath>
 
 #include "streaming/streamutils.h"
-#include "streaming/session.h"
 #include "streaming/video/videoenhancement.h"
 
 #include "public/common/AMFFactory.h"
@@ -61,9 +60,10 @@ static const std::array<const char*, D3D11VARenderer::PixelShaders::_COUNT> k_Vi
     "d3d11_y410_pixel.fxc",
 };
 
-D3D11VARenderer::D3D11VARenderer(int decoderSelectionPass)
+D3D11VARenderer::D3D11VARenderer(int decoderSelectionPass, ID3D11RendererHost& host)
     : IFFmpegRenderer(RendererType::D3D11VA),
       m_DecoderSelectionPass(decoderSelectionPass),
+      m_Host(host),
       m_DevicesWithFL11Support(0),
       m_DevicesWithCodecSupport(0),
       m_LastColorTrc(AVCOL_TRC_UNSPECIFIED),
@@ -363,7 +363,7 @@ bool D3D11VARenderer::createDeviceByAdapterIndex(int adapterIndex, bool* adapter
                      hr);
         goto Exit;
     }
-    else if (adapterDesc.VendorId == 0x8086 && featureLevel <= D3D_FEATURE_LEVEL_11_0 && !qEnvironmentVariableIntValue("D3D11VA_ENABLED")) {
+    else if (adapterDesc.VendorId == 0x8086 && featureLevel <= D3D_FEATURE_LEVEL_11_0 && !StreamEnvironment::integer("D3D11VA_ENABLED")) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Avoiding D3D11VA on old pre-FL11.1 Intel GPU. Set D3D11VA_ENABLED=1 to override.");
         goto Exit;
@@ -411,7 +411,7 @@ bool D3D11VARenderer::createDeviceByAdapterIndex(int adapterIndex, bool* adapter
     }
 
     bool separateDevices;
-    if (Utils::getEnvironmentVariableOverride("D3D11VA_FORCE_SEPARATE_DEVICES", &separateDevices)) {
+    if (StreamEnvironment::getOverride("D3D11VA_FORCE_SEPARATE_DEVICES", &separateDevices)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Using D3D11VA_FORCE_SEPARATE_DEVICES to override default logic");
     }
@@ -456,7 +456,7 @@ bool D3D11VARenderer::createDeviceByAdapterIndex(int adapterIndex, bool* adapter
         separateDevices = false;
     }
 
-    if (Utils::getEnvironmentVariableOverride("D3D11VA_FORCE_BIND", &m_BindDecoderOutputTextures)) {
+    if (StreamEnvironment::getOverride("D3D11VA_FORCE_BIND", &m_BindDecoderOutputTextures)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Using D3D11VA_FORCE_BIND to override default bind/copy logic");
     }
@@ -511,18 +511,18 @@ bool D3D11VARenderer::initialize(PDECODER_PARAMETERS params)
 
     m_DecoderParams = *params;
 
-    if (qgetenv("D3D11VA_ENABLED") == "0") {
+    if (StreamEnvironment::equals("D3D11VA_ENABLED", "0")) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "D3D11VA is disabled by environment variable");
         return false;
     }
 
-    if (Utils::getEnvironmentVariableOverride("D3D11VA_DEBUG_LAYER", &m_DebugLayer)) {
+    if (StreamEnvironment::getOverride("D3D11VA_DEBUG_LAYER", &m_DebugLayer)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Using D3D11VA_DEBUG_LAYER to override default debug layer behavior");
     }
     else {
-#ifdef QT_DEBUG
+#ifndef NDEBUG
         m_DebugLayer = true;
 #else
         m_DebugLayer = false;
@@ -976,7 +976,7 @@ void D3D11VARenderer::renderFrame(AVFrame* frame)
 
 void D3D11VARenderer::renderOverlay(Overlay::OverlayType type)
 {
-    if (!Session::get()->getOverlayManager().isOverlayEnabled(type)) {
+    if (!m_Host.isOverlayEnabled(type)) {
         return;
     }
 
@@ -1283,8 +1283,8 @@ void D3D11VARenderer::notifyOverlayUpdated(Overlay::OverlayType type)
 {
     HRESULT hr;
 
-    SDL_Surface* newSurface = Session::get()->getOverlayManager().getUpdatedOverlaySurface(type);
-    bool overlayEnabled = Session::get()->getOverlayManager().isOverlayEnabled(type);
+    SDL_Surface* newSurface = m_Host.getUpdatedOverlaySurface(type);
+    bool overlayEnabled = m_Host.isOverlayEnabled(type);
     if (newSurface == nullptr && overlayEnabled) {
         // The overlay is enabled and there is no new surface. Leave the old texture alone.
         return;
@@ -1741,10 +1741,10 @@ bool D3D11VARenderer::setupRenderingResources()
 
     // We use a common vertex shader for all pixel shaders
     {
-        QByteArray vertexShaderBytecode = Path::readDataFile("d3d11_vertex.fxc");
+        const std::string vertexShaderBytecode = m_Host.readShader("d3d11_vertex.fxc");
 
         ComPtr<ID3D11VertexShader> vertexShader;
-        hr = m_RenderDevice->CreateVertexShader(vertexShaderBytecode.constData(), vertexShaderBytecode.length(), nullptr, &vertexShader);
+        hr = m_RenderDevice->CreateVertexShader(vertexShaderBytecode.data(), vertexShaderBytecode.size(), nullptr, &vertexShader);
         if (SUCCEEDED(hr)) {
             m_RenderDeviceContext->VSSetShader(vertexShader.Get(), nullptr, 0);
         }
@@ -1761,7 +1761,7 @@ bool D3D11VARenderer::setupRenderingResources()
             { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
         };
         ComPtr<ID3D11InputLayout> inputLayout;
-        hr = m_RenderDevice->CreateInputLayout(vertexDesc, ARRAYSIZE(vertexDesc), vertexShaderBytecode.constData(), vertexShaderBytecode.length(), &inputLayout);
+        hr = m_RenderDevice->CreateInputLayout(vertexDesc, ARRAYSIZE(vertexDesc), vertexShaderBytecode.data(), vertexShaderBytecode.size(), &inputLayout);
         if (SUCCEEDED(hr)) {
             m_RenderDeviceContext->IASetInputLayout(inputLayout.Get());
         }
@@ -1774,9 +1774,9 @@ bool D3D11VARenderer::setupRenderingResources()
     }
 
     {
-        QByteArray overlayPixelShaderBytecode = Path::readDataFile("d3d11_overlay_pixel.fxc");
+        const std::string overlayPixelShaderBytecode = m_Host.readShader("d3d11_overlay_pixel.fxc");
 
-        hr = m_RenderDevice->CreatePixelShader(overlayPixelShaderBytecode.constData(), overlayPixelShaderBytecode.length(), nullptr, &m_OverlayPixelShader);
+        hr = m_RenderDevice->CreatePixelShader(overlayPixelShaderBytecode.data(), overlayPixelShaderBytecode.size(), nullptr, &m_OverlayPixelShader);
         if (FAILED(hr)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "ID3D11Device::CreatePixelShader() failed: %x",
@@ -1787,9 +1787,9 @@ bool D3D11VARenderer::setupRenderingResources()
 
     for (int i = 0; i < PixelShaders::_COUNT; i++)
     {
-        QByteArray videoPixelShaderBytecode = Path::readDataFile(k_VideoShaderNames[i]);
+        const std::string videoPixelShaderBytecode = m_Host.readShader(k_VideoShaderNames[i]);
 
-        hr = m_RenderDevice->CreatePixelShader(videoPixelShaderBytecode.constData(), videoPixelShaderBytecode.length(), nullptr, &m_VideoPixelShaders[i]);
+        hr = m_RenderDevice->CreatePixelShader(videoPixelShaderBytecode.data(), videoPixelShaderBytecode.size(), nullptr, &m_VideoPixelShaders[i]);
         if (FAILED(hr)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "ID3D11Device::CreatePixelShader() failed: %x",
@@ -2432,9 +2432,10 @@ int D3D11VARenderer::getAdapterIndexByEnhancementCapabilities()
 
                 m_VideoEnhancement->setVendorID(adapterDesc.VendorId);
 
-                // Convert wchar[128] to string
-                std::wstring GPUname(adapterDesc.Description);
-                qInfo() << "GPU used for Video Enhancement: " << GPUname;
+                char gpuName[sizeof(adapterDesc.Description) * 2] = {};
+                WideCharToMultiByte(CP_UTF8, 0, adapterDesc.Description, -1,
+                                    gpuName, sizeof(gpuName), nullptr, nullptr);
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "GPU used for Video Enhancement: %s", gpuName);
 
                 // Test, but do not activate yet
                 if (m_VideoEnhancement->isVendorAMD()) {

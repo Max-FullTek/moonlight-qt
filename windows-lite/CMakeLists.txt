@@ -162,6 +162,30 @@ target_compile_features(lite-sdl-video PUBLIC cxx_std_17)
 target_compile_options(lite-sdl-video PRIVATE /W3 /WX)
 target_link_libraries(lite-sdl-video PUBLIC lite-stream-utils lite-swscale moonlight-common-c)
 
+# Keep the same embedded AMF implementation as app.pro. No SDK download or
+# alternate vendor library is introduced by the native renderer build.
+set(LITE_AMF_ROOT "${LITE_SOURCE_ROOT}/third-party/AMF/amf")
+add_library(lite-amf STATIC
+    "${LITE_AMF_ROOT}/public/common/AMFFactory.cpp"
+    "${LITE_AMF_ROOT}/public/common/AMFSTL.cpp"
+    "${LITE_AMF_ROOT}/public/common/Thread.cpp"
+    "${LITE_AMF_ROOT}/public/common/TraceAdapter.cpp"
+    "${LITE_AMF_ROOT}/public/common/Windows/ThreadWindows.cpp")
+target_compile_features(lite-amf PUBLIC cxx_std_17)
+target_include_directories(lite-amf SYSTEM PUBLIC "${LITE_AMF_ROOT}")
+add_library(lite-d3d11-video STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/video/ffmpeg-renderers/d3d11va.cpp"
+    "${LITE_SOURCE_ROOT}/app/streaming/video/videoenhancement.cpp")
+target_compile_features(lite-d3d11-video PUBLIC cxx_std_17)
+target_compile_options(lite-d3d11-video PRIVATE /W3 /WX)
+# The inherited renderer already narrows texture indices, viewport floats and
+# HDR fixed-point metadata in the Qt build. Preserve those conversions here;
+# do not combine a numeric-behavior rewrite with dependency removal.
+set_source_files_properties(
+    "${LITE_SOURCE_ROOT}/app/streaming/video/ffmpeg-renderers/d3d11va.cpp"
+    PROPERTIES COMPILE_OPTIONS /wd4244)
+target_link_libraries(lite-d3d11-video PUBLIC lite-stream-utils lite-avcodec lite-amf moonlight-common-c d3d11 dxgi dwmapi)
+
 if(BUILD_TESTING)
     # The pinned fork's decode fixture omits stopVideoDepacketizer() before
     # destroying a used queue. Patch a build-directory copy only: the fork is
@@ -205,6 +229,13 @@ if(BUILD_TESTING)
     target_link_libraries(overlay_text PRIVATE lite-overlay-text)
     add_test(NAME overlay_text COMMAND overlay_text "${LITE_SOURCE_ROOT}/app/ModeSeven.ttf")
     set_tests_properties(overlay_text PROPERTIES TIMEOUT 15)
+
+    add_executable(d3d11_video_renderer "${LITE_SOURCE_ROOT}/tests/d3d11_video_renderer/main.cpp")
+    target_compile_definitions(d3d11_video_renderer PRIVATE SDL_MAIN_HANDLED)
+    target_compile_options(d3d11_video_renderer PRIVATE /W3 /WX)
+    target_link_libraries(d3d11_video_renderer PRIVATE lite-d3d11-video)
+    add_test(NAME d3d11_video_renderer COMMAND d3d11_video_renderer)
+    set_tests_properties(d3d11_video_renderer PROPERTIES TIMEOUT 15)
 
     # These state/placement tests compile the production helpers directly and have
     # no Qt, SDL window, streaming host, or user-data dependency.

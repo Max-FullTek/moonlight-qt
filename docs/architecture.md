@@ -69,6 +69,10 @@ Windows Lite 的生产 SDL 影像 renderer 与 `SwFrameMapper` 也纳入无 Qt C
 
 `sdl_video_renderer` 默认只验证原生 probe／格式协商，不启动 GPU。显式 `--render` 使用隐藏 Windows 视窗与实际 SDL backend：验证 YUV420／NV12／NV21、4:4:4 CPU 转换、图层更新／快取／开关、尺寸变化与比例，以保留的 SDL target texture 读回像素，避免依赖 Present 后可被丢弃的 window backbuffer。另复用六组 8-bit H.264／HEVC／AV1 的 4:2:0／4:4:4 样本，完成组包→软件解码→生产 Pacer／渲染线程→SDL 实际呈现。此测试不验收硬体解码／copyback、HDR、实体 V-sync 或游戏延迟；SDL 原本拒绝 HDR 的行为保留。
 
+生产 D3D11VA renderer 也保持 C++，直接纳入无 Qt CMake；解码装置、共享 texture／fence、HDR shader 与厂商影像增强流程不改写为 Rust。`ID3D11RendererHost` 只提供 shader 二进位及图层状态／surface，过渡期 `ffmpeg.cpp` 的 Session adapter 保留原 Qt 资源查找顺序；替换为原生 owner 后即可移除此 adapter。无每幀影像中转或额外程序。原生环境变数解析保留既有带正负号、空白、进位侦测与 int 范围；迁移时另与安装的 Qt 6.12.0 比对 37 组值。SDL 的环境快取不作为此查询来源，使用与原 Qt 路径一致的 C runtime 环境。
+
+`d3d11_video_renderer` 的预设测试不启动 GPU，验证生产链接、环境覆盖及显式停用后的 fallback；`--probe app/shaders` 则建立隐藏 SDL 视窗、实际 D3D11 装置、五个既有 shader 与 FFmpeg 硬体 context，再清理资源。此检查尚不验收影片解码／呈现、HDR、厂商增强或游戏延迟。AMF 复用 `app.pro` 的同一组内嵌源码；新 CMake 仅对原 renderer 已有的 C4244 数值缩窄警告作局部豁免，不在解除 Qt 时顺便改动 HDR／texture 数值行为。
+
 Windows Lite 的 GPUI 串流入口使用现有前端视窗中的有焦点控制页，快捷键仍为 Ctrl+Alt+Shift+O；十字键／方向键选择、A／Enter 确认、B／Esc 返回。GPUI session 不建立 Qt 互动选单或浮动按钮；旧 Qt 前端路径保留。原选单位置设定仍保留在隔离 profile 中供旧路径使用，GPUI 设定页不再提供不适用的位置选项。
 
 控制页以既有匿名 pipe 增加 `controls` 命令与状态／导航事件，不传递影像，也不增加程序或定时轮询。worker 收到 pipe 命令时以 SDL user event 唤醒主线程，过渡期由该事件处理既有 Qt 主线程命令。开页时明确释放远端按键／按钮／接点与手把状态、暂停输入计时器；关页时清除控制页期间排队的输入，再恢复原擷取状态，本机仍按住的键鼠／手把按钮必须先放开才可重新送往 host。Windows 两个既有程序透过 `AllowSetForegroundWindow` 交接前景权限，不使用置顶、穿透或不启用焦点的视窗补丁。固定的 GPUI 0.2.2 `activate_window()` 内部会合成 Alt 按键，所以必须先完成 worker 输入交接，才启用 GPUI 视窗。

@@ -1,6 +1,11 @@
 #pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include "renderer.h"
+#include <string>
 
 #include <d3d11_4.h>
 #include <dxgi1_6.h>
@@ -15,10 +20,20 @@ extern "C" {
 #include <wrl/client.h>
 #include <wrl/wrappers/corewrappers.h>
 
+// The owner supplies resources and overlay surfaces. It must outlive the
+// renderer; no Session, Qt resource system, or per-frame image copy is needed.
+class ID3D11RendererHost {
+public:
+    virtual ~ID3D11RendererHost() = default;
+    virtual std::string readShader(const char* name) = 0;
+    virtual bool isOverlayEnabled(Overlay::OverlayType type) = 0;
+    virtual SDL_Surface* getUpdatedOverlaySurface(Overlay::OverlayType type) = 0;
+};
+
 class D3D11VARenderer : public IFFmpegRenderer
 {
 public:
-    D3D11VARenderer(int decoderSelectionPass);
+    D3D11VARenderer(int decoderSelectionPass, ID3D11RendererHost& host);
     virtual ~D3D11VARenderer() override;
     virtual bool initialize(PDECODER_PARAMETERS params) override;
     virtual bool prepareDecoderContext(AVCodecContext* context, AVDictionary**) override;
@@ -75,6 +90,7 @@ private:
                                Microsoft::WRL::ComPtr<ID3D11Fence>& dev2Fence);
 
     int m_DecoderSelectionPass;
+    ID3D11RendererHost& m_Host;
     int m_DevicesWithFL11Support;
     int m_DevicesWithCodecSupport;
 
