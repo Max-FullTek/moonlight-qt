@@ -99,6 +99,12 @@ GPUI 位元率操作结果只显示在控制页，不再触发游戏画面的 Qt
 
 显式执行 `native_notification` 可验证实际 GPU 合成与 SDL 影片 swapchain 共存：只 Present 一次影片，隐藏后重新显示通知、释放影片装置后更新、缩放、期限替换与到期隐藏、跨执行绪拒绝、无效 owner 及销毁后重建。`--visible` 展示五个阶段便于目视确认繁中与半透明；不自动加入可能没有桌面合成器的 CTest。此验证不等于真实串流、全萤幕、HDR、跨萤幕 DPI 或效能验收；正式切换尚需完成这些检查与已确认的警告／操作回馈流程迁移。
 
+## 主机控制 HTTP 的原生能力验证
+
+已确认先验证 C++＋libcurl＋既有 OpenSSL，保留 worker／IPC 边界。`scripts/test-native-host-http.ps1` 是独立探测入口，尚未链接产品或 portable 包；它以官方 curl 8.23.0 ZIP 的固定 SHA256 `85477fe11408471285f38a601e7c6f53470d13be9a5a316919b071ad02e68213` 验证来源，静态构建 libcurl，并只链接既有 OpenSSL 3.6.5。源码与产物留在忽略的 `build/`，不安装系统工具。来源：[官方 release](https://github.com/curl/curl/releases/tag/curl-8_23_0)。正式采用时仍须纳入依赖准备、许可告示及封装来源验证。
+
+`tests/native_host_http` 复用公开的剪贴板 TLS fixture，只访问随机 loopback port。完整 leaf DER 在 OpenSSL 握手验证 callback 中比对，不以公钥 pin 替代；匹配配对凭证才接受其自签／名称／有效期属性，行为目的与现有 `PairedCertificate` 相同。测试从伺服器端确认不同凭证与同公钥换证都未收到 HTTP 请求，并覆盖客戶端凭证、HTTP/1.1、禁止重新导向、忽略代理环境、期限取消及回應大小上限。探测显式禁止连接／TLS session 重用，避免自订验证策略跨请求遗留；参见 [libcurl SSL context callback](https://curl.se/libcurl/c/CURLOPT_SSL_CTX_FUNCTION.html)。这不代表正式配对、应用启停、取消／关闭、错误映射、凭证轮换或持续连接已验收；不读取用户身分或旧设定。
+
 ## 历史
 
 - 2026-09 目录清理:移除空壳目录(src/、streaming/、include/、soundio/ 上游遗留)与误跟踪的 .DS_Store;filemapping-smoke 并入 file-mapping/smoke;DS5 探针脚本并入 scripts/。

@@ -46,6 +46,8 @@ Windows Lite 原生库另有无 Qt 入口 `scripts/build-lite-native.ps1`（CI�
 
 ## 仅本地/手动
 
+`native_host_http` 是 C++／libcurl／既有 OpenSSL 的独立能力探测，运行 `scripts/test-native-host-http.ps1`。脚本验证固定 curl 来源杂凑、构建并以不含 Qt 的 PATH 执行 Python loopback TLS fixture；覆盖完整凭证比对先于 HTTP、同公钥换证拒绝、mTLS、禁止重新导向、代理绕过、期限和回應上限。只复用公开测试金钥，不连接真实主机或操作用户配对资料，也不属于正式产品或 portable 封装。
+
 `vulkan_video_renderer` 与 `ffmpeg_video_decoder`（仅 CMake）默认不启动 GPU，验证生产链接／owner 生命周期、格式与视窗状态契约，以及通用 hwaccel 能力覆盖。显式 `vulkan_video_renderer.exe --probe` 使用实际 Vulkan 上传、呈现与图层，并建立通用 D3D11 context；`ffmpeg_video_decoder.exe <repo-root> --probe` 复用生产探测影格，分别验证 H.264／HEVC／AV1 的软件及硬体解码和 renderer 映射。两者的 PATH 均需固定 `libs/windows/lib/x64`，无 Qt；未读回最终呈现像素，不验收持续串流、HDR、全萤幕或延迟。探测不纳入默认 CTest。
 
 `dxva2_video_renderer`（仅 CMake）默认验证生产链接、明确停用的两轮 fallback，以及 HDR 首轮回退，不启动 GPU。显式 `build/lite-native/Release/dxva2_video_renderer.exe --probe`（自订 build 目录时替换路径；PATH 包含固定 `libs/windows/lib/x64`）建立隐藏 SDL 视窗、DXVA2 装置／video processor、FFmpeg 硬体 context，并执行图层更新／快取／停用清理；错误日志导致失败。此探测不解码影片、不验证最终像素、全萤幕或真实串流，不纳入默认 CTest。
