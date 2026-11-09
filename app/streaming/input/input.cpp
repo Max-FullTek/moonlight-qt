@@ -563,7 +563,9 @@ bool SdlInputHandler::tryUseNativeRemoteCursor(const RemoteCursorUpdate& update)
     const CursorShapeMetrics metrics =
         nativeCursorSubstitutionEnabled()
             ? measureCursorShape(update.width, update.height,
-                                 update.hotspotX, update.hotspotY, update.bgra)
+                                 update.hotspotX, update.hotspotY,
+                                 update.bgra.constData(),
+                                 static_cast<std::size_t>(update.bgra.size()))
             : CursorShapeMetrics();
     const NativeCursorShape shape = classifyCursorShape(metrics);
 

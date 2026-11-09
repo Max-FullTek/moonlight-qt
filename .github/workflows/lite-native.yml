@@ -8,9 +8,12 @@ on:
       - windows-lite/**
       - tests/lite_native/**
       - tests/keyboard_state/**
+      - tests/cursor_shape_classification/**
       - tests/gamepad_sensor_rate/**
       - tests/pen_history_selection/**
       - app/streaming/input/keyboardstate.h
+      - app/streaming/input/cursorshapeclassifier.h
+      - app/streaming/input/cursorshapeclassifier.cpp
       - app/streaming/input/input.h
       - app/streaming/input/input.cpp
       - app/streaming/input/keyboard.cpp

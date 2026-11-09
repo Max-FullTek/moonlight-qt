@@ -1,8 +1,12 @@
 #include "streaming/input/cursorshapeclassifier.h"
 
-#include <QByteArray>
-#include <QCoreApplication>
-#include <QTextStream>
+#include <algorithm>
+#include <cstdint>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -39,12 +43,12 @@ public:
 
     int width() const { return m_width; }
     int height() const { return m_height; }
-    const QByteArray& data() const { return m_data; }
+    const std::vector<char>& data() const { return m_data; }
 
 private:
     int m_width;
     int m_height;
-    QByteArray m_data;
+    std::vector<char> m_data;
 };
 
 // Windows 标准箭头的骨架：热点在左上角，三角头部自上而下变宽，接着一条偏右的尾巴
@@ -63,7 +67,7 @@ Canvas makeArrow(int s)
         }
         else {
             const int tailRows = totalRows - headRows;
-            const int width = qMax(1, 6 * s - (y - headRows) * (4 * s) / tailRows);
+            const int width = std::max(1, 6 * s - (y - headRows) * (4 * s) / tailRows);
             canvas.plotRow(y, 3 * s, width);
         }
     }
@@ -109,7 +113,7 @@ Canvas makeSizeNS(int s)
     const int arrowRows = 4 * s;
 
     for (int y = 0; y < totalRows; y++) {
-        const int d = qMin(y, totalRows - 1 - y);
+        const int d = std::min(y, totalRows - 1 - y);
         int width = stemWidth;
         if (d < arrowRows) {
             width = stemWidth +
@@ -131,7 +135,7 @@ Canvas makeSizeWE(int s)
     const Canvas source = makeSizeNS(s);
     Canvas canvas(source.width(), source.height());
 
-    const uchar* pixels = reinterpret_cast<const uchar*>(source.data().constData());
+    const auto* pixels = reinterpret_cast<const unsigned char*>(source.data().data());
     for (int y = 0; y < source.height(); y++) {
         for (int x = 0; x < source.width(); x++) {
             const int index = (y * source.width() + x) * 4 + 3;
@@ -246,7 +250,7 @@ Canvas makeAppStarting(int s, int& hotspotX, int& hotspotY)
         }
         else {
             const int tailRows = totalRows - headRows;
-            const int width = qMax(1, 12 * s - (y - headRows) * (8 * s) / tailRows);
+            const int width = std::max(1, 12 * s - (y - headRows) * (8 * s) / tailRows);
             canvas.plotRow(arrowTop + y, 7 * s, width);
         }
     }
@@ -265,15 +269,15 @@ Canvas makeWait(int s)
     Canvas canvas(64 * s, 64 * s);
 
     const int size = 40 * s;
-    const qreal center = (size - 1) / 2.0;
-    const qreal outer = size / 2.0;
-    const qreal inner = outer * 0.524;
+    const double center = (size - 1) / 2.0;
+    const double outer = size / 2.0;
+    const double inner = outer * 0.524;
 
     for (int y = 0; y < size; y++) {
         for (int x = 0; x < size; x++) {
-            const qreal dx = x - center;
-            const qreal dy = y - center;
-            const qreal d2 = dx * dx + dy * dy;
+            const double dx = x - center;
+            const double dy = y - center;
+            const double d2 = dx * dx + dy * dy;
             if (d2 <= outer * outer && d2 >= inner * inner) {
                 canvas.plot(x, y);
             }
@@ -336,7 +340,7 @@ Canvas makeNoiseBlob()
 {
     Canvas canvas(32, 32);
 
-    quint32 state = 0x1234567u;
+    std::uint32_t state = 0x1234567u;
     for (int y = 4; y < 26; y++) {
         for (int x = 5; x < 24; x++) {
             state = state * 1664525u + 1013904223u;
@@ -358,37 +362,39 @@ Canvas makeSolidBlock()
     return canvas;
 }
 
-void printMetrics(QTextStream& out, const QString& label, const CursorShapeMetrics& m)
+void printMetrics(std::ostream& out, const std::string& label, const CursorShapeMetrics& m)
 {
-    out << "  " << label << ": box=" << m.boxWidth << 'x' << m.boxHeight
-        << " fill=" << QString::number(m.fill, 'f', 3)
-        << " hotspot=(" << QString::number(m.hotspotX, 'f', 2) << ','
-        << QString::number(m.hotspotY, 'f', 2) << ')'
-        << " symV=" << QString::number(m.symV, 'f', 3)
-        << " symH=" << QString::number(m.symH, 'f', 3)
-        << " symRot180=" << QString::number(m.symRot180, 'f', 3)
-        << " centerFill=" << QString::number(m.centerFill, 'f', 3)
-        << " corr=" << QString::number(m.diagonalCorrelation, 'f', 3)
-        << " firstRow=" << QString::number(m.firstRowRatio, 'f', 3)
-        << " widestRow=" << QString::number(m.widestRowPosition, 'f', 3)
-        << " topWidth=" << QString::number(m.topWidthRatio, 'f', 3)
+    out << std::fixed << "  " << label << ": box=" << m.boxWidth << 'x' << m.boxHeight
+        << " fill=" << std::setprecision(3) << m.fill
+        << " hotspot=(" << std::setprecision(2) << m.hotspotX << ','
+        << std::setprecision(2) << m.hotspotY << ')'
+        << " symV=" << std::setprecision(3) << m.symV
+        << " symH=" << std::setprecision(3) << m.symH
+        << " symRot180=" << std::setprecision(3) << m.symRot180
+        << " centerFill=" << std::setprecision(3) << m.centerFill
+        << " corr=" << std::setprecision(3) << m.diagonalCorrelation
+        << " firstRow=" << std::setprecision(3) << m.firstRowRatio
+        << " widestRow=" << std::setprecision(3) << m.widestRowPosition
+        << " topWidth=" << std::setprecision(3) << m.topWidthRatio
         << " violations=" << m.topMonotoneViolations << '\n';
 }
 
-bool expectShape(QTextStream& out,
-                 const QString& label,
+bool expectShape(std::ostream& out,
+                 const std::string& label,
                  const Canvas& canvas,
                  int hotspotX,
                  int hotspotY,
                  NativeCursorShape expected)
 {
     const CursorShapeMetrics metrics = measureCursorShape(
-        canvas.width(), canvas.height(), hotspotX, hotspotY, canvas.data());
+        canvas.width(), canvas.height(), hotspotX, hotspotY, canvas.data().data(), canvas.data().size());
     const NativeCursorShape actual = classifyCursorShape(metrics);
 
     printMetrics(out, label, metrics);
 
-    if (actual != expected) {
+    if (actual != expected ||
+        classifyCursorShape(canvas.width(), canvas.height(), hotspotX, hotspotY,
+                            canvas.data().data(), canvas.data().size()) != expected) {
         out << "FAIL: " << label << " expected "
             << nativeCursorShapeName(expected) << ", got "
             << nativeCursorShapeName(actual) << '\n';
@@ -399,77 +405,112 @@ bool expectShape(QTextStream& out,
 
 } // namespace
 
-int main(int argc, char* argv[])
+int main()
 {
-    QCoreApplication app(argc, argv);
-    QTextStream out(stdout);
+    auto& out = std::cout;
 
     bool ok = true;
 
     // 同一形状的 1x 与 2x 都要认出来——主机的 DPI 缩放会在这几档之间变
     for (int s = 1; s <= 2; s++) {
-        const QString suffix = QStringLiteral(" @%1x").arg(s);
+        const std::string suffix = " @" + std::to_string(s) + "x";
 
-        ok &= expectShape(out, QStringLiteral("arrow") + suffix,
+        ok &= expectShape(out, "arrow" + suffix,
                           makeArrow(s), 0, 0, NativeCursorShape::Arrow);
 
         int appStartingHx = 0;
         int appStartingHy = 0;
         const Canvas appStarting = makeAppStarting(s, appStartingHx, appStartingHy);
-        ok &= expectShape(out, QStringLiteral("app-starting") + suffix,
+        ok &= expectShape(out, "app-starting" + suffix,
                           appStarting, appStartingHx, appStartingHy,
                           NativeCursorShape::AppStarting);
-        ok &= expectShape(out, QStringLiteral("wait") + suffix,
+        ok &= expectShape(out, "wait" + suffix,
                           makeWait(s), 20 * s, 20 * s, NativeCursorShape::Wait);
 
-        ok &= expectShape(out, QStringLiteral("ibeam") + suffix,
+        ok &= expectShape(out, "ibeam" + suffix,
                           makeIBeam(s), 10 * s, 18 * s, NativeCursorShape::IBeam);
 
-        ok &= expectShape(out, QStringLiteral("hand") + suffix,
+        ok &= expectShape(out, "hand" + suffix,
                           makeHand(s), 7 * s, 0, NativeCursorShape::Hand);
 
-        ok &= expectShape(out, QStringLiteral("size-ns") + suffix,
+        ok &= expectShape(out, "size-ns" + suffix,
                           makeSizeNS(s), 4 * s, 10 * s, NativeCursorShape::SizeNS);
 
-        ok &= expectShape(out, QStringLiteral("size-we") + suffix,
+        ok &= expectShape(out, "size-we" + suffix,
                           makeSizeWE(s), 10 * s, 4 * s, NativeCursorShape::SizeWE);
 
-        ok &= expectShape(out, QStringLiteral("size-nwse") + suffix,
+        ok &= expectShape(out, "size-nwse" + suffix,
                           makeSizeNWSE(s, false), 8 * s, 8 * s,
                           NativeCursorShape::SizeNWSE);
 
-        ok &= expectShape(out, QStringLiteral("size-nesw") + suffix,
+        ok &= expectShape(out, "size-nesw" + suffix,
                           makeSizeNWSE(s, true), 8 * s, 8 * s,
                           NativeCursorShape::SizeNESW);
     }
 
     // 不认识的一律回退位图
     // 四向箭头和十字是故意不认的：它们跟等待光标同属"近方形 + 四重对称 + 热点居中"
-    ok &= expectShape(out, QStringLiteral("size-all"),
+    ok &= expectShape(out, "size-all",
                       makeSizeAll(1), 16, 16, NativeCursorShape::Unknown);
-    ok &= expectShape(out, QStringLiteral("crosshair"),
+    ok &= expectShape(out, "crosshair",
                       makeCrosshair(1), 16, 16, NativeCursorShape::Unknown);
-    ok &= expectShape(out, QStringLiteral("noise blob"),
+    ok &= expectShape(out, "noise blob",
                       makeNoiseBlob(), 12, 8, NativeCursorShape::Unknown);
-    ok &= expectShape(out, QStringLiteral("solid block"),
+    ok &= expectShape(out, "solid block",
                       makeSolidBlock(), 16, 16, NativeCursorShape::Unknown);
 
     // 全透明（主机用来表示光标不可见）不能被当成任何形状
     const Canvas blank(32, 32);
-    ok &= expectShape(out, QStringLiteral("fully transparent"),
+    ok &= expectShape(out, "fully transparent",
                       blank, 0, 0, NativeCursorShape::Unknown);
 
     // 输入长度不符时必须安全地判为不认识
-    if (classifyCursorShape(32, 32, 0, 0, QByteArray(16, '\0')) !=
+    if (classifyCursorShape(32, 32, 0, 0, std::vector<char>(16, '\0').data(), 16) !=
         NativeCursorShape::Unknown) {
         out << "FAIL: short pixel buffer was not rejected\n";
         ok = false;
     }
-    if (classifyCursorShape(0, 0, 0, 0, QByteArray()) !=
+    if (classifyCursorShape(0, 0, 0, 0, nullptr, 0) !=
         NativeCursorShape::Unknown) {
         out << "FAIL: zero-sized shape was not rejected\n";
         ok = false;
     }
+
+    const auto require = [&](bool condition, const char* message) {
+        if (!condition) {
+            out << "FAIL: " << message << '\n';
+            ok = false;
+        }
+    };
+    const char pixel[] = {0, 0, 0, static_cast<char>(255)};
+    require(!measureCursorShape(1, 1, 0, 0, nullptr, 4).valid,
+            "null pixel buffer was not rejected");
+    require(!measureCursorShape(1, 1, 0, 0, pixel, 5).valid,
+            "oversized pixel buffer was not rejected");
+    require(!measureCursorShape(-1, 1, 0, 0, pixel, 4).valid,
+            "negative dimensions were not rejected");
+    require(!measureCursorShape(129, 1, 0, 0, pixel, 4).valid &&
+            !measureCursorShape(1, 129, 0, 0, pixel, 4).valid &&
+            !measureCursorShape(std::numeric_limits<int>::max(),
+                                std::numeric_limits<int>::max(), 0, 0, pixel, 4).valid,
+            "dimensions above the classifier limit were not rejected");
+    const auto single = measureCursorShape(1, 1, 0, 0, pixel, sizeof(pixel));
+    require(single.valid && single.boxWidth == 1 && single.boxHeight == 1 &&
+            single.fill == 1.0 && single.hotspotX == 0.0 && single.hotspotY == 0.0,
+            "single pixel measurements were not finite and valid");
+    std::vector<char> limitPixels(128 * 128 * 4, 0);
+    limitPixels[3] = 33;
+    require(measureCursorShape(128, 128, 0, 0, limitPixels.data(), limitPixels.size()).valid,
+            "maximum supported dimensions were rejected");
+    limitPixels[3] = 32;
+    require(!measureCursorShape(128, 128, 0, 0, limitPixels.data(), limitPixels.size()).valid,
+            "alpha at the transparency threshold was treated as opaque");
+    const auto block = makeSolidBlock();
+    const auto clamped = measureCursorShape(
+        block.width(), block.height(), std::numeric_limits<int>::min(),
+        std::numeric_limits<int>::max(), block.data().data(), block.data().size());
+    require(clamped.valid && clamped.hotspotX == 0.0 && clamped.hotspotY == 1.0,
+            "out-of-bounds hotspots were not clamped safely");
 
     out << (ok ? "PASS\n" : "FAILED\n");
     out.flush();

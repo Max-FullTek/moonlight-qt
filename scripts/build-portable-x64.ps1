@@ -111,7 +111,7 @@ Invoke-Checked (Join-Path $qtBins 'qmltestrunner.exe') @(
     '-input', (Join-Path $SourceRoot 'tests/lite_ui'), '-o', '-,txt'
 )
 $testResults += @{ name = 'lite-manual-connection-ui'; result = 'passed-offscreen' }
-foreach ($test in @('keyboard_state', 'shared_helpers', 'clipboard_payload_routing', 'clipboard_helper_lifecycle', 'overlay_menu_navigation')) {
+foreach ($test in @('keyboard_state', 'cursor_shape_classification', 'shared_helpers', 'clipboard_payload_routing', 'clipboard_helper_lifecycle', 'overlay_menu_navigation')) {
     $testBuild = Join-Path $root "test-$test"
     New-Item -ItemType Directory -Path $testBuild | Out-Null
     Push-Location -LiteralPath $testBuild

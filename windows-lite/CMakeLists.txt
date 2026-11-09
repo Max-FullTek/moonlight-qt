@@ -58,6 +58,12 @@ target_compile_definitions(AntiHooking PRIVATE ANTIHOOKING_LIBRARY)
 target_include_directories(AntiHooking PRIVATE "${LITE_DEPS_ROOT}/include")
 target_link_libraries(AntiHooking PRIVATE "${LITE_DEPS_LIB}/detours.lib")
 
+add_library(lite-cursor-shape STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/input/cursorshapeclassifier.cpp")
+target_compile_features(lite-cursor-shape PUBLIC cxx_std_17)
+target_compile_options(lite-cursor-shape PRIVATE /W3 /WX)
+target_include_directories(lite-cursor-shape PUBLIC "${LITE_SOURCE_ROOT}/app")
+
 if(BUILD_TESTING)
     # The pinned fork's decode fixture omits stopVideoDepacketizer() before
     # destroying a used queue. Patch a build-directory copy only: the fork is
@@ -106,4 +112,11 @@ if(BUILD_TESTING)
         add_test(NAME ${input_test} COMMAND ${input_test})
         set_tests_properties(${input_test} PROPERTIES TIMEOUT 15)
     endforeach()
+
+    add_executable(cursor_shape_classification
+        "${LITE_SOURCE_ROOT}/tests/cursor_shape_classification/main.cpp")
+    target_link_libraries(cursor_shape_classification PRIVATE lite-cursor-shape)
+    target_compile_options(cursor_shape_classification PRIVATE /W3 /WX)
+    add_test(NAME cursor_shape_classification COMMAND cursor_shape_classification)
+    set_tests_properties(cursor_shape_classification PROPERTIES TIMEOUT 15)
 endif()

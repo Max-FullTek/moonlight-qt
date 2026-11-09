@@ -1,6 +1,7 @@
 #include "cursorshapeclassifier.h"
 
-#include <QVector>
+#include <cstdint>
+#include <vector>
 
 #include <algorithm>
 #include <cmath>
@@ -14,14 +15,14 @@ constexpr int OpaqueAlphaThreshold = 32;
 // 正常的光标不会比这更大。超过就当成不认识，走位图。
 constexpr int MaxCursorDimension = 128;
 
-qreal medianOf(QVector<int> values)
+double medianOf(std::vector<int> values)
 {
-    if (values.isEmpty()) {
+    if (values.empty()) {
         return 0.0;
     }
 
     std::sort(values.begin(), values.end());
-    const int mid = values.size() / 2;
+    const std::size_t mid = values.size() / 2;
     if (values.size() % 2 != 0) {
         return values[mid];
     }
@@ -34,7 +35,8 @@ CursorShapeMetrics measureCursorShape(int width,
                                       int height,
                                       int hotspotX,
                                       int hotspotY,
-                                      const QByteArray& bgra)
+                                      const char* bgra,
+                                      std::size_t bgraSize)
 {
     CursorShapeMetrics metrics;
 
@@ -43,11 +45,11 @@ CursorShapeMetrics measureCursorShape(int width,
         return metrics;
     }
 
-    if (bgra.size() != static_cast<qint64>(width) * height * 4) {
+    if (bgra == nullptr || bgraSize != static_cast<std::size_t>(width) * height * 4) {
         return metrics;
     }
 
-    const uchar* pixels = reinterpret_cast<const uchar*>(bgra.constData());
+    const auto* pixels = reinterpret_cast<const std::uint8_t*>(bgra);
 
     int left = width;
     int top = height;
@@ -59,10 +61,10 @@ CursorShapeMetrics measureCursorShape(int width,
             if (pixels[alphaIndex] <= OpaqueAlphaThreshold) {
                 continue;
             }
-            left = qMin(left, x);
-            top = qMin(top, y);
-            right = qMax(right, x);
-            bottom = qMax(bottom, y);
+            left = std::min(left, x);
+            top = std::min(top, y);
+            right = std::max(right, x);
+            bottom = std::max(bottom, y);
         }
     }
 
@@ -74,7 +76,7 @@ CursorShapeMetrics measureCursorShape(int width,
     const int boxWidth = right - left + 1;
     const int boxHeight = bottom - top + 1;
 
-    QVector<quint8> box(boxWidth * boxHeight, 0);
+    std::vector<std::uint8_t> box(boxWidth * boxHeight, 0);
     int opaqueCount = 0;
     for (int y = 0; y < boxHeight; y++) {
         for (int x = 0; x < boxWidth; x++) {
@@ -88,16 +90,14 @@ CursorShapeMetrics measureCursorShape(int width,
 
     metrics.boxWidth = boxWidth;
     metrics.boxHeight = boxHeight;
-    metrics.fill = static_cast<qreal>(opaqueCount) / (boxWidth * boxHeight);
+    metrics.fill = static_cast<double>(opaqueCount) / (boxWidth * boxHeight);
     metrics.hotspotX = boxWidth > 1
-                           ? qBound(0.0,
-                                    static_cast<qreal>(hotspotX - left) / (boxWidth - 1),
-                                    1.0)
+                           ? std::clamp((static_cast<double>(hotspotX) - left) / (boxWidth - 1),
+                                        0.0, 1.0)
                            : 0.0;
     metrics.hotspotY = boxHeight > 1
-                           ? qBound(0.0,
-                                    static_cast<qreal>(hotspotY - top) / (boxHeight - 1),
-                                    1.0)
+                           ? std::clamp((static_cast<double>(hotspotY) - top) / (boxHeight - 1),
+                                        0.0, 1.0)
                            : 0.0;
 
     int matchV = 0;
@@ -117,15 +117,15 @@ CursorShapeMetrics measureCursorShape(int width,
             }
         }
     }
-    metrics.symV = static_cast<qreal>(matchV) / (boxWidth * boxHeight);
-    metrics.symH = static_cast<qreal>(matchH) / (boxWidth * boxHeight);
-    metrics.symRot180 = static_cast<qreal>(matchRot180) / (boxWidth * boxHeight);
+    metrics.symV = static_cast<double>(matchV) / (boxWidth * boxHeight);
+    metrics.symH = static_cast<double>(matchH) / (boxWidth * boxHeight);
+    metrics.symRot180 = static_cast<double>(matchRot180) / (boxWidth * boxHeight);
 
-    qreal sumX = 0.0;
-    qreal sumY = 0.0;
-    qreal sumXX = 0.0;
-    qreal sumYY = 0.0;
-    qreal sumXY = 0.0;
+    double sumX = 0.0;
+    double sumY = 0.0;
+    double sumXX = 0.0;
+    double sumYY = 0.0;
+    double sumXY = 0.0;
     for (int y = 0; y < boxHeight; y++) {
         for (int x = 0; x < boxWidth; x++) {
             if (box[y * boxWidth + x] == 0) {
@@ -133,26 +133,26 @@ CursorShapeMetrics measureCursorShape(int width,
             }
             sumX += x;
             sumY += y;
-            sumXX += static_cast<qreal>(x) * x;
-            sumYY += static_cast<qreal>(y) * y;
-            sumXY += static_cast<qreal>(x) * y;
+            sumXX += static_cast<double>(x) * x;
+            sumYY += static_cast<double>(y) * y;
+            sumXY += static_cast<double>(x) * y;
         }
     }
-    const qreal meanX = sumX / opaqueCount;
-    const qreal meanY = sumY / opaqueCount;
-    const qreal varX = sumXX / opaqueCount - meanX * meanX;
-    const qreal varY = sumYY / opaqueCount - meanY * meanY;
+    const double meanX = sumX / opaqueCount;
+    const double meanY = sumY / opaqueCount;
+    const double varX = sumXX / opaqueCount - meanX * meanX;
+    const double varY = sumYY / opaqueCount - meanY * meanY;
     if (varX > 0.0 && varY > 0.0) {
-        const qreal covXY = sumXY / opaqueCount - meanX * meanY;
+        const double covXY = sumXY / opaqueCount - meanX * meanY;
         metrics.diagonalCorrelation =
-            qBound(-1.0, covXY / std::sqrt(varX * varY), 1.0);
+            std::clamp(covXY / std::sqrt(varX * varY), -1.0, 1.0);
     }
 
     // 正中那块的不透明占比。圆环中间是空的，四向箭头和十字的臂在中心交汇是实的。
     const int centerLeft = boxWidth * 3 / 8;
     const int centerTop = boxHeight * 3 / 8;
-    const int centerWidth = qMax(1, boxWidth / 4);
-    const int centerHeight = qMax(1, boxHeight / 4);
+    const int centerWidth = std::max(1, boxWidth / 4);
+    const int centerHeight = std::max(1, boxHeight / 4);
     int centerOpaque = 0;
     for (int y = centerTop; y < centerTop + centerHeight; y++) {
         for (int x = centerLeft; x < centerLeft + centerWidth; x++) {
@@ -162,9 +162,9 @@ CursorShapeMetrics measureCursorShape(int width,
         }
     }
     metrics.centerFill =
-        static_cast<qreal>(centerOpaque) / (centerWidth * centerHeight);
+        static_cast<double>(centerOpaque) / (centerWidth * centerHeight);
 
-    QVector<int> rowWidths(boxHeight, 0);
+    std::vector<int> rowWidths(boxHeight, 0);
     for (int y = 0; y < boxHeight; y++) {
         for (int x = 0; x < boxWidth; x++) {
             if (box[y * boxWidth + x] != 0) {
@@ -173,29 +173,29 @@ CursorShapeMetrics measureCursorShape(int width,
         }
     }
 
-    const qreal medianRow = medianOf(rowWidths);
+    const double medianRow = medianOf(rowWidths);
     const auto widestRow = std::max_element(rowWidths.cbegin(), rowWidths.cend());
     const int maxRow = *widestRow;
     const int widestRowIndex =
         static_cast<int>(std::distance(rowWidths.cbegin(), widestRow));
 
-    const int topRows = qMax(1, boxHeight * 15 / 100);
+    const int topRows = std::max(1, boxHeight * 15 / 100);
     int topSum = 0;
     for (int y = 0; y < topRows; y++) {
         topSum += rowWidths[y];
     }
     if (medianRow > 0.0) {
-        metrics.topWidthRatio = (static_cast<qreal>(topSum) / topRows) / medianRow;
+        metrics.topWidthRatio = (static_cast<double>(topSum) / topRows) / medianRow;
     }
     if (maxRow > 0) {
-        metrics.firstRowRatio = static_cast<qreal>(rowWidths[0]) / maxRow;
+        metrics.firstRowRatio = static_cast<double>(rowWidths[0]) / maxRow;
     }
     if (boxHeight > 1) {
         metrics.widestRowPosition =
-            static_cast<qreal>(widestRowIndex) / (boxHeight - 1);
+            static_cast<double>(widestRowIndex) / (boxHeight - 1);
     }
 
-    const int upperHalf = qMax(1, boxHeight / 2);
+    const int upperHalf = std::max(1, boxHeight / 2);
     for (int y = 0; y + 1 < upperHalf; y++) {
         if (rowWidths[y + 1] < rowWidths[y]) {
             metrics.topMonotoneViolations++;
@@ -213,8 +213,8 @@ NativeCursorShape classifyCursorShape(const CursorShapeMetrics& metrics)
     }
 
     // >1 表示竖着长
-    const qreal tallness =
-        static_cast<qreal>(metrics.boxHeight) / metrics.boxWidth;
+    const double tallness =
+        static_cast<double>(metrics.boxHeight) / metrics.boxWidth;
     const bool centeredHotspot =
         metrics.hotspotX >= 0.30 && metrics.hotspotX <= 0.70 &&
         metrics.hotspotY >= 0.30 && metrics.hotspotY <= 0.70;
@@ -324,10 +324,11 @@ NativeCursorShape classifyCursorShape(int width,
                                       int height,
                                       int hotspotX,
                                       int hotspotY,
-                                      const QByteArray& bgra)
+                                      const char* bgra,
+                                      std::size_t bgraSize)
 {
     return classifyCursorShape(
-        measureCursorShape(width, height, hotspotX, hotspotY, bgra));
+        measureCursorShape(width, height, hotspotX, hotspotY, bgra, bgraSize));
 }
 
 const char* nativeCursorShapeName(NativeCursorShape shape)
