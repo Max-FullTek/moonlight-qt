@@ -123,6 +123,7 @@ $testResults += @{ name = 'gui-qml-startup'; result = 'passed-offscreen-no-host'
 Invoke-Checked 'python' @((Join-Path $PSScriptRoot 'smoke-gpui-core.py'), $deploy, (Join-Path $root 'core-smoke'))
 $testResults += @{ name = 'gpui-core-protocol-lifecycle'; result = 'passed-offscreen-no-host' }
 
+$githubActions = $env:GITHUB_ACTIONS -eq 'true'
 $provenance = [ordered]@{
     schemaVersion = 1
     repository = $env:GITHUB_REPOSITORY
@@ -131,9 +132,10 @@ $provenance = [ordered]@{
     baseCommit = 'ac1a11ea8396e56545c24e2d4203a17e76777a23'
     version = $version
     submodules = $submodules
-    runUrl = "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
-    runAttempt = $env:GITHUB_RUN_ATTEMPT
-    runnerImage = "$env:ImageOS/$env:ImageVersion"
+    buildEnvironment = if ($githubActions) { 'github-actions' } else { 'local' }
+    runUrl = if ($githubActions) { "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } else { $null }
+    runAttempt = if ($githubActions) { $env:GITHUB_RUN_ATTEMPT } else { $null }
+    runnerImage = if ($githubActions) { "$env:ImageOS/$env:ImageVersion" } else { 'local-windows-x64' }
     qt = @{ version = $qtVersion; qmakeSha256 = (Get-FileHash $qmake -Algorithm SHA256).Hash; origin = 'Qt official prebuilt SDK, installer hash verification enabled' }
     gpui = @{ version = '0.2.2'; rust = '1.99.1'; protocol = 1; qmlInWorker = $false }
     qtInstaller = @{ repository = 'jdpurcell/naqt'; commit = $env:NAQT_COMMIT }
