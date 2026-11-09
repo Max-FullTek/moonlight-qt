@@ -46,7 +46,7 @@ Windows Lite 原生库另有无 Qt 入口 `scripts/build-lite-native.ps1`（CI�
 
 ## 仅本地/手动
 
-`native_host_http` 是 C++／libcurl／既有 OpenSSL 的独立能力探测，运行 `scripts/test-native-host-http.ps1`。脚本验证固定 curl 来源杂凑、构建并以不含 Qt 的 PATH 执行 Python loopback TLS fixture；覆盖完整凭证比对先于 HTTP、同公钥换证拒绝、mTLS、禁止重新导向、代理绕过、期限和回應上限。只复用公开测试金钥，不连接真实主机或操作用户配对资料，也不属于正式产品或 portable 封装。
+`native_host_http` 直接链接生产 `nativehttptransport.*`，运行 `scripts/test-native-host-http.ps1`（另可传 `-Configuration Debug`）。脚本验证固定 curl 来源杂凑、构建并以不含 Qt 的 PATH 执行 Python loopback TLS fixture；覆盖完整凭证比对先于 HTTP、同公钥换证拒绝、记忆体 mTLS、禁止重新导向、代理绕过、期限和回應上限，并验证取消等待的唤醒、UTF-8 JSON、HTTP 错误 status／body、连续身分切换及未配对 HTTP 的明确开关。只复用公开测试金钥，不连接真实主机或操作用户配对资料。此模组也可透过原生核心的 `-CurlSourceDirectory` 选项构建，现有 Qt worker／portable 尚未切换。
 
 `vulkan_video_renderer` 与 `ffmpeg_video_decoder`（仅 CMake）默认不启动 GPU，验证生产链接／owner 生命周期、格式与视窗状态契约，以及通用 hwaccel 能力覆盖。显式 `vulkan_video_renderer.exe --probe` 使用实际 Vulkan 上传、呈现与图层，并建立通用 D3D11 context；`ffmpeg_video_decoder.exe <repo-root> --probe` 复用生产探测影格，分别验证 H.264／HEVC／AV1 的软件及硬体解码和 renderer 映射。两者的 PATH 均需固定 `libs/windows/lib/x64`，无 Qt；未读回最终呈现像素，不验收持续串流、HDR、全萤幕或延迟。探测不纳入默认 CTest。
 

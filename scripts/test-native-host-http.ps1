@@ -1,5 +1,8 @@
-# Explicit capability probe, not a production transport or part of portable packaging.
-param([string]$BuildDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'build/native-host-http'))
+# Explicit native transport regression; not part of portable packaging yet.
+param(
+    [string]$BuildDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'build/native-host-http'),
+    [ValidateSet('Release', 'Debug')][string]$Configuration = 'Release'
+)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repoRoot = Split-Path $PSScriptRoot -Parent
@@ -24,13 +27,13 @@ if ($LASTEXITCODE -ne 0 -or !$cmakePaths.Count) { throw 'Installed VS CMake is r
 $cmake = $cmakePaths[0]
 & $cmake -S (Join-Path $repoRoot 'tests/native_host_http') -B $BuildDirectory -G 'Visual Studio 17 2022' -A x64 "-DCURL_SOURCE_DIRECTORY=$source"
 if ($LASTEXITCODE -ne 0) { throw 'HTTP probe configure failed' }
-& $cmake --build $BuildDirectory --config Release --parallel 2
+& $cmake --build $BuildDirectory --config $Configuration --parallel 2
 if ($LASTEXITCODE -ne 0) { throw 'HTTP probe build failed' }
 $python = (Get-Command python.exe -ErrorAction Stop).Source
 $savedPath = $env:PATH
 try {
     $env:PATH = "$(Join-Path $repoRoot 'libs/windows/lib/x64');$env:SystemRoot/System32;$env:SystemRoot"
     $work = Join-Path $BuildDirectory ('scenarios-' + [guid]::NewGuid().ToString('N'))
-    & $python (Join-Path $repoRoot 'tests/native_host_http/check.py') (Join-Path $BuildDirectory 'Release/native_host_http.exe') (Join-Path $repoRoot 'tests/clipboard_payload_routing/fixtures') $work
+    & $python (Join-Path $repoRoot 'tests/native_host_http/check.py') (Join-Path $BuildDirectory "$Configuration/native_host_http.exe") (Join-Path $repoRoot 'tests/clipboard_payload_routing/fixtures') $work
     if ($LASTEXITCODE -ne 0) { throw 'HTTP capability checks failed' }
 } finally { $env:PATH = $savedPath }

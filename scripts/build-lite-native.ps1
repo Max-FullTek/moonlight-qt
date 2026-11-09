@@ -3,7 +3,8 @@
 param(
     [string]$SourceRoot = (Split-Path $PSScriptRoot -Parent),
     [string]$BuildDirectory,
-    [ValidateSet('Release', 'Debug')][string]$Configuration = 'Release'
+    [ValidateSet('Release', 'Debug')][string]$Configuration = 'Release',
+    [string]$CurlSourceDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,8 +36,11 @@ if ($cmakeCommand) {
 $ctest = Join-Path (Split-Path $cmake -Parent) 'ctest.exe'
 if (!(Test-Path -LiteralPath $ctest)) { throw 'ctest.exe must be beside cmake.exe.' }
 
-Invoke-Checked $cmake @('-S', (Join-Path $SourceRoot 'windows-lite'), '-B', $BuildDirectory,
-    '-G', 'Visual Studio 17 2022', '-A', 'x64', '-DBUILD_TESTING=ON')
+$httpOptions = if ($CurlSourceDirectory) {
+    @('-DLITE_ENABLE_NATIVE_HTTP=ON', "-DCURL_SOURCE_DIRECTORY=$([IO.Path]::GetFullPath($CurlSourceDirectory))")
+} else { @('-DLITE_ENABLE_NATIVE_HTTP=OFF') }
+Invoke-Checked $cmake (@('-S', (Join-Path $SourceRoot 'windows-lite'), '-B', $BuildDirectory,
+    '-G', 'Visual Studio 17 2022', '-A', 'x64', '-DBUILD_TESTING=ON') + $httpOptions)
 Invoke-Checked $cmake @('--build', $BuildDirectory, '--config', $Configuration, '--parallel', '2')
 
 # Tests may load only the native dependencies and Windows runtime from PATH.

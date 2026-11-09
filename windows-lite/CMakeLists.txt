@@ -34,6 +34,13 @@ set(ENET_NO_INSTALL ON CACHE BOOL "Do not install the embedded ENet library")
 set(USE_MBEDTLS OFF CACHE BOOL "Use the existing OpenSSL dependency")
 include(CTest)
 
+# The host-control transport is opt-in until the matching curl source has been
+# prepared and the Qt NvHTTP owner is migrated. Never download during CMake.
+option(LITE_ENABLE_NATIVE_HTTP "Build the native host HTTP transport" OFF)
+if(LITE_ENABLE_NATIVE_HTTP)
+    add_subdirectory(host-http)
+endif()
+
 # Match the existing Windows qmake hardening and symbol generation.
 add_compile_options(/utf-8 /Zi /guard:cf /guard:ehcont)
 add_link_options(/DEBUG /guard:cf /guard:ehcont /CETCOMPAT)

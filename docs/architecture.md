@@ -99,11 +99,15 @@ GPUI 位元率操作结果只显示在控制页，不再触发游戏画面的 Qt
 
 显式执行 `native_notification` 可验证实际 GPU 合成与 SDL 影片 swapchain 共存：只 Present 一次影片，隐藏后重新显示通知、释放影片装置后更新、缩放、期限替换与到期隐藏、跨执行绪拒绝、无效 owner 及销毁后重建。`--visible` 展示五个阶段便于目视确认繁中与半透明；不自动加入可能没有桌面合成器的 CTest。此验证不等于真实串流、全萤幕、HDR、跨萤幕 DPI 或效能验收；正式切换尚需完成这些检查与已确认的警告／操作回馈流程迁移。
 
-## 主机控制 HTTP 的原生能力验证
+## 主机控制 HTTP 原生传输
 
-已确认先验证 C++＋libcurl＋既有 OpenSSL，保留 worker／IPC 边界。`scripts/test-native-host-http.ps1` 是独立探测入口，尚未链接产品或 portable 包；它以官方 curl 8.23.0 ZIP 的固定 SHA256 `85477fe11408471285f38a601e7c6f53470d13be9a5a316919b071ad02e68213` 验证来源，静态构建 libcurl，并只链接既有 OpenSSL 3.6.5。源码与产物留在忽略的 `build/`，不安装系统工具。来源：[官方 release](https://github.com/curl/curl/releases/tag/curl-8_23_0)。正式采用时仍须纳入依赖准备、许可告示及封装来源验证。
+已确认采用 C++＋libcurl＋既有 OpenSSL 方向验证，保留 worker／IPC 边界。原探测中的传输逻辑已抽至 `app/backend/nativehttptransport.*`，由 `windows-lite/host-http` 的 `lite-native-host-http` 静态库构建；测试直接复用它，不另存一份 TLS 实作。模组以标准型别处理 GET／POST、原始回應、配对 leaf DER 及记忆体中的客戶端 PEM 身分，不访问 profile、私钥暂存档或系统凭证库。HTTP status 与 body 留给上层协议政策；取消、期限、超限、凭证不符及传输／设置错误分别回报，失败不交出部分 body。
+
+`scripts/test-native-host-http.ps1` 验证官方 curl 8.23.0 ZIP 的固定 SHA256 `85477fe11408471285f38a601e7c6f53470d13be9a5a316919b071ad02e68213`，静态构建 libcurl，并只链接既有 OpenSSL 3.6.5。可传 `-Configuration Debug`，测试 PATH 不含 Qt；源码与产物留在忽略的 `build/`，不安装系统工具。来源：[官方 release](https://github.com/curl/curl/releases/tag/curl-8_23_0)。准备此来源后，也可给 `scripts/build-lite-native.ps1` 传 `-CurlSourceDirectory <source>`，在原生核心中构建同一模组；未提供时不启用，不在 CMake 中下载。产品 `NvHTTP` 与 portable 尚未改用它，正式切换仍需接上 owner 生命周期／应用关闭、既有错误政策、配对与控制流程、许可告示及封装来源验证。
 
 `tests/native_host_http` 复用公开的剪贴板 TLS fixture，只访问随机 loopback port。完整 leaf DER 在 OpenSSL 握手验证 callback 中比对，不以公钥 pin 替代；匹配配对凭证才接受其自签／名称／有效期属性，行为目的与现有 `PairedCertificate` 相同。测试从伺服器端确认不同凭证与同公钥换证都未收到 HTTP 请求，并覆盖客戶端凭证、HTTP/1.1、禁止重新导向、忽略代理环境、期限取消及回應大小上限。探测显式禁止连接／TLS session 重用，避免自订验证策略跨请求遗留；参见 [libcurl SSL context callback](https://curl.se/libcurl/c/CURLOPT_SSL_CTX_FUNCTION.html)。这不代表正式配对、应用启停、取消／关闭、错误映射、凭证轮换或持续连接已验收；不读取用户身分或旧设定。
+
+传输在调用者选择的执行绪执行，使用 `curl_multi_poll` 的 socket／期限等待；跨执行绪取消以 `curl_multi_wakeup` 唤醒，不由模组增加执行绪或固定间隔轮询。取消 token 单调且同一时间只接受一个请求，注册／解除与唤醒同步，避免对已销毁的 multi handle 操作。回归另覆盖等待前取消、等待中取消、UTF-8 JSON、准确达到回應上限、无效 pin／不完整身分、连续请求切换 pin／移除客戶端身分，以及仅允许明确无身分的未配对 HTTP。应用级关闭仍由未来 owner 负责，不能把 token 测试视为现有 Session 已完成无 Qt 生命周期迁移。
 
 ## 历史
 
