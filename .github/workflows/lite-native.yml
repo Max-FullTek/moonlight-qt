@@ -9,6 +9,9 @@ on:
       - tests/lite_native/**
       - tests/keyboard_state/**
       - tests/cursor_shape_classification/**
+      - tests/sdl_audio_renderer/**
+      - app/streaming/audio/renderers/**
+      - app/SDL_compat.h
       - tests/gamepad_sensor_rate/**
       - tests/pen_history_selection/**
       - app/streaming/input/keyboardstate.h

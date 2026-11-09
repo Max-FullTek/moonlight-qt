@@ -14,7 +14,8 @@ set(LITE_DEPS_ROOT "${LITE_SOURCE_ROOT}/libs/windows" CACHE PATH
 set(LITE_DEPS_LIB "${LITE_DEPS_ROOT}/lib/x64")
 
 foreach(required IN ITEMS include/x64/openssl/ssl.h include/detours.h
-                          lib/x64/libcrypto.lib lib/x64/libcrypto-3-x64.dll lib/x64/detours.lib)
+                          lib/x64/libcrypto.lib lib/x64/libcrypto-3-x64.dll lib/x64/detours.lib
+                          include/x64/SDL2/SDL.h lib/x64/SDL2.lib lib/x64/SDL2.dll lib/x64/SDL3.dll)
     if(NOT EXISTS "${LITE_DEPS_ROOT}/${required}")
         message(FATAL_ERROR "Missing ${LITE_DEPS_ROOT}/${required}; prepare the pinned Windows dependencies first")
     endif()
@@ -63,6 +64,20 @@ add_library(lite-cursor-shape STATIC
 target_compile_features(lite-cursor-shape PUBLIC cxx_std_17)
 target_compile_options(lite-cursor-shape PRIVATE /W3 /WX)
 target_include_directories(lite-cursor-shape PUBLIC "${LITE_SOURCE_ROOT}/app")
+
+# Use the same pinned SDL import library as the Qt build; do not discover a
+# second SDL installation from the developer's environment.
+add_library(lite-sdl2 SHARED IMPORTED)
+set_target_properties(lite-sdl2 PROPERTIES
+    IMPORTED_IMPLIB "${LITE_DEPS_LIB}/SDL2.lib"
+    IMPORTED_LOCATION "${LITE_DEPS_LIB}/SDL2.dll"
+    INTERFACE_INCLUDE_DIRECTORIES "${LITE_DEPS_ROOT}/include/x64/SDL2")
+add_library(lite-sdl-audio STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/audio/renderers/sdlaud.cpp")
+target_compile_features(lite-sdl-audio PUBLIC cxx_std_17)
+target_compile_options(lite-sdl-audio PRIVATE /W3 /WX)
+target_include_directories(lite-sdl-audio PUBLIC "${LITE_SOURCE_ROOT}/app")
+target_link_libraries(lite-sdl-audio PUBLIC moonlight-common-c lite-sdl2)
 
 if(BUILD_TESTING)
     # The pinned fork's decode fixture omits stopVideoDepacketizer() before
@@ -119,4 +134,12 @@ if(BUILD_TESTING)
     target_compile_options(cursor_shape_classification PRIVATE /W3 /WX)
     add_test(NAME cursor_shape_classification COMMAND cursor_shape_classification)
     set_tests_properties(cursor_shape_classification PROPERTIES TIMEOUT 15)
+
+    add_executable(sdl_audio_renderer
+        "${LITE_SOURCE_ROOT}/tests/sdl_audio_renderer/main.cpp")
+    target_compile_definitions(sdl_audio_renderer PRIVATE SDL_MAIN_HANDLED)
+    target_compile_options(sdl_audio_renderer PRIVATE /W3 /WX)
+    target_link_libraries(sdl_audio_renderer PRIVATE lite-sdl-audio)
+    add_test(NAME sdl_audio_renderer COMMAND sdl_audio_renderer)
+    set_tests_properties(sdl_audio_renderer PROPERTIES TIMEOUT 15)
 endif()
