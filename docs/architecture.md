@@ -21,7 +21,7 @@
 | 目录/文件 | 用途 |
 |---|---|
 | `clipboard-helper/` | 剪贴板同步 helper(独立进程) |
-| `windows-lite/` | Windows Lite 的无 Qt CMake 入口，构建原生库、输入 helper、音讯 pipeline、压缩影格组装、画面排程与 SDL 影像输出；不包含仍依赖 Qt 的完整串流 app 与剪贴板 helper |
+| `windows-lite/` | Windows Lite 的无 Qt CMake 入口，构建原生库、输入 helper、音讯 pipeline、压缩影格组装、画面排程、统计文字与 SDL 影像输出；不包含仍依赖 Qt 的完整串流 app 与剪贴板 helper |
 | `usb-helper/` | macOS USB/IP 后端 helper(moonlight-usbd,C++23 + CMake,内嵌自己的 third_party 子模块) |
 | `file-mapping/` | 主机文件共享:mount / protocol / vfs 三层(`FileMapping` 命名空间);`smoke/` 是手工冒烟二进制(不在 CI) |
 | `tests/` | 测试目录,CI 覆盖矩阵与约定见 [../tests/README.md](../tests/README.md) |
@@ -51,7 +51,9 @@ SDL 音讯输出与共用音讯 renderer 介面已不依赖 Qt；仍直接复用
 
 音讯 backend 建立与 Opus→PCM 解码／送出抽至无 Qt 的 `audio/audiopipeline.*`，Qt Session 直接调用，仍负责静音、decoder／renderer 生命周期及失败重试时序；`ML_AUDIO` 的解析保留原 Qt 路径。`audio_pipeline` 使用固定 Opus 实库验证 stereo／5.1／7.1、float／s16 PCM 与直接 Opus 解码输出一致，并覆盖输出失败、空 buffer 与后端清理，不新增 PCM 中转复制。
 
-影像解码参数与解析度使用 `videodecoderoptions.h` 的原生型别；Qt 偏好设定保留原 Q_ENUM 名称与数值，在 Session 边界转换。`overlayrenderer.h` 只保留原生渲染通知，文字／字型载入仍由 Qt OverlayManager 负责。Windows 的生产 Pacer 与 DxVsyncSource 已纳入无 Qt CMake：标准 C++ 佇列、mutex／condition variable 与 atomic 停止旗标，保留三幀佇列上限、500 ms 历史、丢幀策略、SDL 渲染线程及延后一幀释放。停止转移与等待同步，空佇列等待抵御虚假唤醒；其他平台的 Wayland Qt 桥接仍保留。
+影像解码参数与解析度使用 `videodecoderoptions.h` 的原生型别；Qt 偏好设定保留原 Q_ENUM 名称与数值，在 Session 边界转换。`overlayrenderer.h` 只保留原生渲染通知。Windows 的生产 Pacer 与 DxVsyncSource 已纳入无 Qt CMake：标准 C++ 佇列、mutex／condition variable 与 atomic 停止旗标，保留三幀佇列上限、500 ms 历史、丢幀策略、SDL 渲染线程及延后一幀释放。停止转移与等待同步，空佇列等待抵御虚假唤醒；其他平台的 Wayland Qt 桥接仍保留。
+
+统计／状态文字的生产 `OverlayManager` 已纳入无 Qt CMake，保留既有 SDL_ttf 格式解析、字型与 surface 拥有权。owner 以 `std::string` 移入字型资料；过渡期 Session 仍透过原 Qt `Path::readDataFile()` 选择相同档案／内嵌资源，不改变查找顺序。`overlay_text` 比对修改前 Qt 版本的五组固定像素结果，并验证 surface 交接、开关、多个 owner 与字型生命周期；不代表真实串流、DPI 或 HDR 已验收。
 
 `video/decodebuffer.*` 复用原压缩包拼接、H.264 SPS 修正与 AV1 OBU 重排，由 Qt FFmpeg decoder 直接调用；可重用原生缓冲区在扩容时无需复制旧包，每包实际长度后明确补零，满足 FFmpeg padding 要求。原始探测影片样本与原生测试共用，十组 H.264／HEVC／AV1、8／10-bit 与 4:2:0／4:4:4 经分段组装后，以实际软件 decoder 验证像素与原始样本一致，并送入生产 Pacer。此路径使用测试 renderer，不证明 GPU 呈现、实体 V-sync、影音同步或真实游戏串流通过；完整 FFmpeg orchestration、GPU renderer、视窗与 Session 仍有 Qt 相依。
 
@@ -73,7 +75,7 @@ Windows Lite 的 GPUI 串流入口使用现有前端视窗中的有焦点控制�
 
 「暂时断线」明确保留 host 工作阶段；「结束工作阶段」在断线后沿用 `NvHTTP::quitApp()` 的 `cancel` 请求，要求主机结束 Desktop／应用程式工作阶段。主机显示还原依 Sunshine／VDD 设定，client 不自行切换 host 萤幕；请求失败会回报错误。控制页另保留统计、全萤幕、滑鼠模式、游标、文字贴上、范围锁定与即时位元率操作。
 
-此控制页尚需真实 Sunshine／Desktop 串流验证 Windows 焦点、全萤幕、手把输入交接及两种断线结果；模擬核心的介面检查不能代替此验收。GPUI 前端仍由其 Cargo 路径构建，串流 worker、被动 toast、统计文字绘制与剪贴板 helper 仍需 Qt；现有 portable 封装仍走 qmake／windeployqt。不得把原生库或控制页编译通过视为 Windows Lite 已完成无 Qt 交付。
+此控制页尚需真实 Sunshine／Desktop 串流验证 Windows 焦点、全萤幕、手把输入交接及两种断线结果；模擬核心的介面检查不能代替此验收。GPUI 前端仍由其 Cargo 路径构建，串流 worker、被动 toast、字型资源查找与剪贴板 helper 仍需 Qt；现有 portable 封装仍走 qmake／windeployqt。不得把原生库或控制页编译通过视为 Windows Lite 已完成无 Qt 交付。
 
 ## 历史
 

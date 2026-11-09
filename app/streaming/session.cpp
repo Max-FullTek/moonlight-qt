@@ -1,4 +1,5 @@
 #include "session.h"
+#include "path.h"
 #include "clipboardhelperclient.h"
 #include "settings/streamingpreferences.h"
 #include "streaming/streamutils.h"
@@ -1176,7 +1177,8 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences* prefere
       m_HasReceivedVideo(false), m_LastTerminationErrorCode(0), m_AsyncConnectionSuccess(false),
       m_LastClientSdrWhiteNits(0.0f), m_PortTestResults(0), m_OpusDecoder(nullptr),
       m_AudioRenderer(nullptr), m_DualSenseHapticsRenderer(nullptr), m_AudioSampleCount(0),
-      m_DropAudioEndTime(0), m_MenuPanel(nullptr), m_DeferCaptureRestore(false),
+      m_DropAudioEndTime(0), m_OverlayManager(Path::readDataFile("ModeSeven.ttf").toStdString()),
+      m_MenuPanel(nullptr), m_DeferCaptureRestore(false),
       m_PendingMicToggle(false),
 #ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS
       m_StylusReplayTest(nullptr), m_WasCapturedBeforeStylusReplayPanel(false),

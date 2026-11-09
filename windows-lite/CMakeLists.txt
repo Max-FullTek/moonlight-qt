@@ -80,6 +80,22 @@ target_compile_options(lite-sdl-audio PRIVATE /W3 /WX)
 target_include_directories(lite-sdl-audio PUBLIC "${LITE_SOURCE_ROOT}/app")
 target_link_libraries(lite-sdl-audio PUBLIC moonlight-common-c lite-sdl2)
 
+foreach(required IN ITEMS include/x64/SDL2/SDL_ttf.h lib/x64/SDL2_ttf.lib lib/x64/SDL2_ttf.dll)
+    if(NOT EXISTS "${LITE_DEPS_ROOT}/${required}")
+        message(FATAL_ERROR "Missing pinned SDL_ttf dependency: ${required}")
+    endif()
+endforeach()
+add_library(lite-sdl-ttf SHARED IMPORTED)
+set_target_properties(lite-sdl-ttf PROPERTIES
+    IMPORTED_IMPLIB "${LITE_DEPS_LIB}/SDL2_ttf.lib"
+    IMPORTED_LOCATION "${LITE_DEPS_LIB}/SDL2_ttf.dll")
+target_link_libraries(lite-sdl-ttf INTERFACE lite-sdl2)
+add_library(lite-overlay-text STATIC "${LITE_SOURCE_ROOT}/app/streaming/video/overlaymanager.cpp")
+target_compile_features(lite-overlay-text PUBLIC cxx_std_17)
+target_compile_options(lite-overlay-text PRIVATE /W3 /WX)
+target_include_directories(lite-overlay-text PUBLIC "${LITE_SOURCE_ROOT}/app")
+target_link_libraries(lite-overlay-text PUBLIC lite-sdl-ttf)
+
 add_library(lite-opus SHARED IMPORTED)
 set_target_properties(lite-opus PROPERTIES
     IMPORTED_IMPLIB "${LITE_DEPS_LIB}/opus.lib"
@@ -182,6 +198,13 @@ if(BUILD_TESTING)
     target_link_libraries(lite-native-link-test PRIVATE moonlight-common-c h264bitstream)
     add_test(NAME lite-native-link-test COMMAND lite-native-link-test)
     set_tests_properties(lite-native-link-test PROPERTIES TIMEOUT 15)
+
+    add_executable(overlay_text "${LITE_SOURCE_ROOT}/tests/overlay_text/main.cpp")
+    target_compile_definitions(overlay_text PRIVATE SDL_MAIN_HANDLED)
+    target_compile_options(overlay_text PRIVATE /W3 /WX)
+    target_link_libraries(overlay_text PRIVATE lite-overlay-text)
+    add_test(NAME overlay_text COMMAND overlay_text "${LITE_SOURCE_ROOT}/app/ModeSeven.ttf")
+    set_tests_properties(overlay_text PROPERTIES TIMEOUT 15)
 
     # These state/placement tests compile the production helpers directly and have
     # no Qt, SDL window, streaming host, or user-data dependency.

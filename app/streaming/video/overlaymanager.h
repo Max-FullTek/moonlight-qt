@@ -1,6 +1,5 @@
 #pragma once
 
-#include <QByteArray>
 #include "overlayrenderer.h"
 #include <string>
 #include <vector>
@@ -19,7 +18,8 @@ enum TextAlignment {
 class OverlayManager
 {
 public:
-    OverlayManager();
+    // Own the font bytes for the lifetime of every SDL_ttf font/RWops.
+    explicit OverlayManager(std::string fontData);
     ~OverlayManager();
 
     bool isOverlayEnabled(OverlayType type);
@@ -73,7 +73,7 @@ private:
         SDL_Surface* surface;
     } m_Overlays[OverlayMax];
     IOverlayRenderer* m_Renderer;
-    QByteArray m_FontData;
+    std::string m_FontData;
 };
 
 }

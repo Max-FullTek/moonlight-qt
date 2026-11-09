@@ -1,9 +1,10 @@
 #include "overlaymanager.h"
-#include "path.h"
 #include <string>
 #include <vector>
 #include <regex>
 #include <algorithm>
+#include <limits>
+#include <utility>
 
 using namespace Overlay;
 
@@ -33,10 +34,15 @@ static void configureFontRendering(TTF_Font* font, bool isBold, bool isItalic)
     TTF_SetFontWrappedAlign(font, TTF_WRAPPED_ALIGN_CENTER);
 }
 
-OverlayManager::OverlayManager() :
+OverlayManager::OverlayManager(std::string fontData) :
     m_Renderer(nullptr),
-    m_FontData(Path::readDataFile("ModeSeven.ttf"))
+    m_FontData(std::move(fontData))
 {
+    // SDL_RWFromConstMem accepts an int length. Reject rather than truncate an
+    // oversized font supplied by an owner; the existing empty-font path handles it.
+    if (m_FontData.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        m_FontData.clear();
+    }
     memset(m_Overlays, 0, sizeof(m_Overlays));
 
     // 不使用 SDL_GetDisplayDPI() 的硬件 DPI 来缩放 overlay。
@@ -177,14 +183,14 @@ void OverlayManager::notifyOverlayUpdated(OverlayType type)
 
     // Construct the required font to render the overlay
     if (m_Overlays[type].font == nullptr) {
-        if (m_FontData.isEmpty()) {
+        if (m_FontData.empty()) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "SDL overlay font failed to load");
             return;
         }
 
         // m_FontData must stay around until the font is closed
-        m_Overlays[type].font = TTF_OpenFontRW(SDL_RWFromConstMem(m_FontData.constData(), m_FontData.size()),
+        m_Overlays[type].font = TTF_OpenFontRW(SDL_RWFromConstMem(m_FontData.data(), static_cast<int>(m_FontData.size())),
                                                1,
                                                m_Overlays[type].fontSize);
         if (m_Overlays[type].font == nullptr) {
@@ -335,13 +341,13 @@ TTF_Font* OverlayManager::getFontForStyle(OverlayType type, bool isBold, bool is
 
     // 如果字体还没有创建，创建它
     if (*targetFont == nullptr) {
-        if (m_FontData.isEmpty()) {
+        if (m_FontData.empty()) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "SDL覆盖层字体数据为空");
             return nullptr;
         }
 
-        *targetFont = TTF_OpenFontRW(SDL_RWFromConstMem(m_FontData.constData(), m_FontData.size()),
+        *targetFont = TTF_OpenFontRW(SDL_RWFromConstMem(m_FontData.data(), static_cast<int>(m_FontData.size())),
                                      1,
                                      m_Overlays[type].fontSize);
         if (*targetFont == nullptr) {
@@ -582,13 +588,13 @@ TTF_Font* OverlayManager::getFontForStyleAndSize(OverlayType type, bool isBold, 
     }
 
     // 为不同字号创建临时字体（这里简化处理，实际可以考虑缓存机制）
-    if (m_FontData.isEmpty()) {
+    if (m_FontData.empty()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "SDL覆盖层字体数据为空");
         return nullptr;
     }
 
-    TTF_Font* tempFont = TTF_OpenFontRW(SDL_RWFromConstMem(m_FontData.constData(), m_FontData.size()),
+    TTF_Font* tempFont = TTF_OpenFontRW(SDL_RWFromConstMem(m_FontData.data(), static_cast<int>(m_FontData.size())),
                                        1, fontSize);
     if (tempFont == nullptr) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
