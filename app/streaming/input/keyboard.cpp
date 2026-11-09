@@ -508,7 +508,7 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         m_KeysDown.insert(KeyboardState::pack(keyCode, modifiers, flags));
     }
     else {
-        m_KeysDown.remove(KeyboardState::pack(keyCode, modifiers, flags));
+        m_KeysDown.erase(KeyboardState::pack(keyCode, modifiers, flags));
     }
 
     const char keyAction = event->state == SDL_PRESSED ? KEY_ACTION_DOWN : KEY_ACTION_UP;
@@ -521,7 +521,7 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
                  (int)(0x8000 | keyCode),
                  (int)(unsigned char)modifiers,
                  (int)(unsigned char)flags,
-                 (int)m_KeysDown.count());
+                 (int)m_KeysDown.size());
 
     int rc = LiSendKeyboardEvent2(0x8000 | keyCode,
                                   keyAction,
@@ -534,17 +534,17 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
                     keyAction == KEY_ACTION_DOWN ? "down" : "up",
                     (int)event->keysym.scancode,
                     (int)(0x8000 | keyCode),
-                    (int)m_KeysDown.count());
+                    (int)m_KeysDown.size());
     }
 }
 
 void SdlInputHandler::raiseAllKeys(bool clearKeys)
 {
-    if (m_KeysDown.isEmpty()) {
+    if (m_KeysDown.empty()) {
         return;
     }
 
-    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Raising %d keys%s", (int)m_KeysDown.count(),
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Raising %d keys%s", (int)m_KeysDown.size(),
                 clearKeys ? "" : " (keeping local state for retry)");
 
     const int failedCount = KeyboardState::raiseKeys(m_KeysDown, clearKeys, [](uint32_t keyDown) {

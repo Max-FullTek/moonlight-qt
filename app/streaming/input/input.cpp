@@ -796,7 +796,7 @@ void SdlInputHandler::notifyFocusLost()
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "Input focus lost: windowFlags=0x%08x keysDown=%d capture=%d",
                 (unsigned int)windowFlags,
-                (int)m_KeysDown.count(),
+                (int)m_KeysDown.size(),
                 isCaptureActive() ? 1 : 0);
 
     cancelNativeTouchpadContacts();

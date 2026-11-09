@@ -1,5 +1,4 @@
-QT += core
-QT -= gui
+QT -= core gui
 CONFIG += console c++17
 CONFIG -= app_bundle
 TARGET = keyboard_state

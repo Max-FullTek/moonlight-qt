@@ -7,6 +7,15 @@ on:
     paths:
       - windows-lite/**
       - tests/lite_native/**
+      - tests/keyboard_state/**
+      - tests/gamepad_sensor_rate/**
+      - tests/pen_history_selection/**
+      - app/streaming/input/keyboardstate.h
+      - app/streaming/input/input.h
+      - app/streaming/input/input.cpp
+      - app/streaming/input/keyboard.cpp
+      - app/streaming/input/gamepadsensorrate.h
+      - app/streaming/input/penhistory.h
       - moonlight-common-c/**
       - h264bitstream/**
       - AntiHooking/**

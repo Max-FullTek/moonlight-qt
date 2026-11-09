@@ -1,10 +1,12 @@
 #pragma once
 
 #include <Limelight.h>
-#include <QSet>
 #include <cstdint>
+#include <unordered_set>
 
 namespace KeyboardState {
+using PressedKeys = std::unordered_set<uint32_t>;
+
 inline uint32_t pack(short code, char modifiers, char flags)
 {
     return static_cast<uint16_t>(code) |
@@ -27,14 +29,14 @@ inline char flags(uint32_t state)
 
 // Keep failed releases for the next attempt. Temporary releases must retain all
 // local state so the subsequent physical key-up can still be matched.
-template <typename Sender> int raiseKeys(QSet<uint32_t>& keysDown, bool clearKeys, Sender send)
+template <typename Sender> int raiseKeys(PressedKeys& keysDown, bool clearKeys, Sender send)
 {
     int failedCount = 0;
     const auto snapshot = keysDown;
     for (uint32_t state : snapshot) {
         if (send(state) == 0) {
             if (clearKeys) {
-                keysDown.remove(state);
+                keysDown.erase(state);
             }
         } else {
             failedCount++;

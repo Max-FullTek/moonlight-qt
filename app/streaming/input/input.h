@@ -3,6 +3,7 @@
 #include "settings/streamingpreferences.h"
 #include "streaming/input/gamepadglyphs.h"
 #include "streaming/input/gamepadsensorrate.h"
+#include "streaming/input/keyboardstate.h"
 #ifdef HAS_QT_SDL_WAYLAND_BRIDGE
 #include "streaming/waylandwindowmetrics.h"
 #endif
@@ -227,7 +228,7 @@ public:
     int getAttachedGamepadMask();
 
     void raiseAllKeys(bool clearKeys = true);
-    bool hasKeysDown() const { return !m_KeysDown.isEmpty(); }
+    bool hasKeysDown() const { return !m_KeysDown.empty(); }
 
     void notifyMouseLeave();
 
@@ -451,7 +452,7 @@ private:
 
     int m_GamepadMask;
     GamepadState m_GamepadState[MAX_GAMEPADS];
-    QSet<uint32_t> m_KeysDown;
+    KeyboardState::PressedKeys m_KeysDown;
     bool m_FakeMouseCaptureActive;
     bool m_KeyboardCaptureActive;
     QString m_OldIgnoreDevices;

@@ -94,4 +94,16 @@ if(BUILD_TESTING)
     target_link_libraries(lite-native-link-test PRIVATE moonlight-common-c h264bitstream)
     add_test(NAME lite-native-link-test COMMAND lite-native-link-test)
     set_tests_properties(lite-native-link-test PROPERTIES TIMEOUT 15)
+
+    # These input-state tests compile the production helpers directly and have
+    # no Qt, SDL window, streaming host, or user-data dependency.
+    foreach(input_test IN ITEMS keyboard_state gamepad_sensor_rate pen_history_selection)
+        add_executable(${input_test} "${LITE_SOURCE_ROOT}/tests/${input_test}/main.cpp")
+        target_compile_features(${input_test} PRIVATE cxx_std_17)
+        target_compile_options(${input_test} PRIVATE /W3 /WX)
+        target_include_directories(${input_test} PRIVATE "${LITE_SOURCE_ROOT}/app"
+            "${LITE_SOURCE_ROOT}/moonlight-common-c/moonlight-common-c/src")
+        add_test(NAME ${input_test} COMMAND ${input_test})
+        set_tests_properties(${input_test} PROPERTIES TIMEOUT 15)
+    endforeach()
 endif()
