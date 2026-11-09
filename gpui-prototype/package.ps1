@@ -1,5 +1,12 @@
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
+if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
+    throw 'Set CARGO_TARGET_DIR before packaging the GPUI frontend.'
+}
+# Tests produce a separate test binary. Always build the shipping executable
+# before recording provenance or copying a possibly stale release executable.
+& cargo +1.99.1 build --release --locked --manifest-path (Join-Path $PSScriptRoot 'Cargo.toml')
+if ($LASTEXITCODE -ne 0) { throw 'Cannot build the GPUI release executable; package was not updated.' }
 $outDir = Join-Path $repoRoot 'build/gpui-package'
 New-Item -ItemType Directory -Force $outDir | Out-Null
 $exe = Join-Path $env:CARGO_TARGET_DIR 'release/moonlight-lite-gpui-prototype.exe'
