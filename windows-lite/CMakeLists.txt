@@ -59,6 +59,37 @@ target_include_directories(AntiHooking PRIVATE "${LITE_DEPS_ROOT}/include")
 target_link_libraries(AntiHooking PRIVATE "${LITE_DEPS_LIB}/detours.lib")
 
 if(BUILD_TESTING)
+    # The pinned fork's decode fixture omits stopVideoDepacketizer() before
+    # destroying a used queue. Patch a build-directory copy only: the fork is
+    # read-only to this repository's maintainer, so its gitlink stays unchanged.
+    find_package(Git REQUIRED)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/patches/common-c-decode-test-shutdown.patch")
+    set(decode_fixture_root "${CMAKE_CURRENT_BINARY_DIR}/common-c-test-fixture")
+    file(MAKE_DIRECTORY "${decode_fixture_root}/tests")
+    configure_file(
+        "${LITE_SOURCE_ROOT}/moonlight-common-c/moonlight-common-c/tests/PyrowaveDecodeUnitTest.c"
+        "${decode_fixture_root}/tests/PyrowaveDecodeUnitTest.c" COPYONLY)
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E env
+            # Prevent Git from treating the fixture as a subdirectory of this
+            # checkout and silently skipping paths outside its working prefix.
+            "GIT_CEILING_DIRECTORIES=${CMAKE_CURRENT_BINARY_DIR}"
+            "${GIT_EXECUTABLE}" apply --no-index
+            "${CMAKE_CURRENT_SOURCE_DIR}/patches/common-c-decode-test-shutdown.patch"
+        WORKING_DIRECTORY "${decode_fixture_root}"
+        RESULT_VARIABLE patch_result ERROR_VARIABLE patch_error)
+    if(NOT patch_result EQUAL 0)
+        message(FATAL_ERROR "Cannot apply the pinned common-c test fixture fix: ${patch_error}")
+    endif()
+    # The fixture's ../src includes resolve against the existing src include
+    # directory. All production code and data still come from the submodule.
+    set_property(TARGET pyrowave-decode-unit-tests PROPERTY SOURCES
+        "${decode_fixture_root}/tests/PyrowaveDecodeUnitTest.c")
+    target_include_directories(pyrowave-decode-unit-tests PRIVATE
+        "${LITE_SOURCE_ROOT}/moonlight-common-c/moonlight-common-c/tests")
+    target_sources(pyrowave-decode-unit-tests PRIVATE
+        "${LITE_SOURCE_ROOT}/tests/lite_native/assert_reporting.c")
     add_executable(lite-native-link-test "${LITE_SOURCE_ROOT}/tests/lite_native/main.c")
     target_link_libraries(lite-native-link-test PRIVATE moonlight-common-c h264bitstream)
     add_test(NAME lite-native-link-test COMMAND lite-native-link-test)

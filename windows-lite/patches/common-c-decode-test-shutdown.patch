@@ -1,0 +1,12 @@
+diff --git a/tests/PyrowaveDecodeUnitTest.c b/tests/PyrowaveDecodeUnitTest.c
+index e1ede61..e51a663 100644
+--- a/tests/PyrowaveDecodeUnitTest.c
++++ b/tests/PyrowaveDecodeUnitTest.c
+@@ -166,6 +166,7 @@ int main(void) {
+     NegotiatedDynamicHdrFormat = DYNAMIC_HDR_FORMAT_NONE;
+     CHECK(processPyrowaveMetadata(NULL, 0, 0));
+     CHECK(frameHostProcessingLatency == 0);
++    stopVideoDepacketizer();
+     destroyVideoDepacketizer();
+     puts("PASS: same-frame metadata ownership and production depacketizer validation");
+     return 0;

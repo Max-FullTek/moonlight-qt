@@ -43,7 +43,9 @@
 
 当前入口为 `./scripts/build-lite-native.ps1`，需要 Windows x64、VS 2022 C++ Build Tools、CMake 3.24+，以及既有 `libs/windows` 依赖。干净 checkout 可先执行 `./scripts/prepare-portable-deps.ps1`，按现有固定 SHA256 校验并解包；已有依赖目录时不要重复解包。脚本优先使用 PATH 中的 CMake，否则寻找 VS 随附版本，不安装工具。
 
-入口构建 `moonlight-common-c`（含 ENet／nanors）、`h264bitstream` 与 `AntiHooking`，执行协议库既有 CTest 和原生链接测试。默认产物放在 `build/lite-native`；可传入 `-BuildDirectory`。Release 已通过九项测试，独立 CI 为 `.github/workflows/lite-native.yml`。`-Configuration Debug` 可构建，但 `pyrowave-decode-unit-tests` 在本地验证中逾时，原因未确定，Debug 尚未完成验收；脚本会如实返回失败，不跳过此测试。
+入口构建 `moonlight-common-c`（含 ENet／nanors）、`h264bitstream` 与 `AntiHooking`，执行协议库既有 CTest 和原生链接测试。默认产物放在 `build/lite-native`；可传入 `-BuildDirectory` 或 `-Configuration Debug`。独立 CI 为 `.github/workflows/lite-native.yml`，覆盖 Release 与 Debug。
+
+固定版本的协议库解码测试在销毁已使用的佇列前遗漏关闭操作。`windows-lite/patches/common-c-decode-test-shutdown.patch` 只修正建置目录中的测试副本，生产源码与 submodule 指针不变；原 fork 远端没有本维护者的写入权限。测试数据与生产代码仍直接来自原 submodule，升级版本时必须重新核对补丁，无法套用即停止配置。测试另将 Debug CRT 断言输出为明确失败，避免等待交互对话框。原 fork 收录此修正后，应移除此测试补丁。
 
 测试 PATH 仅包含原生依赖与 Windows 系统目录，不借用开发机 Qt 路径。
 

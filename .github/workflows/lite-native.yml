@@ -23,6 +23,9 @@ jobs:
   native:
     runs-on: windows-2022
     timeout-minutes: 20
+    strategy:
+      matrix:
+        configuration: [Release, Debug]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -43,4 +46,4 @@ jobs:
       # No Qt SDK installation or qmake/windeployqt step belongs in this job.
       - name: Build and test native libraries
         shell: pwsh
-        run: ./scripts/build-lite-native.ps1
+        run: ./scripts/build-lite-native.ps1 -Configuration ${{ matrix.configuration }}
