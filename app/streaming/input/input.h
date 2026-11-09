@@ -4,6 +4,7 @@
 #include "streaming/input/gamepadglyphs.h"
 #include "streaming/input/gamepadsensorrate.h"
 #include "streaming/input/keyboardstate.h"
+#include "streaming/input/touchpadcontacts.h"
 #ifdef HAS_QT_SDL_WAYLAND_BRIDGE
 #include "streaming/waylandwindowmetrics.h"
 #endif
@@ -111,7 +112,7 @@ struct DualSenseOutputReport{
 
 #define MAX_FINGERS 2
 
-#define MAX_TOUCHPAD_FRAME_CONTACTS 5
+#define MAX_TOUCHPAD_FRAME_CONTACTS TouchpadContacts::MaxContacts
 
 #define TOUCHPAD_SCROLL_SUPPRESSION_TIMEOUT_MS 500
 
@@ -367,13 +368,7 @@ private:
 
     void cancelPendingRemoteCursorHide();
 
-    struct NativeTouchpadContact {
-        uint8_t eventType;
-        uint32_t pointerId;
-        float x;
-        float y;
-        float pressure;
-    };
+    using NativeTouchpadContact = TouchpadContacts::Contact;
 
     void sendNativeTouchpadContacts(const NativeTouchpadContact* contacts, int contactCount,
                                     bool transitionToSoftwarePointer = true,
@@ -548,7 +543,7 @@ private:
 #endif
 
 #ifdef HAVE_WINDOWS_RAW_TOUCHPAD
-    QHash<uint32_t, NativeTouchpadContact> m_ActiveWindowsTouchpadContacts;
+    TouchpadContacts::Active m_ActiveWindowsTouchpadContacts;
     uint64_t m_ActiveWindowsTouchpadDevice;
     Uint32 m_LastWindowsTouchpadFrameTicks;
     Uint32 m_SuppressedWindowsTouchpadMouseButtons;

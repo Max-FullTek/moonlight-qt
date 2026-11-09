@@ -10,6 +10,13 @@ on:
       - tests/keyboard_state/**
       - tests/cursor_shape_classification/**
       - tests/sdl_audio_renderer/**
+      - tests/audio_pipeline/**
+      - tests/touchpad_contacts/**
+      - app/streaming/input/touchpadcontacts.h
+      - app/streaming/input/touchpad.cpp
+      - app/streaming/audio/audiopipeline.cpp
+      - app/streaming/audio/audiopipeline.h
+      - app/streaming/audio/audio.cpp
       - tests/stream_utils/**
       - app/streaming/streamutils.cpp
       - app/streaming/streamutils.h

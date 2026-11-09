@@ -1,54 +1,25 @@
 #include "../session.h"
 #include "renderers/renderer.h"
 
-#ifdef HAVE_SLAUDIO
-#include "renderers/slaud.h"
-#endif
-
-#include "renderers/sdl.h"
-
-#include <Limelight.h>
-
-#define TRY_INIT_RENDERER(renderer, opusConfig)        \
-{                                                      \
-    IAudioRenderer* __renderer = new renderer();       \
-    if (__renderer->prepareForPlayback(opusConfig))    \
-        return __renderer;                             \
-    delete __renderer;                                 \
-}
+#include "audiopipeline.h"
 
 IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATION opusConfig)
 {
-    // Handle explicit ML_AUDIO setting and fail if the requested backend fails
-    QString mlAudio = qgetenv("ML_AUDIO").toLower();
-    if (mlAudio == "sdl") {
-        TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig)
-        return nullptr;
+    // Preserve the Qt path's exact environment parsing during migration.
+    const QString mlAudio = qgetenv("ML_AUDIO").toLower();
+    auto backend = AudioPipeline::Backend::Unknown;
+    if (mlAudio.isEmpty()) {
+        backend = AudioPipeline::Backend::Automatic;
     }
-#if defined(HAVE_SLAUDIO)
+    else if (mlAudio == "sdl") {
+        backend = AudioPipeline::Backend::Sdl;
+    }
+#ifdef HAVE_SLAUDIO
     else if (mlAudio == "slaudio") {
-        TRY_INIT_RENDERER(SLAudioRenderer, opusConfig)
-        return nullptr;
+        backend = AudioPipeline::Backend::SlAudio;
     }
 #endif
-    else if (!mlAudio.isEmpty()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Unknown audio backend: %s",
-                     SDL_getenv("ML_AUDIO"));
-        return nullptr;
-    }
-
-    // -------------- Automatic backend selection below this line ---------------
-
-#if defined(HAVE_SLAUDIO)
-    // Steam Link should always have SLAudio
-    TRY_INIT_RENDERER(SLAudioRenderer, opusConfig)
-#endif
-
-    // Default to SDL
-    TRY_INIT_RENDERER(SdlAudioRenderer, opusConfig)
-
-    return nullptr;
+    return AudioPipeline::createRenderer(backend, *opusConfig);
 }
 
 bool Session::initializeAudioRenderer()
@@ -71,13 +42,7 @@ bool Session::initializeAudioRenderer()
     m_AudioRenderer->remapChannels(&m_ActiveAudioConfig);
 
     // Create the Opus decoder with the renderer's preferred channel mapping
-    m_OpusDecoder =
-        opus_multistream_decoder_create(m_ActiveAudioConfig.sampleRate,
-                                        m_ActiveAudioConfig.channelCount,
-                                        m_ActiveAudioConfig.streams,
-                                        m_ActiveAudioConfig.coupledStreams,
-                                        m_ActiveAudioConfig.mapping,
-                                        &error);
+    m_OpusDecoder = AudioPipeline::createDecoder(m_ActiveAudioConfig, &error);
     if (m_OpusDecoder == nullptr) {
         delete m_AudioRenderer;
         m_AudioRenderer = nullptr;
@@ -149,8 +114,6 @@ void Session::arCleanup()
 
 void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
 {
-    int samplesDecoded;
-
 #ifndef STEAM_LINK
     // Set this thread to high priority to reduce the chance of missing
     // our sample delivery time. On Steam Link, this causes starvation
@@ -188,41 +151,10 @@ void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
     }
 
     if (s_ActiveSession->m_AudioRenderer != nullptr) {
-        int sampleSize = s_ActiveSession->m_AudioRenderer->getAudioBufferSampleSize();
-        int frameSize = sampleSize * s_ActiveSession->m_ActiveAudioConfig.channelCount;
-        int desiredBufferSize = frameSize * s_ActiveSession->m_ActiveAudioConfig.samplesPerFrame;
-        void* buffer = s_ActiveSession->m_AudioRenderer->getAudioBuffer(&desiredBufferSize);
-        if (buffer == nullptr) {
-            return;
-        }
-
-        if (s_ActiveSession->m_AudioRenderer->getAudioBufferFormat() == IAudioRenderer::AudioFormat::Float32NE) {
-            samplesDecoded = opus_multistream_decode_float(s_ActiveSession->m_OpusDecoder,
-                                                           (unsigned char*)sampleData,
-                                                           sampleLength,
-                                                           (float*)buffer,
-                                                           desiredBufferSize / frameSize,
-                                                           0);
-        }
-        else {
-            samplesDecoded = opus_multistream_decode(s_ActiveSession->m_OpusDecoder,
-                                                     (unsigned char*)sampleData,
-                                                     sampleLength,
-                                                     (short*)buffer,
-                                                     desiredBufferSize / frameSize,
-                                                     0);
-        }
-
-        // Update desiredSize with the number of bytes actually populated by the decoding operation
-        if (samplesDecoded > 0) {
-            SDL_assert(desiredBufferSize >= frameSize * samplesDecoded);
-            desiredBufferSize = frameSize * samplesDecoded;
-        }
-        else {
-            desiredBufferSize = 0;
-        }
-
-        if (!s_ActiveSession->m_AudioRenderer->submitAudio(desiredBufferSize)) {
+        if (!AudioPipeline::decodeAndSubmit(s_ActiveSession->m_OpusDecoder,
+                                            *s_ActiveSession->m_AudioRenderer,
+                                            s_ActiveSession->m_ActiveAudioConfig,
+                                            sampleData, sampleLength)) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "Reinitializing audio renderer after failure");
 

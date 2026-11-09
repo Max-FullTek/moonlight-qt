@@ -49,6 +49,10 @@
 
 SDL 音讯输出与共用音讯 renderer 介面已不依赖 Qt；仍直接复用既有 `sdlaud.cpp`、固定 SDL2／SDL3 依赖与 common-c。`sdl_audio_renderer` 测试用 dummy 音讯驱动验证 stereo／5.1／7.1、5／10 ms PCM 送出与重复开关，不启动串流、不操作实际音讯装置；SDL 错误与断言会明确失败。真实音讯装置切换、影音同步与延迟未由此测试验收。
 
+音讯 backend 建立与 Opus→PCM 解码／送出抽至无 Qt 的 `audio/audiopipeline.*`，Qt Session 直接调用，仍负责静音、decoder／renderer 生命周期及失败重试时序；`ML_AUDIO` 的解析保留原 Qt 路径。`audio_pipeline` 使用固定 Opus 实库验证 stereo／5.1／7.1、float／s16 PCM 与直接 Opus 解码输出一致，并覆盖输出失败、空 buffer 与后端清理，不新增 PCM 中转复制。
+
+Windows Raw Input 触控板的接点集合与帧差异计算由无 Qt 的 `input/touchpadcontacts.h` 处理，保留五接点上限、HID 输入顺序、旧接点释放先于新 Down 事件；同一组 Up 内的 hash 迭代顺序不作为契约。Qt 输入处理器复用生产 helper，仍负责装置拥有权、按钮回退、擷取、传输与取消流程；SDL／macOS 接点容器保留。原生测试覆盖 1024 组新旧接点集合组合与边界，不代表真实触控板手势已完成验收。
+
 浮动按钮的单轴边界、归一化与像素还原由无 Qt 的 `overlayplacementaxis.h` 处理，原 Qt 介面直接复用计算；QSettings 路径／格式、窗口与输入处理仍保留。原生测试验证坐标往返与边界，旧 Qt 位置测试另外比对原 Qt 公式及保存还原。喚醒合并与 toast 排程测试也已移除 Qt，相同生产状态 helper 由 CMake 与旧 qmake 测试共用；这不代表浮动介面已完成无 Qt 绘制。
 
 Windows／MSVC 的 `streamutils.cpp` 也已纳入无 Qt 建置：复用既有 SDL 隐藏视窗探测、桌面模式／刷新率查询、比例／座标转换与 AES-NI 检测。原 Qt 异步日志计数的控制函数随日志实现留在 `main.cpp`，不会纳入原生库；其他平台／工具链的 Qt 平台与 DRM 路径保留。`stream_utils` 测试仅用 SDL dummy video，不操作实体显示器；不代表已验收真实 GPU、HDR、DPI 或全屏体验。

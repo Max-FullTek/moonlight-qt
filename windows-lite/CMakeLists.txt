@@ -15,7 +15,8 @@ set(LITE_DEPS_LIB "${LITE_DEPS_ROOT}/lib/x64")
 
 foreach(required IN ITEMS include/x64/openssl/ssl.h include/detours.h
                           lib/x64/libcrypto.lib lib/x64/libcrypto-3-x64.dll lib/x64/detours.lib
-                          include/x64/SDL2/SDL.h lib/x64/SDL2.lib lib/x64/SDL2.dll lib/x64/SDL3.dll)
+                          include/x64/SDL2/SDL.h lib/x64/SDL2.lib lib/x64/SDL2.dll lib/x64/SDL3.dll
+                          include/opus_multistream.h lib/x64/opus.lib lib/x64/opus.dll)
     if(NOT EXISTS "${LITE_DEPS_ROOT}/${required}")
         message(FATAL_ERROR "Missing ${LITE_DEPS_ROOT}/${required}; prepare the pinned Windows dependencies first")
     endif()
@@ -79,6 +80,17 @@ target_compile_options(lite-sdl-audio PRIVATE /W3 /WX)
 target_include_directories(lite-sdl-audio PUBLIC "${LITE_SOURCE_ROOT}/app")
 target_link_libraries(lite-sdl-audio PUBLIC moonlight-common-c lite-sdl2)
 
+add_library(lite-opus SHARED IMPORTED)
+set_target_properties(lite-opus PROPERTIES
+    IMPORTED_IMPLIB "${LITE_DEPS_LIB}/opus.lib"
+    IMPORTED_LOCATION "${LITE_DEPS_LIB}/opus.dll"
+    INTERFACE_INCLUDE_DIRECTORIES "${LITE_DEPS_ROOT}/include")
+add_library(lite-audio-pipeline STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/audio/audiopipeline.cpp")
+target_compile_features(lite-audio-pipeline PUBLIC cxx_std_17)
+target_compile_options(lite-audio-pipeline PRIVATE /W3 /WX)
+target_link_libraries(lite-audio-pipeline PUBLIC lite-sdl-audio lite-opus)
+
 add_library(lite-stream-utils STATIC "${LITE_SOURCE_ROOT}/app/streaming/streamutils.cpp")
 target_compile_features(lite-stream-utils PUBLIC cxx_std_17)
 target_compile_options(lite-stream-utils PRIVATE /W3 /WX)
@@ -127,7 +139,8 @@ if(BUILD_TESTING)
     # These state/placement tests compile the production helpers directly and have
     # no Qt, SDL window, streaming host, or user-data dependency.
     foreach(input_test IN ITEMS keyboard_state gamepad_sensor_rate pen_history_selection
-                                overlay_placement_axis overlay_event_wake_state overlay_toast_event_state)
+                                overlay_placement_axis overlay_event_wake_state overlay_toast_event_state
+                                touchpad_contacts)
         add_executable(${input_test} "${LITE_SOURCE_ROOT}/tests/${input_test}/main.cpp")
         target_compile_features(${input_test} PRIVATE cxx_std_17)
         target_compile_options(${input_test} PRIVATE /W3 /WX)
@@ -158,4 +171,11 @@ if(BUILD_TESTING)
     target_link_libraries(stream_utils PRIVATE lite-stream-utils)
     add_test(NAME stream_utils COMMAND stream_utils)
     set_tests_properties(stream_utils PROPERTIES TIMEOUT 15)
+
+    add_executable(audio_pipeline "${LITE_SOURCE_ROOT}/tests/audio_pipeline/main.cpp")
+    target_compile_definitions(audio_pipeline PRIVATE SDL_MAIN_HANDLED)
+    target_compile_options(audio_pipeline PRIVATE /W3 /WX)
+    target_link_libraries(audio_pipeline PRIVATE lite-audio-pipeline)
+    add_test(NAME audio_pipeline COMMAND audio_pipeline)
+    set_tests_properties(audio_pipeline PROPERTIES TIMEOUT 15)
 endif()

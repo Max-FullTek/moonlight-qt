@@ -256,6 +256,7 @@ SOURCES += \
     streaming/clipboardhelperclient.cpp \
     streaming/clipboardipc.cpp \
     streaming/audio/audio.cpp \
+    streaming/audio/audiopipeline.cpp \
     streaming/audio/dualsensehaptics.cpp \
     streaming/audio/renderers/sdlaud.cpp \
     streaming/network/bandwidth.cpp \
@@ -307,10 +308,12 @@ HEADERS += \
     streaming/input/input.h \
     streaming/input/gamepadsensorrate.h \
     streaming/input/keyboardstate.h \
+    streaming/input/touchpadcontacts.h \
     streaming/session.h \
     streaming/clipboardhelperclient.h \
     streaming/clipboardipc.h \
     streaming/audio/renderers/renderer.h \
+    streaming/audio/audiopipeline.h \
     streaming/audio/dualsensehaptics.h \
     streaming/audio/dualsensehapticscalibration.h \
     streaming/audio/dualsensehapticsrouting.h \

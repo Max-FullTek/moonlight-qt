@@ -1,6 +1,7 @@
 #include "input.h"
 
 #include <Limelight.h>
+#include <utility>
 #include "streaming/session.h"
 
 void SdlInputHandler::selectNativeTouchpadTransport()
@@ -99,7 +100,7 @@ void SdlInputHandler::handleNativeTouchpadEvent(SDL_TouchFingerEvent* event)
     m_ActiveTouchpadId = event->touchId;
 
 #ifdef HAVE_WINDOWS_RAW_TOUCHPAD
-    if (!m_ActiveWindowsTouchpadContacts.isEmpty() || m_WindowsTouchpadButtonDown ||
+    if (!m_ActiveWindowsTouchpadContacts.empty() || m_WindowsTouchpadButtonDown ||
             m_WindowsTouchpadButtonUsesMouseFallback) {
         // The wire protocol has no input-source identifier. A valid SDL
         // contact takes ownership from Windows Raw Input before it is sent.
@@ -485,7 +486,7 @@ void SdlInputHandler::handleWindowsTouchpadFrame(uint64_t deviceId,
         }
     }
 
-    const bool hasWindowsState = !m_ActiveWindowsTouchpadContacts.isEmpty() ||
+    const bool hasWindowsState = !m_ActiveWindowsTouchpadContacts.empty() ||
             m_WindowsTouchpadButtonDown || m_WindowsTouchpadButtonUsesMouseFallback;
     const bool currentDeviceOwnsWindowsState =
             m_ActiveWindowsTouchpadDevice == deviceId && hasWindowsState;
@@ -538,7 +539,7 @@ void SdlInputHandler::handleWindowsTouchpadFrame(uint64_t deviceId,
     }
     else if (!m_WindowsTouchpadButtonUsesMouseFallback && buttonDown &&
              !(hasContactFrame ? hasCurrentContact :
-                                 !m_ActiveWindowsTouchpadContacts.isEmpty())) {
+                                 !m_ActiveWindowsTouchpadContacts.empty())) {
         // Button 1 may be reported with no capacitive contact. Preserve those
         // presses through the mouse protocol because Sunshine has no pointer
         // slot to carry a native button state in that case.
@@ -555,7 +556,7 @@ void SdlInputHandler::handleWindowsTouchpadFrame(uint64_t deviceId,
             int changeCount = 0;
             for (auto it = m_ActiveWindowsTouchpadContacts.cbegin();
                  it != m_ActiveWindowsTouchpadContacts.cend(); ++it) {
-                NativeTouchpadContact contact = it.value();
+                NativeTouchpadContact contact = it->second;
                 contact.eventType = LI_TOUCH_EVENT_MOVE;
                 changes[changeCount++] = contact;
             }
@@ -564,15 +565,14 @@ void SdlInputHandler::handleWindowsTouchpadFrame(uint64_t deviceId,
                                        m_WindowsTouchpadHeightMm);
         }
         m_WindowsTouchpadButtonDown = buttonDown;
-        if (m_ActiveWindowsTouchpadContacts.isEmpty() && !buttonDown) {
+        if (m_ActiveWindowsTouchpadContacts.empty() && !buttonDown) {
             m_ActiveWindowsTouchpadDevice = 0;
         }
         return;
     }
 
-    QHash<uint32_t, NativeTouchpadContact> currentContacts;
-    NativeTouchpadContact currentChanges[MAX_TOUCHPAD_FRAME_CONTACTS];
-    int currentChangeCount = 0;
+    auto frame = TouchpadContacts::buildFrame(m_ActiveWindowsTouchpadContacts,
+                                              pointerIds, x, y, pressure, touching, contactCount);
     NativeTouchpadContact changes[MAX_TOUCHPAD_FRAME_CONTACTS];
     int changeCount = 0;
 
@@ -585,51 +585,20 @@ void SdlInputHandler::handleWindowsTouchpadFrame(uint64_t deviceId,
         }
     };
 
-    for (int i = 0; i < contactCount && i < MAX_TOUCHPAD_FRAME_CONTACTS; i++) {
-        if (!touching[i]) {
-            continue;
-        }
-
-        NativeTouchpadContact contact = {
-            static_cast<uint8_t>(m_ActiveWindowsTouchpadContacts.contains(pointerIds[i]) ?
-                                 LI_TOUCH_EVENT_MOVE : LI_TOUCH_EVENT_DOWN),
-            pointerIds[i],
-            SDL_clamp(x[i], 0.0f, 1.0f),
-            SDL_clamp(y[i], 0.0f, 1.0f),
-            SDL_clamp(pressure[i], 0.0f, 1.0f),
-        };
-        currentContacts.insert(contact.pointerId, contact);
-        currentChanges[currentChangeCount++] = contact;
-    }
-
-    // Release old pointer IDs before sending new Down events. This ensures the
-    // host has a free slot when a full five-contact frame replaces a contact.
-    for (auto it = m_ActiveWindowsTouchpadContacts.cbegin();
-         it != m_ActiveWindowsTouchpadContacts.cend(); ++it) {
-        if (currentContacts.contains(it.key())) {
-            continue;
-        }
-
-        NativeTouchpadContact contact = it.value();
-        contact.eventType = LI_TOUCH_EVENT_UP;
-        changes[changeCount++] = contact;
-        if (changeCount == MAX_TOUCHPAD_FRAME_CONTACTS) {
-            flushChanges();
-        }
+    // Release old pointer IDs before any new Down events so the host has slots.
+    for (int i = 0; i < frame.releaseCount; ++i) {
+        changes[changeCount++] = frame.releases[i];
+        if (changeCount == MAX_TOUCHPAD_FRAME_CONTACTS) flushChanges();
     }
     flushChanges();
-
-    for (int i = 0; i < currentChangeCount; i++) {
-        changes[changeCount++] = currentChanges[i];
-        if (changeCount == MAX_TOUCHPAD_FRAME_CONTACTS) {
-            flushChanges();
-        }
+    for (int i = 0; i < frame.updateCount; ++i) {
+        changes[changeCount++] = frame.updates[i];
+        if (changeCount == MAX_TOUCHPAD_FRAME_CONTACTS) flushChanges();
     }
     flushChanges();
-
-    m_ActiveWindowsTouchpadContacts = currentContacts;
+    m_ActiveWindowsTouchpadContacts = std::move(frame.active);
     m_WindowsTouchpadButtonDown = buttonDown;
-    if (currentContacts.isEmpty() && !buttonDown) {
+    if (m_ActiveWindowsTouchpadContacts.empty() && !buttonDown) {
         m_ActiveWindowsTouchpadDevice = 0;
     }
 }
@@ -644,7 +613,7 @@ void SdlInputHandler::cancelWindowsTouchpadContacts(uint64_t deviceId)
     int contactCount = 0;
     for (auto it = m_ActiveWindowsTouchpadContacts.cbegin();
          it != m_ActiveWindowsTouchpadContacts.cend(); ++it) {
-        NativeTouchpadContact contact = it.value();
+        NativeTouchpadContact contact = it->second;
         contact.eventType = LI_TOUCH_EVENT_CANCEL;
         contacts[contactCount++] = contact;
     }
