@@ -1,5 +1,5 @@
 #include "genhwaccel.h"
-#include "utils.h"
+#include "streaming/environment.h"
 
 GenericHwAccelRenderer::GenericHwAccelRenderer(AVHWDeviceType hwDeviceType)
     : IFFmpegRenderer(RendererType::Unknown),
@@ -59,7 +59,7 @@ int GenericHwAccelRenderer::getDecoderCapabilities()
 {
     int caps;
 
-    if (Utils::getEnvironmentVariableOverride("GENHWACCEL_CAPS", &caps)) {
+    if (StreamEnvironment::getOverride("GENHWACCEL_CAPS", &caps)) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Using GENHWACCEL_CAPS for decoder capabilities: %x",
                     caps);

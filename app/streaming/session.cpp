@@ -28,6 +28,47 @@
 
 #ifdef HAVE_FFMPEG
 #include "video/ffmpeg.h"
+
+namespace {
+// Transitional owner boundary. Native decoder/renderers never look up Session.
+// A future native owner supplies these services and removes this adapter.
+class SessionFFmpegDecoderHost final : public IFFmpegDecoderHost {
+public:
+    void flushWindowEvents() override
+    {
+        Session* session = Session::get();
+        if (session != nullptr) session->flushWindowEvents();
+        else {
+            SDL_PumpEvents();
+            SDL_FlushEvent(SDL_WINDOWEVENT);
+        }
+    }
+    Overlay::OverlayManager& getOverlayManager() override
+    {
+        return Session::get()->getOverlayManager();
+    }
+    bool isOverlayEnabled(Overlay::OverlayType type) override
+    {
+        return getOverlayManager().isOverlayEnabled(type);
+    }
+    SDL_Surface* getUpdatedOverlaySurface(Overlay::OverlayType type) override
+    {
+        return getOverlayManager().getUpdatedOverlaySurface(type);
+    }
+#ifdef Q_OS_WIN32
+    std::string readShader(const char* name) override
+    {
+        return Path::readDataFile(QString::fromLatin1(name)).toStdString();
+    }
+#endif
+    int getCurrentBandwidthKbps() override
+    {
+        return BandwidthCalculator::instance()->getCurrentBandwidthKbps();
+    }
+    bool isGpuSlow() override { return WMUtils::isGpuSlow(); }
+};
+SessionFFmpegDecoderHost s_FFmpegDecoderHost;
+}
 #endif
 
 #ifdef Q_OS_DARWIN
@@ -911,7 +952,7 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
 #endif
 
 #ifdef HAVE_FFMPEG
-    chosenDecoder = new FFmpegVideoDecoder(testOnly);
+    chosenDecoder = new FFmpegVideoDecoder(testOnly, s_FFmpegDecoderHost);
     if (chosenDecoder->initialize(&params)) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "FFmpeg-based video decoder chosen");

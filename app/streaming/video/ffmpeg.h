@@ -9,14 +9,39 @@
 #include "ffmpeg-renderers/renderer.h"
 #include "ffmpeg-renderers/pacer/pacer.h"
 #include "streaming/video/videoenhancement.h"
+#include "overlaymanager.h"
+#include "ffmpeg-renderers/sdlvid.h"
+#ifdef _WIN32
+#include "ffmpeg-renderers/d3d11va.h"
+#include "ffmpeg-renderers/dxva2.h"
+#endif
+#ifdef HAVE_LIBPLACEBO_VULKAN
+#include "ffmpeg-renderers/plvk.h"
+#endif
 
 extern "C" {
 #include <libavcodec/avcodec.h>
 }
 
+// The existing owner supplies live overlays, resources and environment policy.
+// This boundary carries no frames and must outlive the decoder.
+class IFFmpegDecoderHost : public ISdlRendererHost
+#ifdef _WIN32
+    , public ID3D11RendererHost, public IDxva2RendererHost
+#endif
+#ifdef HAVE_LIBPLACEBO_VULKAN
+    , public IPlVkRendererHost
+#endif
+{
+public:
+    virtual Overlay::OverlayManager& getOverlayManager() = 0;
+    virtual int getCurrentBandwidthKbps() = 0;
+    virtual bool isGpuSlow() = 0;
+};
+
 class FFmpegVideoDecoder : public IVideoDecoder {
 public:
-    FFmpegVideoDecoder(bool testOnly);
+    FFmpegVideoDecoder(bool testOnly, IFFmpegDecoderHost& host);
     virtual ~FFmpegVideoDecoder() override;
     virtual bool initialize(PDECODER_PARAMETERS params) override;
     virtual bool isHardwareAccelerated() override;
@@ -88,7 +113,7 @@ private:
                                IFFmpegRenderer::InitFailureReason* failureReason,
                                std::function<IFFmpegRenderer*()> createRendererFunc);
 
-    static IFFmpegRenderer* createHwAccelRenderer(const AVCodecHWConfig* hwDecodeCfg, PDECODER_PARAMETERS params, int pass);
+    IFFmpegRenderer* createHwAccelRenderer(const AVCodecHWConfig* hwDecodeCfg, PDECODER_PARAMETERS params, int pass);
 
     bool initializeRendererInternal(IFFmpegRenderer* renderer, PDECODER_PARAMETERS params);
 
@@ -104,6 +129,7 @@ private:
 
     static int decoderThreadProcThunk(void* context);
 
+    IFFmpegDecoderHost& m_Host;
     AVPacket* m_Pkt;
     AVCodecContext* m_VideoDecoderCtx;
     enum AVPixelFormat m_RequiredPixelFormat;

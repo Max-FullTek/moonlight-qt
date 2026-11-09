@@ -1,6 +1,6 @@
 #include "plvk.h"
 
-#include "streaming/session.h"
+#include "streaming/environment.h"
 #include "streaming/streamutils.h"
 
 // Implementation in plvk_c.c
@@ -72,7 +72,7 @@ static const char *k_OptionalDeviceExtensions[] = {
     VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
     VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
     VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME,
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
     VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
     VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME,
 #endif
@@ -135,18 +135,20 @@ void PlVkRenderer::overlayUploadComplete(void* opaque)
     SDL_FreeSurface((SDL_Surface*)opaque);
 }
 
-PlVkRenderer::PlVkRenderer(AVHWDeviceType hwDeviceType, IFFmpegRenderer *backendRenderer) :
+PlVkRenderer::PlVkRenderer(IPlVkRendererHost& host, AVHWDeviceType hwDeviceType, IFFmpegRenderer *backendRenderer) :
     IFFmpegRenderer(RendererType::Vulkan),
+    m_Host(host),
     m_Backend(backendRenderer),
     m_HwDeviceType(hwDeviceType)
 {
-    bool ok;
+    int logLevel;
 
     pl_log_params logParams = pl_log_default_params;
     logParams.log_cb = pl_log_cb;
-    logParams.log_level = (pl_log_level)qEnvironmentVariableIntValue("PLVK_LOG_LEVEL", &ok);
+    const bool ok = StreamEnvironment::getOverride("PLVK_LOG_LEVEL", &logLevel);
+    logParams.log_level = (pl_log_level)logLevel;
     if (!ok) {
-#ifdef QT_DEBUG
+#ifndef NDEBUG
         logParams.log_level = PL_LOG_DEBUG;
 #else
         logParams.log_level = PL_LOG_WARN;
@@ -182,7 +184,7 @@ PlVkRenderer::~PlVkRenderer()
 
         pl_renderer_destroy(&m_Renderer);
         pl_swapchain_destroy(&m_Swapchain);
-#ifdef Q_OS_DARWIN
+#ifdef __APPLE__
         m_MetalTextureFactory.reset();
 #endif
         pl_vulkan_destroy(&m_Vulkan);
@@ -324,12 +326,12 @@ bool PlVkRenderer::tryInitializeDevice(VkPhysicalDevice device, VkPhysicalDevice
             return false;
         }
 
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
         // Intel's Windows drivers seem to have interoperability issues as of FFmpeg 7.0.1
         // when using Vulkan Video decoding. Since they also expose HEVC REXT profiles using
         // D3D11VA, let's reject them here so we can select a different Vulkan device or
         // just allow D3D11VA to take over.
-        if (deviceProps->vendorID == 0x8086 && !qEnvironmentVariableIntValue("PLVK_ALLOW_INTEL")) {
+        if (deviceProps->vendorID == 0x8086 && !StreamEnvironment::integer("PLVK_ALLOW_INTEL")) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "Skipping Intel GPU for Vulkan Video due to broken drivers");
             return false;
@@ -352,7 +354,7 @@ bool PlVkRenderer::tryInitializeDevice(VkPhysicalDevice device, VkPhysicalDevice
     }
 
     // Avoid software GPUs
-    if (deviceProps->deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU && qgetenv("PLVK_ALLOW_SOFTWARE") != "1") {
+    if (deviceProps->deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU && !StreamEnvironment::equals("PLVK_ALLOW_SOFTWARE", "1")) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Vulkan device '%s' is a (probably slow) software renderer. Set PLVK_ALLOW_SOFTWARE=1 to allow using this device.",
                     deviceProps->deviceName);
@@ -448,8 +450,8 @@ bool PlVkRenderer::initialize(PDECODER_PARAMETERS params)
 
     pl_vk_inst_params vkInstParams = pl_vk_inst_default_params;
     {
-        vkInstParams.debug_extra = !!qEnvironmentVariableIntValue("PLVK_DEBUG_EXTRA");
-        vkInstParams.debug = vkInstParams.debug_extra || !!qEnvironmentVariableIntValue("PLVK_DEBUG");
+        vkInstParams.debug_extra = !!StreamEnvironment::integer("PLVK_DEBUG_EXTRA");
+        vkInstParams.debug = vkInstParams.debug_extra || !!StreamEnvironment::integer("PLVK_DEBUG");
     }
     vkInstParams.get_proc_addr = (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();
     vkInstParams.extensions = instanceExtensions.data();
@@ -617,7 +619,7 @@ bool PlVkRenderer::initialize(PDECODER_PARAMETERS params)
         }
     }
 
-#ifdef Q_OS_DARWIN
+#ifdef __APPLE__
     m_MetalTextureFactory = std::make_unique<MetalVulkanTextureFactory>(m_Vulkan);
 
     // Set an initial wide colorspace hint to ensure that MoltenVK sets wantsExtendedDynamicRangeContent
@@ -683,7 +685,7 @@ bool PlVkRenderer::prepareDecoderContext(AVCodecContext *context, AVDictionary *
 
 bool PlVkRenderer::mapAvFrameToPlacebo(const AVFrame *frame, pl_frame* mappedFrame)
 {
-#ifdef Q_OS_DARWIN
+#ifdef __APPLE__
     if (frame->format == AV_PIX_FMT_VIDEOTOOLBOX) {
         if (!m_MetalTextureFactory->mapVideoToolboxToPlacebo(frame, mappedFrame)) {
             return false;
@@ -723,13 +725,13 @@ bool PlVkRenderer::mapAvFrameToPlacebo(const AVFrame *frame, pl_frame* mappedFra
 
 void PlVkRenderer::unmapAvFrameFromPlacebo(const AVFrame *frame, pl_frame* mappedFrame)
 {
-#ifdef Q_OS_DARWIN
+#ifdef __APPLE__
     if (frame->format == AV_PIX_FMT_VIDEOTOOLBOX) {
         m_MetalTextureFactory->unmapVideoToolboxFromPlacebo(mappedFrame);
     }
     else
 #else
-    Q_UNUSED(frame)
+    (void)frame;
 #endif
     {
         pl_unmap_avframe(m_Vulkan->gpu, mappedFrame);
@@ -754,7 +756,7 @@ bool PlVkRenderer::populateQueues(int videoFormat)
     fn_vkGetPhysicalDeviceQueueFamilyProperties2(m_Vulkan->phys_device, &queueFamilyCount, queueFamilies.data());
 
 #if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(59, 34, 100)
-    Q_UNUSED(videoFormat);
+    (void)videoFormat;
 
     for (uint32_t i = 0; i < queueFamilyCount; i++) {
         vkDeviceContext->qf[i].idx = i;
@@ -900,7 +902,7 @@ void PlVkRenderer::waitToRender()
         return;
     }
 
-#ifndef Q_OS_WIN32
+#ifndef _WIN32
     // With libplacebo's Vulkan backend, all swap_buffers does is wait for queued
     // presents to finish. This happens to be exactly what we want to do here, since
     // it lets us wait to select a queued frame for rendering until we know that we
@@ -992,7 +994,7 @@ void PlVkRenderer::renderFrame(AVFrame *frame)
     if (!pl_color_space_equal(&hintColorspace, &m_LastColorspace)) {
         m_LastColorspace = hintColorspace;
 
-#ifdef Q_OS_DARWIN
+#ifdef __APPLE__
         // There is a gamma mismatch on macOS between what libplacebo thinks BT.709
         // should use and what the Metal layer actually displays. Use sRGB for the
         // swapchain when the incoming frames are BT.709 as a workaround.
@@ -1034,7 +1036,7 @@ void PlVkRenderer::renderFrame(AVFrame *frame)
         }
 
         // If we have an overlay but it's been disabled, free the overlay texture
-        if (m_Overlays[i].hasOverlay && !Session::get()->getOverlayManager().isOverlayEnabled((Overlay::OverlayType)i)) {
+        if (m_Overlays[i].hasOverlay && !m_Host.isOverlayEnabled((Overlay::OverlayType)i)) {
             texturesToDestroy.push_back(m_Overlays[i].overlay.tex);
             SDL_zero(m_Overlays[i].overlay);
             m_Overlays[i].hasOverlay = false;
@@ -1170,7 +1172,7 @@ void PlVkRenderer::renderFrame(AVFrame *frame)
     }
 #endif
 
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
     // On Windows, we swap buffers here instead of waitToRender()
     // to avoid some performance problems on Nvidia GPUs.
     pl_swapchain_swap_buffers(m_Swapchain);
@@ -1290,8 +1292,8 @@ bool PlVkRenderer::createOverlay(pl_overlay* overlay, SDL_Surface* surface)
 
 void PlVkRenderer::notifyOverlayUpdated(Overlay::OverlayType type)
 {
-    SDL_Surface* newSurface = Session::get()->getOverlayManager().getUpdatedOverlaySurface(type);
-    if (newSurface == nullptr && Session::get()->getOverlayManager().isOverlayEnabled(type)) {
+    SDL_Surface* newSurface = m_Host.getUpdatedOverlaySurface(type);
+    if (newSurface == nullptr && m_Host.isOverlayEnabled(type)) {
         // The overlay is enabled and there is no new surface. Leave the old texture alone.
         return;
     }

@@ -1,24 +1,26 @@
 #include <Limelight.h>
 #include "ffmpeg.h"
-#include "utils.h"
-#include "streaming/session.h"
-#include "streaming/network/bandwidth.h"
-#include "path.h"
+#include "streaming/environment.h"
+#include <algorithm>
+#include <cstring>
+#include <string>
+#include <unordered_map>
 
 extern "C" {
 #include <libavutil/mastering_display_metadata.h>
 #include <libavutil/pixdesc.h>
+#include <libavutil/avstring.h>
 }
 
 #include "ffmpeg-renderers/sdlvid.h"
 #include "ffmpeg-renderers/genhwaccel.h"
 
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
 #include "ffmpeg-renderers/dxva2.h"
 #include "ffmpeg-renderers/d3d11va.h"
 #endif
 
-#ifdef Q_OS_DARWIN
+#ifdef __APPLE__
 #include "ffmpeg-renderers/vt.h"
 #endif
 
@@ -58,64 +60,6 @@ using namespace VideoSamples;
 
 #define FAILED_DECODES_RESET_THRESHOLD 20
 
-namespace {
-// Transitional Qt boundary only. Keep Session lookup at call time, including
-// the existing pre-session probe/event-flush behavior.
-class SessionSdlRendererHost final : public ISdlRendererHost {
-public:
-    void flushWindowEvents() override
-    {
-        Session* session = Session::get();
-        if (session != nullptr) {
-            session->flushWindowEvents();
-        }
-        else {
-            SDL_PumpEvents();
-            SDL_FlushEvent(SDL_WINDOWEVENT);
-        }
-    }
-    bool isOverlayEnabled(Overlay::OverlayType type) override
-    {
-        return Session::get()->getOverlayManager().isOverlayEnabled(type);
-    }
-    SDL_Surface* getUpdatedOverlaySurface(Overlay::OverlayType type) override
-    {
-        return Session::get()->getOverlayManager().getUpdatedOverlaySurface(type);
-    }
-};
-SessionSdlRendererHost s_SdlRendererHost;
-#ifdef Q_OS_WIN32
-class SessionD3D11RendererHost final : public ID3D11RendererHost {
-public:
-    std::string readShader(const char* name) override
-    {
-        return Path::readDataFile(QString::fromLatin1(name)).toStdString();
-    }
-    bool isOverlayEnabled(Overlay::OverlayType type) override
-    {
-        return Session::get()->getOverlayManager().isOverlayEnabled(type);
-    }
-    SDL_Surface* getUpdatedOverlaySurface(Overlay::OverlayType type) override
-    {
-        return Session::get()->getOverlayManager().getUpdatedOverlaySurface(type);
-    }
-};
-SessionD3D11RendererHost s_D3D11RendererHost;
-class SessionDxva2RendererHost final : public IDxva2RendererHost {
-public:
-    bool isOverlayEnabled(Overlay::OverlayType type) override
-    {
-        return Session::get()->getOverlayManager().isOverlayEnabled(type);
-    }
-    SDL_Surface* getUpdatedOverlaySurface(Overlay::OverlayType type) override
-    {
-        return Session::get()->getOverlayManager().getUpdatedOverlaySurface(type);
-    }
-};
-SessionDxva2RendererHost s_Dxva2RendererHost;
-#endif
-}
-
 bool FFmpegVideoDecoder::isHardwareAccelerated()
 {
     return m_HwDecodeCfg != nullptr ||
@@ -146,7 +90,7 @@ int FFmpegVideoDecoder::getDecoderCapabilities()
 {
     int capabilities;
 
-    if (Utils::getEnvironmentVariableOverride("DECODER_CAPS", &capabilities)) {
+    if (StreamEnvironment::getOverride("DECODER_CAPS", &capabilities)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Using decoder capability override: 0x%x",
                     capabilities);
@@ -157,7 +101,7 @@ int FFmpegVideoDecoder::getDecoderCapabilities()
 
         if (!isHardwareAccelerated()) {
             // Slice up to 4 times for parallel CPU decoding, once slice per core
-            int slices = qMin(MAX_SLICES, SDL_GetCPUCount());
+            int slices = std::min(MAX_SLICES, SDL_GetCPUCount());
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Encoder configured for %d slices per frame",
                         slices);
@@ -174,7 +118,7 @@ int FFmpegVideoDecoder::getDecoderCapabilities()
             // that Moonlight could pick. It will pick any working
             // decoder that matches the codec ID and outputs one of
             // the pixel formats that we have a renderer for.
-            static const QMap<QString, int> nonHwaccelCodecInfo = {
+            static const std::unordered_map<std::string, int> nonHwaccelCodecInfo = {
                 // H.264
                 {"h264_mmal", 0},
                 {"h264_rkmpp", 0},
@@ -196,7 +140,8 @@ int FFmpegVideoDecoder::getDecoderCapabilities()
             // We have a non-hwaccel hardware decoder. This will always
             // be using SDLRenderer/DrmRenderer/PlVkRenderer so we will
             // pick decoder capabilities based on the decoder name.
-            capabilities = nonHwaccelCodecInfo.value(m_VideoDecoderCtx->codec->name, 0);
+            const auto info = nonHwaccelCodecInfo.find(m_VideoDecoderCtx->codec->name);
+            capabilities = info != nonHwaccelCodecInfo.end() ? info->second : 0;
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Using capabilities table for decoder: %s -> %d",
                         m_VideoDecoderCtx->codec->name,
@@ -283,8 +228,8 @@ enum AVPixelFormat FFmpegVideoDecoder::ffGetFormat(AVCodecContext* context,
     return AV_PIX_FMT_NONE;
 }
 
-FFmpegVideoDecoder::FFmpegVideoDecoder(bool testOnly)
-    : m_Pkt(av_packet_alloc()), m_VideoDecoderCtx(nullptr), m_RequiredPixelFormat(AV_PIX_FMT_NONE),
+FFmpegVideoDecoder::FFmpegVideoDecoder(bool testOnly, IFFmpegDecoderHost& host)
+    : m_Host(host), m_Pkt(av_packet_alloc()), m_VideoDecoderCtx(nullptr), m_RequiredPixelFormat(AV_PIX_FMT_NONE),
       m_HwDecodeCfg(nullptr), m_BackendRenderer(nullptr),
       m_FrontendRenderer(nullptr), m_ConsecutiveFailedDecodes(0), m_Pacer(nullptr), m_FramesIn(0),
       m_FramesOut(0), m_LastFrameNumber(0), m_StreamFps(0), m_VideoFormat(0),
@@ -343,7 +288,7 @@ void FFmpegVideoDecoder::reset()
     avcodec_free_context(&m_VideoDecoderCtx);
 
     if (m_CurrentTestMode != TestMode::TestFrameOnly) {
-        Session::get()->getOverlayManager().setOverlayRenderer(nullptr);
+        m_Host.getOverlayManager().setOverlayRenderer(nullptr);
     }
 
     // If we have a separate frontend renderer, free that first
@@ -394,24 +339,24 @@ bool FFmpegVideoDecoder::createFrontendRenderer(PDECODER_PARAMETERS params, bool
     bool glIsSlow;
     bool vulkanIsSlow;
 
-    if (!Utils::getEnvironmentVariableOverride("GL_IS_SLOW", &glIsSlow)) {
+    if (!StreamEnvironment::getOverride("GL_IS_SLOW", &glIsSlow)) {
 #ifdef GL_IS_SLOW
         glIsSlow = true;
 #else
-        glIsSlow = WMUtils::isGpuSlow();
+        glIsSlow = m_Host.isGpuSlow();
 #endif
     }
 
-    if (!Utils::getEnvironmentVariableOverride("VULKAN_IS_SLOW", &vulkanIsSlow)) {
+    if (!StreamEnvironment::getOverride("VULKAN_IS_SLOW", &vulkanIsSlow)) {
 #ifdef VULKAN_IS_SLOW
         vulkanIsSlow = true;
 #else
-        vulkanIsSlow = WMUtils::isGpuSlow();
+        vulkanIsSlow = m_Host.isGpuSlow();
 #endif
     }
 
-    Q_UNUSED(glIsSlow);
-    Q_UNUSED(vulkanIsSlow);
+    (void)glIsSlow;
+    (void)vulkanIsSlow;
 
     // For cases where we're already using Vulkan Video decoding, always use the Vulkan renderer too.
     // The alternate frontend logic is primarily for cases where a different renderer like EGL or DRM
@@ -422,7 +367,7 @@ bool FFmpegVideoDecoder::createFrontendRenderer(PDECODER_PARAMETERS params, bool
             if (!vulkanIsSlow) {
                 // The Vulkan renderer can also handle HDR with a supported compositor. We prefer
                 // rendering HDR with Vulkan if possible since it's more fully featured than DRM.
-                m_FrontendRenderer = new PlVkRenderer(AV_HWDEVICE_TYPE_NONE, m_BackendRenderer);
+                m_FrontendRenderer = new PlVkRenderer(m_Host, AV_HWDEVICE_TYPE_NONE, m_BackendRenderer);
                 if (initializeRendererInternal(m_FrontendRenderer, params) && (m_FrontendRenderer->getRendererAttributes() & RENDERER_ATTRIBUTE_HDR_SUPPORT)) {
                     return true;
                 }
@@ -450,7 +395,7 @@ bool FFmpegVideoDecoder::createFrontendRenderer(PDECODER_PARAMETERS params, bool
             if (vulkanIsSlow) {
                 // Try Vulkan even if it's slow because we have no other renderer
                 // that can display HDR properly on Linux.
-                m_FrontendRenderer = new PlVkRenderer(AV_HWDEVICE_TYPE_NONE, m_BackendRenderer);
+                m_FrontendRenderer = new PlVkRenderer(m_Host, AV_HWDEVICE_TYPE_NONE, m_BackendRenderer);
                 if (initializeRendererInternal(m_FrontendRenderer, params) && (m_FrontendRenderer->getRendererAttributes() & RENDERER_ATTRIBUTE_HDR_SUPPORT)) {
                     return true;
                 }
@@ -462,8 +407,8 @@ bool FFmpegVideoDecoder::createFrontendRenderer(PDECODER_PARAMETERS params, bool
         else
         {
 #ifdef HAVE_LIBPLACEBO_VULKAN
-            if (qgetenv("PREFER_VULKAN") == "1") {
-                m_FrontendRenderer = new PlVkRenderer(AV_HWDEVICE_TYPE_NONE, m_BackendRenderer);
+            if (StreamEnvironment::equals("PREFER_VULKAN", "1")) {
+                m_FrontendRenderer = new PlVkRenderer(m_Host, AV_HWDEVICE_TYPE_NONE, m_BackendRenderer);
                 if (initializeRendererInternal(m_FrontendRenderer, params)) {
                     return true;
                 }
@@ -522,7 +467,7 @@ bool FFmpegVideoDecoder::createFrontendRenderer(PDECODER_PARAMETERS params, bool
         }
 #endif
 
-        m_FrontendRenderer = new SdlRenderer(&s_SdlRendererHost);
+        m_FrontendRenderer = new SdlRenderer(&m_Host);
         if (!initializeRendererInternal(m_FrontendRenderer, params)) {
             return false;
         }
@@ -583,7 +528,7 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
     // Enable slice multi-threading for software decoding
     if (!isHardwareAccelerated()) {
         m_VideoDecoderCtx->thread_type = FF_THREAD_SLICE;
-        m_VideoDecoderCtx->thread_count = qMin(MAX_SLICES, SDL_GetCPUCount());
+        m_VideoDecoderCtx->thread_count = std::min(MAX_SLICES, SDL_GetCPUCount());
     }
     else {
         // No threading for HW decode
@@ -618,13 +563,16 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
         return false;
     }
 
-    QString optionVarName = QString("%1_AVOPTIONS").arg(decoder->name).toUpper();
-    QByteArray optionVarValue = qgetenv(optionVarName.toUtf8());
-    if (!optionVarValue.isNull()) {
+    std::string optionVarName = std::string(decoder->name) + "_AVOPTIONS";
+    for (char& c : optionVarName) {
+        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+    }
+    const char* optionVarValue = std::getenv(optionVarName.c_str());
+    if (optionVarValue != nullptr) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Applying FFmpeg option overrides for %s: %s",
                     decoder->name,
-                    optionVarValue.constData());
+                    optionVarValue);
         av_dict_parse_string(&options, optionVarValue, "=", ":", 0);
     }
 
@@ -792,7 +740,7 @@ bool FFmpegVideoDecoder::completeInitialization(const AVCodec* decoder, enum AVP
         }
 
         // Tell overlay manager to use this frontend renderer
-        Session::get()->getOverlayManager().setOverlayRenderer(m_FrontendRenderer);
+        m_Host.getOverlayManager().setOverlayRenderer(m_FrontendRenderer);
 
         // Allow the renderer to perform final preparations for rendering
         m_FrontendRenderer->prepareToRender();
@@ -839,9 +787,9 @@ void FFmpegVideoDecoder::addVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst)
         dst.minHostProcessingLatency = src.minHostProcessingLatency;
     }
     else if (src.minHostProcessingLatency != 0) {
-        dst.minHostProcessingLatency = qMin(dst.minHostProcessingLatency, src.minHostProcessingLatency);
+        dst.minHostProcessingLatency = std::min(dst.minHostProcessingLatency, src.minHostProcessingLatency);
     }
-    dst.maxHostProcessingLatency = qMax(dst.maxHostProcessingLatency, src.maxHostProcessingLatency);
+    dst.maxHostProcessingLatency = std::max(dst.maxHostProcessingLatency, src.maxHostProcessingLatency);
     dst.totalHostProcessingLatency += src.totalHostProcessingLatency;
     dst.framesWithHostProcessingLatency += src.framesWithHostProcessingLatency;
 
@@ -998,7 +946,7 @@ void FFmpegVideoDecoder::stringifyVideoStats(VIDEO_STATS &stats, char *output, i
     {
         char rttString[32];
         char bandwidthString[32];
-        int bandwidthKbps = BandwidthCalculator::instance()->getCurrentBandwidthKbps();
+        int bandwidthKbps = m_Host.getCurrentBandwidthKbps();
 
         if (stats.lastRtt != 0)
         {
@@ -1078,7 +1026,7 @@ void FFmpegVideoDecoder::logVideoStats(VIDEO_STATS& stats, const char* title)
 
 IFFmpegRenderer* FFmpegVideoDecoder::createHwAccelRenderer(const AVCodecHWConfig* hwDecodeCfg, PDECODER_PARAMETERS params, int pass)
 {
-    Q_UNUSED(params);
+    (void)params;
 
     if (!(hwDecodeCfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)) {
         return nullptr;
@@ -1087,18 +1035,18 @@ IFFmpegRenderer* FFmpegVideoDecoder::createHwAccelRenderer(const AVCodecHWConfig
     // First pass using our top-tier hwaccel implementations
     if (pass == 0) {
         switch (hwDecodeCfg->device_type) {
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
         // DXVA2 appears in the hwaccel list before D3D11VA, so we only check for D3D11VA
         // on the first pass to ensure we prefer D3D11VA over DXVA2.
         case AV_HWDEVICE_TYPE_D3D11VA:
-            return new D3D11VARenderer(pass, s_D3D11RendererHost);
+            return new D3D11VARenderer(pass, m_Host);
 #endif
-#ifdef Q_OS_DARWIN
+#ifdef __APPLE__
         case AV_HWDEVICE_TYPE_VIDEOTOOLBOX:
             // Prefer the libplacebo (on MoltenVK) renderer unless explicitly opted out
 #ifdef HAVE_LIBPLACEBO_VULKAN
             if (params->renderer == VideoDecoderOptions::Automatic || params->renderer == VideoDecoderOptions::Vulkan) {
-                return new PlVkRenderer(hwDecodeCfg->device_type);
+                return new PlVkRenderer(m_Host, hwDecodeCfg->device_type);
             }
 #endif
             if (params->renderer == VideoDecoderOptions::AvSampleBuffer) {
@@ -1123,7 +1071,7 @@ IFFmpegRenderer* FFmpegVideoDecoder::createHwAccelRenderer(const AVCodecHWConfig
 #endif
 #ifdef HAVE_LIBPLACEBO_VULKAN
         case AV_HWDEVICE_TYPE_VULKAN:
-            return new PlVkRenderer(hwDecodeCfg->device_type);
+            return new PlVkRenderer(m_Host, hwDecodeCfg->device_type);
 #endif
         default:
             switch (hwDecodeCfg->pix_fmt) {
@@ -1146,16 +1094,16 @@ IFFmpegRenderer* FFmpegVideoDecoder::createHwAccelRenderer(const AVCodecHWConfig
             // CUDA should only be used to cover the NVIDIA+Wayland case
             return new CUDARenderer();
 #endif
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
         // This gives us another shot if D3D11VA failed in the first pass.
         // Since DXVA2 is in the hwaccel list first, we'll first try to fall back
         // to that before giving D3D11VA another try as a last resort.
         case AV_HWDEVICE_TYPE_DXVA2:
-            return new DXVA2Renderer(pass, s_Dxva2RendererHost);
+            return new DXVA2Renderer(pass, m_Host);
         case AV_HWDEVICE_TYPE_D3D11VA:
-            return new D3D11VARenderer(pass, s_D3D11RendererHost);
+            return new D3D11VARenderer(pass, m_Host);
 #endif
-#ifdef Q_OS_DARWIN
+#ifdef __APPLE__
         case AV_HWDEVICE_TYPE_VIDEOTOOLBOX:
             // Use the older AVSampleBufferDisplayLayer if Metal cannot be used
             return VTRendererFactory::createRenderer();
@@ -1222,7 +1170,7 @@ bool FFmpegVideoDecoder::isSeparateTestDecoderRequired(const AVCodec* decoder)
     // We know v4l2m2m can't handle this (see comment below), so let's just
     // opt-out all non-hwaccel decoders just to be safe.
     bool value;
-    if (Utils::getEnvironmentVariableOverride("SEPARATE_TEST_DECODER", &value)) {
+    if (StreamEnvironment::getOverride("SEPARATE_TEST_DECODER", &value)) {
         return value;
     }
     else if (getAVCodecCapabilities(decoder) & AV_CODEC_CAP_HARDWARE) {
@@ -1271,7 +1219,7 @@ bool FFmpegVideoDecoder::tryInitializeRenderer(const AVCodec* decoder,
     // i == 0 - Indirect via EGL, DRM, or Vulkan frontend with zero-copy buffer passing
     // i == 1 - Direct rendering or indirect via SDL or DRM read-back
     bool backendInitFailure = false;
-#if defined(Q_OS_UNIX) && !defined(Q_OS_DARWIN) && (defined(HAVE_EGL) || defined(HAVE_DRM) || defined(HAVE_LIBPLACEBO_VULKAN))
+#if defined(Q_OS_UNIX) && !defined(__APPLE__) && (defined(HAVE_EGL) || defined(HAVE_DRM) || defined(HAVE_LIBPLACEBO_VULKAN))
     for (int i = 0; i < 2 && !backendInitFailure; i++) {
 #else
     for (int i = 1; i < 2 && !backendInitFailure; i++) {
@@ -1350,7 +1298,7 @@ bool FFmpegVideoDecoder::tryInitializeRenderer(const AVCodec* decoder,
                         "Trying " #RENDERER_TYPE " for codec %s due to preferred pixel format: 0x%x", \
                         decoder->name, decoder_pix_fmts[i]); \
             if (tryInitializeRenderer(decoder, decoder_pix_fmts[i], params, nullptr, nullptr, \
-                                      []() -> IFFmpegRenderer* { return new RENDERER_TYPE CONSTRUCTOR_ARGS; })) { \
+                                      [this]() -> IFFmpegRenderer* { return new RENDERER_TYPE CONSTRUCTOR_ARGS; })) { \
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, \
                             "Chose " #RENDERER_TYPE " for codec %s due to preferred pixel format: 0x%x", \
                             decoder->name, decoder_pix_fmts[i]); \
@@ -1368,7 +1316,7 @@ bool FFmpegVideoDecoder::tryInitializeRenderer(const AVCodec* decoder,
                         "Trying " #RENDERER_TYPE " for codec %s due to compatible pixel format: 0x%x", \
                         decoder->name, decoder_pix_fmts[i]); \
             if (tryInitializeRenderer(decoder, decoder_pix_fmts[i], params, nullptr, nullptr, \
-                                      []() -> IFFmpegRenderer* { return new RENDERER_TYPE CONSTRUCTOR_ARGS; })) { \
+                                      [this]() -> IFFmpegRenderer* { return new RENDERER_TYPE CONSTRUCTOR_ARGS; })) { \
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, \
                             "Chose " #RENDERER_TYPE " for codec %s due to compatible pixel format: 0x%x", \
                             decoder->name, decoder_pix_fmts[i]); \
@@ -1388,24 +1336,24 @@ bool FFmpegVideoDecoder::tryInitializeRendererForUnknownDecoder(const AVCodec* d
     bool glIsSlow;
     bool vulkanIsSlow;
 
-    if (!Utils::getEnvironmentVariableOverride("GL_IS_SLOW", &glIsSlow)) {
+    if (!StreamEnvironment::getOverride("GL_IS_SLOW", &glIsSlow)) {
 #ifdef GL_IS_SLOW
         glIsSlow = true;
 #else
-        glIsSlow = WMUtils::isGpuSlow();
+        glIsSlow = m_Host.isGpuSlow();
 #endif
     }
 
-    if (!Utils::getEnvironmentVariableOverride("VULKAN_IS_SLOW", &vulkanIsSlow)) {
+    if (!StreamEnvironment::getOverride("VULKAN_IS_SLOW", &vulkanIsSlow)) {
 #ifdef VULKAN_IS_SLOW
         vulkanIsSlow = true;
 #else
-        vulkanIsSlow = WMUtils::isGpuSlow();
+        vulkanIsSlow = m_Host.isGpuSlow();
 #endif
     }
 
-    Q_UNUSED(glIsSlow);
-    Q_UNUSED(vulkanIsSlow);
+    (void)glIsSlow;
+    (void)vulkanIsSlow;
 
     const AVPixelFormat* decoder_pix_fmts;
 #if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 13, 100)
@@ -1430,7 +1378,7 @@ bool FFmpegVideoDecoder::tryInitializeRendererForUnknownDecoder(const AVCodec* d
                 // Initialize the hardware codec and submit a test frame if the renderer needs it
                 IFFmpegRenderer::InitFailureReason failureReason;
                 if (tryInitializeRenderer(decoder, AV_PIX_FMT_NONE, params, config, &failureReason,
-                                          [config, params, pass]() -> IFFmpegRenderer* { return createHwAccelRenderer(config, params, pass); })) {
+                                          [this, config, params, pass]() -> IFFmpegRenderer* { return createHwAccelRenderer(config, params, pass); })) {
                     return true;
                 }
                 else if (failureReason == IFFmpegRenderer::InitFailureReason::NoHardwareSupport) {
@@ -1447,27 +1395,27 @@ bool FFmpegVideoDecoder::tryInitializeRendererForUnknownDecoder(const AVCodec* d
 
 #ifdef HAVE_DRM
         if ((glIsSlow || vulkanIsSlow) && tryInitializeRenderer(decoder, AV_PIX_FMT_NONE, params, nullptr, nullptr,
-                                  []() -> IFFmpegRenderer* { return new DrmRenderer(); })) {
+                                  [this]() -> IFFmpegRenderer* { return new DrmRenderer(); })) {
             return true;
         }
 #endif
 
 #ifdef HAVE_LIBPLACEBO_VULKAN
         if (!vulkanIsSlow && tryInitializeRenderer(decoder, AV_PIX_FMT_NONE, params, nullptr, nullptr,
-                                  []() -> IFFmpegRenderer* { return new PlVkRenderer(); })) {
+                                  [this]() -> IFFmpegRenderer* { return new PlVkRenderer(m_Host); })) {
             return true;
         }
 #endif
 
-#ifdef Q_OS_DARWIN
+#ifdef __APPLE__
         if (tryInitializeRenderer(decoder, AV_PIX_FMT_NONE, params, nullptr, nullptr,
-                                  []() -> IFFmpegRenderer* { return VTMetalRendererFactory::createRenderer(false); })) {
+                                  [this]() -> IFFmpegRenderer* { return VTMetalRendererFactory::createRenderer(false); })) {
             return true;
         }
 #endif
 
         if (tryInitializeRenderer(decoder, AV_PIX_FMT_NONE, params, nullptr, nullptr,
-                                  []() -> IFFmpegRenderer* { return new SdlRenderer(&s_SdlRendererHost); })) {
+                                  [this]() -> IFFmpegRenderer* { return new SdlRenderer(&m_Host); })) {
             return true;
         }
 
@@ -1498,11 +1446,11 @@ bool FFmpegVideoDecoder::tryInitializeRendererForUnknownDecoder(const AVCodec* d
 #endif
 #ifdef HAVE_LIBPLACEBO_VULKAN
         if (!vulkanIsSlow) {
-            TRY_PREFERRED_PIXEL_FORMAT(PlVkRenderer, {});
+            TRY_PREFERRED_PIXEL_FORMAT(PlVkRenderer, {m_Host});
         }
 #endif
         if (!glIsSlow) {
-            TRY_PREFERRED_PIXEL_FORMAT(SdlRenderer, {&s_SdlRendererHost});
+            TRY_PREFERRED_PIXEL_FORMAT(SdlRenderer, {&m_Host});
         }
     }
 
@@ -1513,11 +1461,11 @@ bool FFmpegVideoDecoder::tryInitializeRendererForUnknownDecoder(const AVCodec* d
 #endif
 #ifdef HAVE_LIBPLACEBO_VULKAN
         if (!vulkanIsSlow) {
-            TRY_SUPPORTED_NON_PREFERRED_PIXEL_FORMAT(PlVkRenderer, {});
+            TRY_SUPPORTED_NON_PREFERRED_PIXEL_FORMAT(PlVkRenderer, {m_Host});
         }
 #endif
         if (!glIsSlow) {
-            TRY_SUPPORTED_NON_PREFERRED_PIXEL_FORMAT(SdlRenderer, {&s_SdlRendererHost});
+            TRY_SUPPORTED_NON_PREFERRED_PIXEL_FORMAT(SdlRenderer, {&m_Host});
         }
     }
 
@@ -1526,10 +1474,10 @@ bool FFmpegVideoDecoder::tryInitializeRendererForUnknownDecoder(const AVCodec* d
         // If we got here with VULKAN_IS_SLOW, DrmRenderer didn't work,
         // so we have to resort to PlVkRenderer.
         for (int i = 0; decoder_pix_fmts[i] != AV_PIX_FMT_NONE; i++) {
-            TRY_PREFERRED_PIXEL_FORMAT(PlVkRenderer, {});
+            TRY_PREFERRED_PIXEL_FORMAT(PlVkRenderer, {m_Host});
         }
         for (int i = 0; decoder_pix_fmts[i] != AV_PIX_FMT_NONE; i++) {
-            TRY_SUPPORTED_NON_PREFERRED_PIXEL_FORMAT(PlVkRenderer, {});
+            TRY_SUPPORTED_NON_PREFERRED_PIXEL_FORMAT(PlVkRenderer, {m_Host});
         }
     }
 #endif
@@ -1538,10 +1486,10 @@ bool FFmpegVideoDecoder::tryInitializeRendererForUnknownDecoder(const AVCodec* d
         // If we got here with GL_IS_SLOW, DrmRenderer didn't work, so we have
         // to resort to SdlRenderer.
         for (int i = 0; decoder_pix_fmts[i] != AV_PIX_FMT_NONE; i++) {
-            TRY_PREFERRED_PIXEL_FORMAT(SdlRenderer, {&s_SdlRendererHost});
+            TRY_PREFERRED_PIXEL_FORMAT(SdlRenderer, {&m_Host});
         }
         for (int i = 0; decoder_pix_fmts[i] != AV_PIX_FMT_NONE; i++) {
-            TRY_SUPPORTED_NON_PREFERRED_PIXEL_FORMAT(SdlRenderer, {&s_SdlRendererHost});
+            TRY_SUPPORTED_NON_PREFERRED_PIXEL_FORMAT(SdlRenderer, {&m_Host});
         }
     }
 
@@ -1562,7 +1510,8 @@ int FFmpegVideoDecoder::getAVCodecCapabilities(const AVCodec *codec)
     // AV_CODEC_CAP_HARDWARE (probably because the upstream OMX code
     // also doesn't set it). Avoid a false decoder warning on startup
     // by setting it ourselves.
-    if (QString::fromUtf8(codec->name).endsWith("_omx", Qt::CaseInsensitive)) {
+    const size_t nameLength = std::strlen(codec->name);
+    if (nameLength >= 4 && av_strcasecmp(codec->name + nameLength - 4, "_omx") == 0) {
         caps |= AV_CODEC_CAP_HARDWARE;
     }
 
@@ -1630,7 +1579,7 @@ bool FFmpegVideoDecoder::tryInitializeHwAccelDecoder(PDECODER_PARAMETERS params,
             // Initialize the hardware codec and submit a test frame if the renderer needs it
             IFFmpegRenderer::InitFailureReason failureReason;
             if (tryInitializeRenderer(decoder, AV_PIX_FMT_NONE, params, config, &failureReason,
-                                      [config, params, pass]() -> IFFmpegRenderer* { return createHwAccelRenderer(config, params, pass); })) {
+                                      [this, config, params, pass]() -> IFFmpegRenderer* { return createHwAccelRenderer(config, params, pass); })) {
                 return true;
             }
             else if (failureReason == IFFmpegRenderer::InitFailureReason::NoHardwareSupport) {
@@ -1727,53 +1676,53 @@ bool FFmpegVideoDecoder::initialize(PDECODER_PARAMETERS params)
     // - AV_PIX_FMT_NV12
     // - AV_PIX_FMT_NV21
     {
-        QString h264DecoderHint = qgetenv("H264_DECODER_HINT");
-        if (!h264DecoderHint.isEmpty() && (params->videoFormat & VIDEO_FORMAT_MASK_H264)) {
-            QByteArray decoderString = h264DecoderHint.toUtf8();
-            if (tryInitializeRendererForUnknownDecoder(avcodec_find_decoder_by_name(decoderString.constData()), params, true)) {
+        const char* h264DecoderHint = std::getenv("H264_DECODER_HINT");
+        if (h264DecoderHint && *h264DecoderHint && (params->videoFormat & VIDEO_FORMAT_MASK_H264)) {
+            const char* decoderString = h264DecoderHint;
+            if (tryInitializeRendererForUnknownDecoder(avcodec_find_decoder_by_name(decoderString), params, true)) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                             "Using custom H.264 decoder (H264_DECODER_HINT): %s",
-                            decoderString.constData());
+                            decoderString);
                 return true;
             }
             else {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                              "Custom H.264 decoder (H264_DECODER_HINT) failed to load: %s",
-                             decoderString.constData());
+                             decoderString);
             }
         }
     }
     {
-        QString hevcDecoderHint = qgetenv("HEVC_DECODER_HINT");
-        if (!hevcDecoderHint.isEmpty() && (params->videoFormat & VIDEO_FORMAT_MASK_H265)) {
-            QByteArray decoderString = hevcDecoderHint.toUtf8();
-            if (tryInitializeRendererForUnknownDecoder(avcodec_find_decoder_by_name(decoderString.constData()), params, true)) {
+        const char* hevcDecoderHint = std::getenv("HEVC_DECODER_HINT");
+        if (hevcDecoderHint && *hevcDecoderHint && (params->videoFormat & VIDEO_FORMAT_MASK_H265)) {
+            const char* decoderString = hevcDecoderHint;
+            if (tryInitializeRendererForUnknownDecoder(avcodec_find_decoder_by_name(decoderString), params, true)) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                             "Using custom HEVC decoder (HEVC_DECODER_HINT): %s",
-                            decoderString.constData());
+                            decoderString);
                 return true;
             }
             else {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                              "Custom HEVC decoder (HEVC_DECODER_HINT) failed to load: %s",
-                             decoderString.constData());
+                             decoderString);
             }
         }
     }
     {
-        QString av1DecoderHint = qgetenv("AV1_DECODER_HINT");
-        if (!av1DecoderHint.isEmpty() && (params->videoFormat & VIDEO_FORMAT_MASK_AV1)) {
-            QByteArray decoderString = av1DecoderHint.toUtf8();
-            if (tryInitializeRendererForUnknownDecoder(avcodec_find_decoder_by_name(decoderString.constData()), params, true)) {
+        const char* av1DecoderHint = std::getenv("AV1_DECODER_HINT");
+        if (av1DecoderHint && *av1DecoderHint && (params->videoFormat & VIDEO_FORMAT_MASK_AV1)) {
+            const char* decoderString = av1DecoderHint;
+            if (tryInitializeRendererForUnknownDecoder(avcodec_find_decoder_by_name(decoderString), params, true)) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                             "Using custom AV1 decoder (AV1_DECODER_HINT): %s",
-                            decoderString.constData());
+                            decoderString);
                 return true;
             }
             else {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                              "Custom AV1 decoder (AV1_DECODER_HINT) failed to load: %s",
-                             decoderString.constData());
+                             decoderString);
             }
         }
     }
@@ -2143,15 +2092,15 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
     // Flip stats windows roughly every second
     if (LiGetMicroseconds() > m_ActiveWndVideoStats.measurementStartUs + 1000000) {
         // Update overlay stats if it's enabled
-        if (Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug)) {
+        if (m_Host.getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug)) {
             VIDEO_STATS lastTwoWndStats = {};
             addVideoStats(m_LastWndVideoStats, lastTwoWndStats);
             addVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
 
             stringifyVideoStats(lastTwoWndStats,
-                                Session::get()->getOverlayManager().getOverlayText(Overlay::OverlayDebug),
-                                Session::get()->getOverlayManager().getOverlayMaxTextLength());
-            Session::get()->getOverlayManager().setOverlayTextUpdated(Overlay::OverlayDebug);
+                                m_Host.getOverlayManager().getOverlayText(Overlay::OverlayDebug),
+                                m_Host.getOverlayManager().getOverlayMaxTextLength());
+            m_Host.getOverlayManager().setOverlayTextUpdated(Overlay::OverlayDebug);
         }
 
         // Accumulate these values into the global stats
@@ -2165,14 +2114,14 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
 
     if (du->frameHostProcessingLatency != 0) {
         if (m_ActiveWndVideoStats.minHostProcessingLatency != 0) {
-            m_ActiveWndVideoStats.minHostProcessingLatency = qMin(m_ActiveWndVideoStats.minHostProcessingLatency, du->frameHostProcessingLatency);
+            m_ActiveWndVideoStats.minHostProcessingLatency = std::min(m_ActiveWndVideoStats.minHostProcessingLatency, du->frameHostProcessingLatency);
         }
         else {
             m_ActiveWndVideoStats.minHostProcessingLatency = du->frameHostProcessingLatency;
         }
         m_ActiveWndVideoStats.framesWithHostProcessingLatency += 1;
     }
-    m_ActiveWndVideoStats.maxHostProcessingLatency = qMax(m_ActiveWndVideoStats.maxHostProcessingLatency, du->frameHostProcessingLatency);
+    m_ActiveWndVideoStats.maxHostProcessingLatency = std::max(m_ActiveWndVideoStats.maxHostProcessingLatency, du->frameHostProcessingLatency);
     m_ActiveWndVideoStats.totalHostProcessingLatency += du->frameHostProcessingLatency;
 
     m_ActiveWndVideoStats.receivedFrames++;

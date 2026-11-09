@@ -55,7 +55,7 @@ SDL 音讯输出与共用音讯 renderer 介面已不依赖 Qt；仍直接复用
 
 统计／状态文字的生产 `OverlayManager` 已纳入无 Qt CMake，保留既有 SDL_ttf 格式解析、字型与 surface 拥有权。owner 以 `std::string` 移入字型资料；过渡期 Session 仍透过原 Qt `Path::readDataFile()` 选择相同档案／内嵌资源，不改变查找顺序。`overlay_text` 比对修改前 Qt 版本的五组固定像素结果，并验证 surface 交接、开关、多个 owner 与字型生命周期；不代表真实串流、DPI 或 HDR 已验收。
 
-`video/decodebuffer.*` 复用原压缩包拼接、H.264 SPS 修正与 AV1 OBU 重排，由 Qt FFmpeg decoder 直接调用；可重用原生缓冲区在扩容时无需复制旧包，每包实际长度后明确补零，满足 FFmpeg padding 要求。原始探测影片样本与原生测试共用，十组 H.264／HEVC／AV1、8／10-bit 与 4:2:0／4:4:4 经分段组装后，以实际软件 decoder 验证像素与原始样本一致，并送入生产 Pacer。此路径使用测试 renderer，不证明 GPU 呈现、实体 V-sync、影音同步或真实游戏串流通过；完整 FFmpeg orchestration、GPU renderer、视窗与 Session 仍有 Qt 相依。
+`video/decodebuffer.*` 复用原压缩包拼接、H.264 SPS 修正与 AV1 OBU 重排，由 Qt FFmpeg decoder 直接调用；可重用原生缓冲区在扩容时无需复制旧包，每包实际长度后明确补零，满足 FFmpeg padding 要求。原始探测影片样本与原生测试共用，十组 H.264／HEVC／AV1、8／10-bit 与 4:2:0／4:4:4 经分段组装后，以实际软件 decoder 验证像素与原始样本一致，并送入生产 Pacer。此路径使用测试 renderer，不证明 GPU 呈现、实体 V-sync、影音同步或真实游戏串流通过；完整串流视窗、Session 与网路仍有 Qt 相依；FFmpeg／Windows renderer 的原生建置见下文。
 
 Windows Raw Input 触控板的接点集合与帧差异计算由无 Qt 的 `input/touchpadcontacts.h` 处理，保留五接点上限、HID 输入顺序、旧接点释放先于新 Down 事件；同一组 Up 内的 hash 迭代顺序不作为契约。Qt 输入处理器复用生产 helper，仍负责装置拥有权、按钮回退、擷取、传输与取消流程；SDL／macOS 接点容器保留。原生测试覆盖 1024 组新旧接点集合组合与边界，不代表真实触控板手势已完成验收。
 
@@ -65,17 +65,23 @@ Windows／MSVC 的 `streamutils.cpp` 也已纳入无 Qt 建置：复用既有 SD
 
 测试 PATH 仅包含原生依赖与 Windows 系统目录，不借用开发机 Qt 路径。
 
-Windows Lite 的生产 SDL 影像 renderer 与 `SwFrameMapper` 也纳入无 Qt CMake，使用固定 swscale／avutil／SDL 依赖。`ISdlRendererHost` 只提供视窗事件同步清理、图层开关与更新后的 SDL surface；原 Qt decoder 透过 `SessionSdlRendererHost` adapter 保留即时 Session 查询与既有清理流程。图层 surface 拥有权、texture 快取、位置、渲染线程选择与色彩转换不变，不增加每幀像素中转。完整 worker 仍由 Qt Session 协调；改由原生 owner 提供此介面后即可移除该 adapter，不需要在 renderer 模拟 QObject。其他平台 MMAL／CUDA 条件路径不属于此无 Qt 验收。
+Windows Lite 的生产 SDL 影像 renderer 与 `SwFrameMapper` 也纳入无 Qt CMake，使用固定 swscale／avutil／SDL 依赖。`ISdlRendererHost` 只提供视窗事件同步清理、图层开关与更新后的 SDL surface；原 Qt decoder 透过 `SessionFFmpegDecoderHost` adapter 保留即时 Session 查询与既有清理流程。图层 surface 拥有权、texture 快取、位置、渲染线程选择与色彩转换不变，不增加每幀像素中转。完整 worker 仍由 Qt Session 协调；改由原生 owner 提供此介面后即可移除该 adapter，不需要在 renderer 模拟 QObject。其他平台 MMAL／CUDA 条件路径不属于此无 Qt 验收。
 
 `sdl_video_renderer` 默认只验证原生 probe／格式协商，不启动 GPU。显式 `--render` 使用隐藏 Windows 视窗与实际 SDL backend：验证 YUV420／NV12／NV21、4:4:4 CPU 转换、图层更新／快取／开关、尺寸变化与比例，以保留的 SDL target texture 读回像素，避免依赖 Present 后可被丢弃的 window backbuffer。另复用六组 8-bit H.264／HEVC／AV1 的 4:2:0／4:4:4 样本，完成组包→软件解码→生产 Pacer／渲染线程→SDL 实际呈现。此测试不验收硬体解码／copyback、HDR、实体 V-sync 或游戏延迟；SDL 原本拒绝 HDR 的行为保留。
 
-生产 D3D11VA renderer 也保持 C++，直接纳入无 Qt CMake；解码装置、共享 texture／fence、HDR shader 与厂商影像增强流程不改写为 Rust。`ID3D11RendererHost` 只提供 shader 二进位及图层状态／surface，过渡期 `ffmpeg.cpp` 的 Session adapter 保留原 Qt 资源查找顺序；替换为原生 owner 后即可移除此 adapter。无每幀影像中转或额外程序。原生环境变数解析保留既有带正负号、空白、进位侦测与 int 范围；迁移时另与安装的 Qt 6.12.0 比对 37 组值。SDL 的环境快取不作为此查询来源，使用与原 Qt 路径一致的 C runtime 环境。
+生产 D3D11VA renderer 也保持 C++，直接纳入无 Qt CMake；解码装置、共享 texture／fence、HDR shader 与厂商影像增强流程不改写为 Rust。`ID3D11RendererHost` 只提供 shader 二进位及图层状态／surface，过渡期 `session.cpp` 的 `SessionFFmpegDecoderHost` adapter 保留原 Qt 资源查找顺序；替换为原生 owner 后即可移除此 adapter。无每幀影像中转或额外程序。原生环境变数解析保留既有带正负号、空白、进位侦测与 int 范围；迁移时另与安装的 Qt 6.12.0 比对 37 组值。SDL 的环境快取不作为此查询来源，使用与原 Qt 路径一致的 C runtime 环境。
 
 `d3d11_video_renderer` 的预设测试不启动 GPU，验证生产链接、环境覆盖及显式停用后的 fallback；`--probe app/shaders` 则建立隐藏 SDL 视窗、实际 D3D11 装置、五个既有 shader 与 FFmpeg 硬体 context，再清理资源。此检查尚不验收影片解码／呈现、HDR、厂商增强或游戏延迟。AMF 复用 `app.pro` 的同一组内嵌源码；新 CMake 仅对原 renderer 已有的 C4244 数值缩窄警告作局部豁免，不在解除 Qt 时顺便改动 HDR／texture 数值行为。
 
-DXVA2 备援 renderer 同样保持 C++，由 `lite-dxva2-video` 直接构建生产源码；`IDxva2RendererHost` 只提供既有图层状态与 SDL surface，`ffmpeg.cpp` 的过渡 adapter 保留即时 Session 查询。surface 交接、texture 快取、D3D9 装置／video processor、黑名单、quirk、decoder 选择顺序及 HDR 首轮回退不变。环境开关复用相同的原生解析器；x86／x64 判定使用编译器架构宏，不再依赖 Qt 宏。未来原生 owner 接手图层后即可移除 adapter，不新增影像复制或程序。
+DXVA2 备援 renderer 同样保持 C++，由 `lite-dxva2-video` 直接构建生产源码；`IDxva2RendererHost` 只提供既有图层状态与 SDL surface，`session.cpp` 的过渡 adapter 保留即时 Session 查询。surface 交接、texture 快取、D3D9 装置／video processor、黑名单、quirk、decoder 选择顺序及 HDR 首轮回退不变。环境开关复用相同的原生解析器；x86／x64 判定使用编译器架构宏，不再依赖 Qt 宏。未来原生 owner 接手图层后即可移除 adapter，不新增影像复制或程序。
 
 `dxva2_video_renderer` 默认仅验证原生链接、明确停用时的两轮 fallback、HDR 能力与首轮 HDR 回退，不启动 GPU；显式 `--probe` 建立隐藏 SDL 视窗、实际 DXVA2 装置／processor 及 FFmpeg 硬体 context，并执行图层 surface 交接、无新像素的更新与停用清理，错误日志即失败。探测未送入压缩影片、未读回呈现像素，不代表真实硬体解码、全萤幕、延迟或串流体验通过。无 Qt CMake 对既有顶点 int→float 转换仅作局部 C4244 豁免，保留原数值行为。
+
+Vulkan／libplacebo renderer 与通用 FFmpeg hwaccel 分别由 `lite-vulkan-video`、`lite-generic-hwaccel` 直接编译生产源码，使用既有固定 libplacebo 374／Vulkan headers，不另找 SDK。`IPlVkRendererHost` 只提供原图层状态与 surface，保留异步上传的 surface 所有权、staging texture 与渲染线程锁。日志、Intel／软件 GPU 开关复用原生环境解析器；平台与 Debug 分支改用编译器宏。通用 hwaccel 保留原 FFmpeg 装置建立、context 引用及 read-back 语意，不新增影像中转。
+
+`lite-ffmpeg-decoder` 直接构建生产 `ffmpeg.cpp`，同时链接 SDL、D3D11VA、DXVA2、Vulkan 和通用 hwaccel，未藉停用 renderer 达成无 Qt 编译。`IFFmpegDecoderHost` 提供原生 OverlayManager、renderer 图层／资源介面、当前频宽及 GPU 策略；原 Session 查询与 Qt 资源读取统一留在 `session.cpp` 的 `SessionFFmpegDecoderHost`，此 owner 必须比 decoder 活得更久。renderer 选择顺序、探测影格、解码线程、Pacer、统计更新与清理顺序保留。codec 名称表、ASCII 名称衍生的 AVOPTIONS／OMX 判定及环境 hint 使用标准型别；不改主机格式或用户设定。
+
+`vulkan_video_renderer --probe` 验证实际 Vulkan 影格上传、两次呈现、图层更新／清理及通用 D3D11 硬体 context；未读回最终像素。`ffmpeg_video_decoder <repo-root> --probe` 则使用生产内嵌 H.264／HEVC／AV1 探测影格，分别走软件与硬体解码、原 renderer 格式映射，再清理资源。两者均须显式执行，默认 CTest 不启动 GPU；所有原生测试在不含 Qt 的 PATH 运行。这些验证不代表完整 worker 已无 Qt，或真实串流、HDR、全萤幕、影音同步及延迟已验收；Session、网路、设定、输入与 helper 仍需迁移。
 
 Windows Lite 的 GPUI 串流入口使用现有前端视窗中的有焦点控制页，快捷键仍为 Ctrl+Alt+Shift+O；十字键／方向键选择、A／Enter 确认、B／Esc 返回。GPUI session 不建立 Qt 互动选单或浮动按钮；旧 Qt 前端路径保留。原选单位置设定仍保留在隔离 profile 中供旧路径使用，GPUI 设定页不再提供不适用的位置选项。
 

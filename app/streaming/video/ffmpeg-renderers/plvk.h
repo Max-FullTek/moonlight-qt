@@ -4,7 +4,7 @@
 
 #include <atomic>
 
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
 #define VK_USE_PLATFORM_WIN32_KHR
 #endif
 
@@ -12,7 +12,7 @@
 #include <libplacebo/renderer.h>
 #include <libplacebo/vulkan.h>
 
-#ifdef Q_OS_DARWIN
+#ifdef __APPLE__
 class MetalVulkanTextureFactory {
 public:
     MetalVulkanTextureFactory(pl_vulkan vulkan);
@@ -37,9 +37,16 @@ private:
 
 #endif
 
+class IPlVkRendererHost {
+public:
+    virtual ~IPlVkRendererHost() = default;
+    virtual bool isOverlayEnabled(Overlay::OverlayType type) = 0;
+    virtual SDL_Surface* getUpdatedOverlaySurface(Overlay::OverlayType type) = 0;
+};
+
 class PlVkRenderer : public IFFmpegRenderer {
 public:
-    PlVkRenderer(AVHWDeviceType hwDeviceType = AV_HWDEVICE_TYPE_NONE, IFFmpegRenderer *backendRenderer = nullptr);
+    PlVkRenderer(IPlVkRendererHost& host, AVHWDeviceType hwDeviceType = AV_HWDEVICE_TYPE_NONE, IFFmpegRenderer *backendRenderer = nullptr);
     virtual ~PlVkRenderer() override;
     virtual bool initialize(PDECODER_PARAMETERS params) override;
     virtual bool prepareDecoderContext(AVCodecContext* context, AVDictionary** options) override;
@@ -79,10 +86,11 @@ private:
     bool isSurfacePresentationSupportedByPhysicalDevice(VkPhysicalDevice device);
 
     // The backend renderer if we're frontend-only
+    IPlVkRendererHost& m_Host;
     IFFmpegRenderer* m_Backend;
     AVHWDeviceType m_HwDeviceType;
 
-#ifdef Q_OS_DARWIN
+#ifdef __APPLE__
     std::unique_ptr<MetalVulkanTextureFactory> m_MetalTextureFactory;
 #endif
 

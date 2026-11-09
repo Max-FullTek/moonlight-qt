@@ -204,6 +204,48 @@ target_compile_options(lite-native-notification PRIVATE /W3 /WX)
 target_include_directories(lite-native-notification PUBLIC "${LITE_SOURCE_ROOT}/app")
 target_link_libraries(lite-native-notification PUBLIC lite-sdl2 d3d11 dxgi dcomp d2d1 dwrite user32)
 
+foreach(required IN ITEMS include/x64/libplacebo/vulkan.h include/vulkan/vulkan.h
+                          lib/x64/libplacebo.lib lib/x64/libplacebo-374.dll)
+    if(NOT EXISTS "${LITE_DEPS_ROOT}/${required}")
+        message(FATAL_ERROR "Missing pinned libplacebo dependency: ${required}")
+    endif()
+endforeach()
+add_library(lite-placebo SHARED IMPORTED)
+set_target_properties(lite-placebo PROPERTIES
+    IMPORTED_IMPLIB "${LITE_DEPS_LIB}/libplacebo.lib"
+    IMPORTED_LOCATION "${LITE_DEPS_LIB}/libplacebo-374.dll"
+    INTERFACE_INCLUDE_DIRECTORIES "${LITE_DEPS_ROOT}/include")
+add_library(lite-vulkan-video STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/video/ffmpeg-renderers/plvk.cpp"
+    "${LITE_SOURCE_ROOT}/app/streaming/video/ffmpeg-renderers/plvk_c.c")
+target_compile_features(lite-vulkan-video PUBLIC cxx_std_17)
+target_compile_definitions(lite-vulkan-video PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_compile_options(lite-vulkan-video PRIVATE /W3 /WX)
+# Preserve existing overlay coordinate conversions and the FFmpeg queue-lock
+# callbacks required by this pinned production integration.
+set_source_files_properties(
+    "${LITE_SOURCE_ROOT}/app/streaming/video/ffmpeg-renderers/plvk.cpp"
+    PROPERTIES COMPILE_OPTIONS "/wd4244;/wd4996")
+target_link_libraries(lite-vulkan-video PUBLIC lite-stream-utils lite-avcodec lite-placebo moonlight-common-c)
+
+add_library(lite-generic-hwaccel STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/video/ffmpeg-renderers/genhwaccel.cpp")
+target_compile_features(lite-generic-hwaccel PUBLIC cxx_std_17)
+target_compile_definitions(lite-generic-hwaccel PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_compile_options(lite-generic-hwaccel PRIVATE /W3 /WX)
+target_link_libraries(lite-generic-hwaccel PUBLIC lite-stream-utils lite-avcodec moonlight-common-c)
+
+add_library(lite-ffmpeg-decoder STATIC "${LITE_SOURCE_ROOT}/app/streaming/video/ffmpeg.cpp")
+target_compile_features(lite-ffmpeg-decoder PUBLIC cxx_std_17)
+target_compile_definitions(lite-ffmpeg-decoder PUBLIC HAVE_LIBPLACEBO_VULKAN)
+target_compile_definitions(lite-ffmpeg-decoder PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_compile_options(lite-ffmpeg-decoder PRIVATE /W3 /WX)
+# The inherited first-pass switch has only a default when EGL is not built.
+set_source_files_properties("${LITE_SOURCE_ROOT}/app/streaming/video/ffmpeg.cpp"
+    PROPERTIES COMPILE_OPTIONS /wd4065)
+target_link_libraries(lite-ffmpeg-decoder PUBLIC lite-d3d11-video lite-dxva2-video
+    lite-vulkan-video lite-generic-hwaccel lite-sdl-video lite-video-buffer lite-video-pacer lite-overlay-text)
+
 if(BUILD_TESTING)
     # The pinned fork's decode fixture omits stopVideoDepacketizer() before
     # destroying a used queue. Patch a build-directory copy only: the fork is
@@ -261,6 +303,20 @@ if(BUILD_TESTING)
     target_link_libraries(dxva2_video_renderer PRIVATE lite-dxva2-video)
     add_test(NAME dxva2_video_renderer COMMAND dxva2_video_renderer)
     set_tests_properties(dxva2_video_renderer PROPERTIES TIMEOUT 15)
+
+    add_executable(vulkan_video_renderer "${LITE_SOURCE_ROOT}/tests/vulkan_video_renderer/main.cpp")
+    target_compile_definitions(vulkan_video_renderer PRIVATE SDL_MAIN_HANDLED)
+    target_compile_options(vulkan_video_renderer PRIVATE /W3 /WX)
+    target_link_libraries(vulkan_video_renderer PRIVATE lite-vulkan-video lite-generic-hwaccel)
+    add_test(NAME vulkan_video_renderer COMMAND vulkan_video_renderer)
+    set_tests_properties(vulkan_video_renderer PROPERTIES TIMEOUT 15)
+
+    add_executable(ffmpeg_video_decoder "${LITE_SOURCE_ROOT}/tests/ffmpeg_video_decoder/main.cpp")
+    target_compile_definitions(ffmpeg_video_decoder PRIVATE SDL_MAIN_HANDLED)
+    target_compile_options(ffmpeg_video_decoder PRIVATE /W3 /WX)
+    target_link_libraries(ffmpeg_video_decoder PRIVATE lite-ffmpeg-decoder)
+    add_test(NAME ffmpeg_video_decoder COMMAND ffmpeg_video_decoder "${LITE_SOURCE_ROOT}")
+    set_tests_properties(ffmpeg_video_decoder PROPERTIES TIMEOUT 15)
 
     add_executable(native_notification "${LITE_SOURCE_ROOT}/tests/native_notification/main.cpp")
     target_compile_definitions(native_notification PRIVATE SDL_MAIN_HANDLED)
