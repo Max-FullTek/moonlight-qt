@@ -4,6 +4,7 @@
 #include <QRect>
 #include <QQmlEngine>
 #include <QString>
+#include "streaming/video/videodecoderoptions.h"
 
 class StreamingPreferences : public QObject
 {
@@ -40,20 +41,20 @@ public:
 
     enum VideoDecoderSelection
     {
-        VDS_AUTO,
-        VDS_FORCE_HARDWARE,
-        VDS_FORCE_SOFTWARE
+        VDS_AUTO = VideoDecoderOptions::Auto,
+        VDS_FORCE_HARDWARE = VideoDecoderOptions::Hardware,
+        VDS_FORCE_SOFTWARE = VideoDecoderOptions::Software
     };
     Q_ENUM(VideoDecoderSelection)
 
     // Mac only (for now)
     enum RendererSelection
     {
-        RS_PROBE_ONLY = -1, // Only valid for probing decoder properties
-        RS_AUTO,
-        RS_VULKAN,
-        RS_METAL,
-        RS_AVSBDL
+        RS_PROBE_ONLY = VideoDecoderOptions::ProbeOnly, // Only valid for probing decoder properties
+        RS_AUTO = VideoDecoderOptions::Automatic,
+        RS_VULKAN = VideoDecoderOptions::Vulkan,
+        RS_METAL = VideoDecoderOptions::Metal,
+        RS_AVSBDL = VideoDecoderOptions::AvSampleBuffer
     };
     Q_ENUM(RendererSelection)
 

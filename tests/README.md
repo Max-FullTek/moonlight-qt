@@ -1,6 +1,6 @@
 # tests/
 
-各子目录为独立可执行测试，既有测试经 `qmake && make` 后直接运行，退出码非零即失败；`sdl_audio_renderer` 为仅 CMake 的 Windows Lite 原生测试，入口见下文。
+各子目录为独立可执行测试，既有测试经 `qmake && make` 后直接运行，退出码非零即失败；Windows Lite 原生测试另有 CMake 入口，见下文。
 CI 统一经 `scripts/run-test.bat`(Windows)调用,法规约见脚本头注释;新测试加入
 CI 时在 build.yml 对应步骤加一行 `call scripts\run-test.bat <目录> <TARGET>`。
 
@@ -38,6 +38,8 @@ main() 短、被测逻辑走生产源文件直编(见各 .pro 的 SOURCES)。
 | linux_display_event_monitor | Linux 显示事件唤醒 | Linux |
 
 Windows Lite 原生库另有无 Qt 入口 `scripts/build-lite-native.ps1`（CI：`lite-native.yml`），覆盖 Release／Debug，构建并执行协议库已有 CTest、`lite_native` 的实际静态链接／API／H.264 NAL 解析检查，以及 `keyboard_state`、`gamepad_sensor_rate`、`pen_history_selection`、`cursor_shape_classification`。四项输入测试复用现有源文件，键盘与光标分类测试本身已不再依赖 Qt；原 `.pro` 入口保留。光标分类测试覆盖 1x／2x 形状、保守回退、空指针、输入长度／尺寸、alpha 门槛及热点边界，也加入 portable 回归入口。此入口不需要 qmake，不连接真实主机，不读取用户设置或凭证；范围与前提见 [架构文档](../docs/architecture.md#windows-lite-原生库建置)。另有仅 CMake 的 `sdl_audio_renderer`：直接编译生产 SDL renderer 并链接实际 common-c，dummy 驱动覆盖 stereo／5.1／7.1、5／10 ms PCM、空帧与重复开关；SDL 错误／断言导致失败，不使用实体音讯装置。浮动介面另覆盖 `overlay_placement_axis`（仅 CMake）、`overlay_event_wake_state` 与 `overlay_toast_event_state`（保留 qmake 入口）；直接复用生产 helper，不启动视窗。旧 `overlay_button_position` 仍覆盖 Qt 包装及 QSettings，并比对原 Qt 公式与无 Qt 计算。`stream_utils` 为仅 CMake 的 Windows／MSVC 测试，直接编译生产源文件，以 SDL dummy 隐藏视窗覆盖 Vulkan 探测失败回退、桌面模式／刷新率、Windows DRM 空结果、比例／座标转换与 AES-NI 查询，不接触实体显示器。`audio_pipeline`（仅 CMake）使用实际 Opus encoder／decoder 比对多声道 float／s16 输出，验证输出缓冲区大小、空 buffer、错误包、输出失败及 dummy 后端建立／清理；`touchpad_contacts`（仅 CMake）直接测试生产帧差异 helper 的 1024 组接点转移、完整 32-bit ID、五点上限、重复 ID 与接点释放。均不连接串流主机或使用实体输入／音讯装置。其余 qmake 测试仍属于旧路径。
+
+`video_pacer`（仅 CMake）直接编译生产 Pacer／Windows DxVsyncSource，以 SDL dummy 视窗及可控制的 V-sync source 验证主线程／SDL 渲染线程、三幀上限、严格／宽松丢幀、无缓冲 renderer、延后释放、失败回退与反复启停；用实际 AVFrame buffer 回调检查释放，检查渲染及清理的线程一致性。`video_decode_path`（仅 CMake）复用生产探测样本，十组 H.264／HEVC／AV1 的 8／10-bit、4:2:0／4:4:4 经三段组装、实际 FFmpeg 软件解码后，与原包解码逐像素比对，再送入生产 Pacer 的测试 renderer；另覆盖超过 1 MiB 的扩容、缩包重用、FFmpeg 零 padding、AV1 metadata 重排及 H.264 SPS 原样／修正。两者不使用 Qt、实体显示器或主机，不验收 GPU 呈现、实体 V-sync、延迟或游戏体验。
 
 ## 仅本地/手动
 

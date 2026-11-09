@@ -1,6 +1,7 @@
 #pragma once
 
-#include <QString>
+#include <QByteArray>
+#include "overlayrenderer.h"
 #include <string>
 #include <vector>
 
@@ -9,24 +10,10 @@
 
 namespace Overlay {
 
-enum OverlayType {
-    OverlayDebug,
-    OverlayStatusUpdate,
-    OverlayMax
-};
-
 enum TextAlignment {
     AlignTop,        // 顶部对齐
     AlignCenter,     // 居中对齐
     AlignBottom      // 底部对齐（默认）
-};
-
-class IOverlayRenderer
-{
-public:
-    virtual ~IOverlayRenderer() = default;
-
-    virtual void notifyOverlayUpdated(OverlayType type) = 0;
 };
 
 class OverlayManager

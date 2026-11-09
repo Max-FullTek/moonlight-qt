@@ -886,8 +886,8 @@ bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
                                     vds != StreamingPreferences::VDS_FORCE_SOFTWARE;
     params.ignoreAspectRatio = ignoreAspectRatio;
     params.testOnly = testOnly;
-    params.vds = vds;
-    params.renderer = renderer;
+    params.vds = static_cast<VideoDecoderOptions::Decoder>(vds);
+    params.renderer = static_cast<VideoDecoderOptions::Renderer>(renderer);
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                 "V-sync %s",
@@ -997,7 +997,8 @@ void Session::getDecoderInfo(SDL_Window* window,
         isHardwareAccelerated = decoder->isHardwareAccelerated();
         isFullScreenOnly = decoder->isAlwaysFullScreen();
         isHdrSupported = decoder->isHdrSupported();
-        maxResolution = decoder->getDecoderMaxResolution();
+        const auto resolution = decoder->getDecoderMaxResolution();
+        maxResolution = QSize(resolution.width, resolution.height);
         delete decoder;
 
         return;
@@ -1042,7 +1043,8 @@ void Session::getDecoderInfo(SDL_Window* window,
                       false, false, false, false, true, decoder)) {
         isHardwareAccelerated = decoder->isHardwareAccelerated();
         isFullScreenOnly = decoder->isAlwaysFullScreen();
-        maxResolution = decoder->getDecoderMaxResolution();
+        const auto resolution = decoder->getDecoderMaxResolution();
+        maxResolution = QSize(resolution.width, resolution.height);
         delete decoder;
 
         return;
@@ -1055,7 +1057,8 @@ void Session::getDecoderInfo(SDL_Window* window,
                       false, false, false, false, true, decoder)) {
         isHardwareAccelerated = decoder->isHardwareAccelerated();
         isFullScreenOnly = decoder->isAlwaysFullScreen();
-        maxResolution = decoder->getDecoderMaxResolution();
+        const auto resolution = decoder->getDecoderMaxResolution();
+        maxResolution = QSize(resolution.width, resolution.height);
         delete decoder;
 
         return;
@@ -1070,7 +1073,8 @@ void Session::getDecoderInfo(SDL_Window* window,
                       false, false, false, false, true, decoder)) {
         isHardwareAccelerated = decoder->isHardwareAccelerated();
         isFullScreenOnly = decoder->isAlwaysFullScreen();
-        maxResolution = decoder->getDecoderMaxResolution();
+        const auto resolution = decoder->getDecoderMaxResolution();
+        maxResolution = QSize(resolution.width, resolution.height);
         delete decoder;
 
         return;

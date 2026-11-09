@@ -2,7 +2,7 @@
 
 #include <Limelight.h>
 #include "SDL_compat.h"
-#include "settings/streamingpreferences.h"
+#include "videodecoderoptions.h"
 
 #define SDL_CODE_FRAME_READY 0
 
@@ -35,8 +35,8 @@ typedef struct _VIDEO_STATS {
 
 typedef struct _DECODER_PARAMETERS {
     SDL_Window* window;
-    StreamingPreferences::VideoDecoderSelection vds;
-    StreamingPreferences::RendererSelection renderer;
+    VideoDecoderOptions::Decoder vds;
+    VideoDecoderOptions::Renderer renderer;
 
     int videoFormat;
     int width;
@@ -74,7 +74,7 @@ public:
     virtual int getDecoderCapabilities() = 0;
     virtual int getDecoderColorspace() = 0;
     virtual int getDecoderColorRange() = 0;
-    virtual QSize getDecoderMaxResolution() = 0;
+    virtual VideoResolution getDecoderMaxResolution() = 0;
     virtual int submitDecodeUnit(PDECODE_UNIT du) = 0;
     virtual void renderFrameOnMainThread() = 0;
     virtual void setHdrMode(bool enabled) = 0;

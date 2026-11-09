@@ -1,11 +1,9 @@
 #include <Limelight.h>
 #include "ffmpeg.h"
-#include "av1obu.h"
 #include "utils.h"
 #include "streaming/session.h"
 #include "streaming/network/bandwidth.h"
 
-#include <h264_stream.h>
 extern "C" {
 #include <libavutil/mastering_display_metadata.h>
 #include <libavutil/pixdesc.h>
@@ -53,10 +51,9 @@ extern "C" {
 
 // This is gross but it allows us to use sizeof()
 #include "ffmpeg_videosamples.cpp"
+using namespace VideoSamples;
 
 #define MAX_DECODER_PASS 2
-
-#define MAX_SPS_EXTRA_SIZE 16
 
 #define FAILED_DECODES_RESET_THRESHOLD 20
 
@@ -175,14 +172,14 @@ int FFmpegVideoDecoder::getDecoderColorRange()
     return m_FrontendRenderer->getDecoderColorRange();
 }
 
-QSize FFmpegVideoDecoder::getDecoderMaxResolution()
+VideoResolution FFmpegVideoDecoder::getDecoderMaxResolution()
 {
     if (m_BackendRenderer->getRendererAttributes() & RENDERER_ATTRIBUTE_1080P_MAX) {
-        return QSize(1920, 1080);
+        return VideoResolution{1920, 1080};
     }
     else {
         // No known maximum
-        return QSize(0, 0);
+        return VideoResolution{0, 0};
     }
 }
 
@@ -229,7 +226,7 @@ enum AVPixelFormat FFmpegVideoDecoder::ffGetFormat(AVCodecContext* context,
 
 FFmpegVideoDecoder::FFmpegVideoDecoder(bool testOnly)
     : m_Pkt(av_packet_alloc()), m_VideoDecoderCtx(nullptr), m_RequiredPixelFormat(AV_PIX_FMT_NONE),
-      m_DecodeBuffer(1024 * 1024, 0), m_HwDecodeCfg(nullptr), m_BackendRenderer(nullptr),
+      m_HwDecodeCfg(nullptr), m_BackendRenderer(nullptr),
       m_FrontendRenderer(nullptr), m_ConsecutiveFailedDecodes(0), m_Pacer(nullptr), m_FramesIn(0),
       m_FramesOut(0), m_LastFrameNumber(0), m_StreamFps(0), m_VideoFormat(0),
       m_NeedsSpsFixup(false), m_NeedsAv1ObuRepack(false), m_LoggedHdr10PlusMetadata(false),
@@ -1041,11 +1038,11 @@ IFFmpegRenderer* FFmpegVideoDecoder::createHwAccelRenderer(const AVCodecHWConfig
         case AV_HWDEVICE_TYPE_VIDEOTOOLBOX:
             // Prefer the libplacebo (on MoltenVK) renderer unless explicitly opted out
 #ifdef HAVE_LIBPLACEBO_VULKAN
-            if (params->renderer == StreamingPreferences::RS_AUTO || params->renderer == StreamingPreferences::RS_VULKAN) {
+            if (params->renderer == VideoDecoderOptions::Automatic || params->renderer == VideoDecoderOptions::Vulkan) {
                 return new PlVkRenderer(hwDecodeCfg->device_type);
             }
 #endif
-            if (params->renderer == StreamingPreferences::RS_AVSBDL) {
+            if (params->renderer == VideoDecoderOptions::AvSampleBuffer) {
                 return VTRendererFactory::createRenderer();
             }
             else {
@@ -1533,7 +1530,7 @@ bool FFmpegVideoDecoder::isDecoderMatchForParams(const AVCodec *decoder, PDECODE
            ((params->videoFormat & VIDEO_FORMAT_MASK_AV1)  && decoder->id == AV_CODEC_ID_AV1);
 }
 
-bool FFmpegVideoDecoder::tryInitializeHwAccelDecoder(PDECODER_PARAMETERS params, int pass, QSet<const AVCodec*>& terminallyFailedHardwareDecoders)
+bool FFmpegVideoDecoder::tryInitializeHwAccelDecoder(PDECODER_PARAMETERS params, int pass, std::set<const AVCodec*>& terminallyFailedHardwareDecoders)
 {
     const AVCodec* decoder;
     void* codecIterator;
@@ -1559,7 +1556,7 @@ bool FFmpegVideoDecoder::tryInitializeHwAccelDecoder(PDECODER_PARAMETERS params,
         }
 
         // Skip hardware decoders that have returned a terminal failure status
-        if (terminallyFailedHardwareDecoders.contains(decoder)) {
+        if (terminallyFailedHardwareDecoders.find(decoder) != terminallyFailedHardwareDecoders.end()) {
             continue;
         }
 
@@ -1595,7 +1592,7 @@ bool FFmpegVideoDecoder::isZeroCopyFormat(AVPixelFormat format)
     return (formatDesc && !!(formatDesc->flags & AV_PIX_FMT_FLAG_HWACCEL));
 }
 
-bool FFmpegVideoDecoder::tryInitializeNonHwAccelDecoder(PDECODER_PARAMETERS params, bool requireZeroCopyFormat, QSet<const AVCodec*>& terminallyFailedHardwareDecoders)
+bool FFmpegVideoDecoder::tryInitializeNonHwAccelDecoder(PDECODER_PARAMETERS params, bool requireZeroCopyFormat, std::set<const AVCodec*>& terminallyFailedHardwareDecoders)
 {
     const AVCodec* decoder;
     void* codecIterator;
@@ -1643,7 +1640,7 @@ bool FFmpegVideoDecoder::tryInitializeNonHwAccelDecoder(PDECODER_PARAMETERS para
         }
 
         // Skip hardware decoders that have returned a terminal failure status
-        if (terminallyFailedHardwareDecoders.contains(decoder)) {
+        if (terminallyFailedHardwareDecoders.find(decoder) != terminallyFailedHardwareDecoders.end()) {
             continue;
         }
 
@@ -1726,8 +1723,8 @@ bool FFmpegVideoDecoder::initialize(PDECODER_PARAMETERS params)
     void* codecIterator;
 
     // Look for a hardware decoder first unless software-only
-    if (params->vds != StreamingPreferences::VDS_FORCE_SOFTWARE) {
-        QSet<const AVCodec*> terminallyFailedHardwareDecoders;
+    if (params->vds != VideoDecoderOptions::Software) {
+        std::set<const AVCodec*> terminallyFailedHardwareDecoders;
 
         // Try tier 1 hwaccel decoders first
         if (tryInitializeHwAccelDecoder(params, 0, terminallyFailedHardwareDecoders)) {
@@ -1754,7 +1751,7 @@ bool FFmpegVideoDecoder::initialize(PDECODER_PARAMETERS params)
     }
 
     // Iterate through all software decoders if allowed
-    if (params->vds != StreamingPreferences::VDS_FORCE_HARDWARE) {
+    if (params->vds != VideoDecoderOptions::Hardware) {
         codecIterator = NULL;
         while ((decoder = av_codec_iterate(&codecIterator))) {
             // Skip codecs that aren't decoders
@@ -1788,90 +1785,6 @@ bool FFmpegVideoDecoder::initialize(PDECODER_PARAMETERS params)
                  "Unable to find working decoder for format: %x",
                  params->videoFormat);
     return false;
-}
-
-void FFmpegVideoDecoder::writeBuffer(PLENTRY entry, int& offset)
-{
-    if (m_NeedsSpsFixup && entry->bufferType == BUFFER_TYPE_SPS) {
-        h264_stream_t* stream = h264_new();
-        int nalStart, nalEnd;
-        bool needsFixup;
-
-        // Read the old NALU
-        find_nal_unit((uint8_t*)entry->data, entry->length, &nalStart, &nalEnd);
-        read_nal_unit(stream,
-                      (unsigned char *)&entry->data[nalStart],
-                      nalEnd - nalStart);
-
-        SDL_assert(nalStart == 3 || nalStart == 4); // 3 or 4 byte Annex B start sequence
-        SDL_assert(nalEnd == entry->length);
-
-        // Fixup the SPS to what OS X needs to use hardware acceleration
-        // This is also critical for decoding latency on the Pi 2.
-        needsFixup = (stream->sps->num_ref_frames != 1 || stream->sps->vui.max_dec_frame_buffering != 1);
-#ifndef QT_DEBUG
-        if (needsFixup)
-#endif
-        {
-            stream->sps->num_ref_frames = 1;
-            stream->sps->vui.max_dec_frame_buffering = 1;
-
-            // NVENC doesn't seem to add bitstream restrictions anymore (591.59),
-            // so we need to add them ourselves if not present to ensure that
-            // the max_dec_frame_buffering option actually takes effect.
-            // We use the defaults for everything except max_dec_frame_buffering.
-            if (!stream->sps->vui.bitstream_restriction_flag) {
-                stream->sps->vui.bitstream_restriction_flag = 1;
-                stream->sps->vui.motion_vectors_over_pic_boundaries_flag = 1;
-                stream->sps->vui.max_bytes_per_pic_denom = 2;
-                stream->sps->vui.max_bits_per_mb_denom = 1;
-                stream->sps->vui.log2_max_mv_length_horizontal = 16;
-                stream->sps->vui.log2_max_mv_length_vertical = 16;
-                stream->sps->vui.num_reorder_frames = 0;
-            }
-
-            int initialOffset = offset;
-
-            // Copy the modified NALU data. This clobbers byte 0 and starts NALU data at byte 1.
-            // Since it prepended one extra byte, subtract one from the returned length.
-            offset += write_nal_unit(stream, (uint8_t*)&m_DecodeBuffer.data()[initialOffset + nalStart - 1],
-                                     MAX_SPS_EXTRA_SIZE + entry->length - nalStart) - 1;
-
-            // Copy the NALU prefix over from the original SPS
-            memcpy(&m_DecodeBuffer.data()[initialOffset], entry->data, nalStart);
-            offset += nalStart;
-
-#ifdef QT_DEBUG
-            // If we didn't need a fixup, the SPS should have stayed the exact same
-            if (!needsFixup) {
-                SDL_assert(offset - initialOffset == entry->length);
-                SDL_assert(memcmp(&m_DecodeBuffer.data()[initialOffset], entry->data, entry->length) == 0);
-            }
-            else {
-                // The SPS should never get smaller with a fixup
-                SDL_assert(offset - initialOffset >= entry->length);
-            }
-#endif
-        }
-#ifndef QT_DEBUG
-        else {
-            // Write the SPS as-is if it required no modification
-            memcpy(&m_DecodeBuffer.data()[offset],
-                   entry->data,
-                   entry->length);
-            offset += entry->length;
-        }
-#endif
-
-        h264_free(stream);
-    }
-    else {
-        // Write the buffer as-is
-        memcpy(&m_DecodeBuffer.data()[offset],
-               entry->data,
-               entry->length);
-        offset += entry->length;
-    }
 }
 
 int FFmpegVideoDecoder::decoderThreadProcThunk(void *context)
@@ -2075,9 +1988,10 @@ void FFmpegVideoDecoder::decoderThreadProc()
                     // Capture a frame timestamp to measuring pacing delay
                     frame->pkt_dts = LiGetMicroseconds();
 
-                    if (!m_FrameInfoQueue.isEmpty()) {
+                    if (!m_FrameInfoQueue.empty()) {
                         // Data buffers in the DU are not valid here!
-                        DECODE_UNIT du = m_FrameInfoQueue.dequeue();
+                        DECODE_UNIT du = m_FrameInfoQueue.front();
+                        m_FrameInfoQueue.pop_front();
 
                         // Count time in avcodec_send_packet() and avcodec_receive_frame()
                         // as time spent decoding. Also count time spent in the decode unit
@@ -2117,7 +2031,7 @@ void FFmpegVideoDecoder::decoderThreadProc()
                     SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                                 "avcodec_receive_frame() failed: %s (frame %d)",
                                 errorstring,
-                                !m_FrameInfoQueue.isEmpty() ? m_FrameInfoQueue.head().frameNumber : -1);
+                                !m_FrameInfoQueue.empty() ? m_FrameInfoQueue.front().frameNumber : -1);
 
                     if (++m_ConsecutiveFailedDecodes == FAILED_DECODES_RESET_THRESHOLD) {
                         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -2147,7 +2061,6 @@ void FFmpegVideoDecoder::decoderThreadProc()
 
 int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
 {
-    PLENTRY entry = du->bufferList;
     int err;
 
     SDL_assert(m_CurrentTestMode != TestMode::TestFrameOnly);
@@ -2206,27 +2119,8 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
     m_ActiveWndVideoStats.receivedFrames++;
     m_ActiveWndVideoStats.totalFrames++;
 
-    int requiredBufferSize = du->fullLength;
-    if (du->frameType == FRAME_TYPE_IDR) {
-        // Add some extra space in case we need to do an SPS fixup
-        requiredBufferSize += MAX_SPS_EXTRA_SIZE;
-    }
-
-    // Ensure the decoder buffer is large enough
-    m_DecodeBuffer.reserve(requiredBufferSize + AV_INPUT_BUFFER_PADDING_SIZE);
-
-    int offset = 0;
-    while (entry != nullptr) {
-        writeBuffer(entry, offset);
-        entry = entry->next;
-    }
-
-    if (m_NeedsAv1ObuRepack) {
-        offset = repackAv1TemporalUnit(reinterpret_cast<uint8_t*>(m_DecodeBuffer.data()), offset);
-    }
-
-    m_Pkt->data = reinterpret_cast<uint8_t*>(m_DecodeBuffer.data());
-    m_Pkt->size = offset;
+    m_Pkt->size = m_DecodeBuffer.assemble(du, m_NeedsSpsFixup, m_NeedsAv1ObuRepack);
+    m_Pkt->data = m_DecodeBuffer.data();
 
     if (du->frameType == FRAME_TYPE_IDR) {
         m_Pkt->flags = AV_PKT_FLAG_KEY;
@@ -2264,7 +2158,7 @@ int FFmpegVideoDecoder::submitDecodeUnit(PDECODE_UNIT du)
         return DR_NEED_IDR;
     }
 
-    m_FrameInfoQueue.enqueue(*du);
+    m_FrameInfoQueue.push_back(*du);
 
     m_FramesIn++;
     return DR_OK;

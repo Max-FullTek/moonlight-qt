@@ -3,9 +3,10 @@
 #include "../../decoder.h"
 #include "../renderer.h"
 
-#include <QQueue>
-#include <QMutex>
-#include <QWaitCondition>
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
 
 // The maximum number of frames pacer will ever hold is:
 // - 3 frames in the pacing queue
@@ -31,7 +32,11 @@ public:
 class Pacer
 {
 public:
-    Pacer(IFFmpegRenderer* renderer, PVIDEO_STATS videoStats);
+    // Optional source factory also permits exercising pacing without a monitor.
+    // A null factory selects the existing platform source.
+    using VsyncSourceFactory = IVsyncSource* (*)(Pacer*);
+    Pacer(IFFmpegRenderer* renderer, PVIDEO_STATS videoStats,
+          VsyncSourceFactory vsyncSourceFactory = nullptr);
 
     ~Pacer();
 
@@ -54,25 +59,26 @@ private:
 
     void renderFrame(AVFrame* frame);
 
-    void dropFrameForEnqueue(QQueue<AVFrame*>& queue);
+    void dropFrameForEnqueue(std::deque<AVFrame*>& queue);
 
 #ifdef HAS_QT_SDL_WAYLAND_BRIDGE
     SDL_Window* m_Window = nullptr;
 #endif
-    QQueue<AVFrame*> m_RenderQueue;
-    QQueue<AVFrame*> m_PacingQueue;
-    QQueue<int> m_PacingQueueHistory;
-    QQueue<int> m_RenderQueueHistory;
-    QMutex m_FrameQueueLock;
-    QWaitCondition m_RenderQueueNotEmpty;
-    QWaitCondition m_PacingQueueNotEmpty;
-    QWaitCondition m_VsyncSignalled;
+    std::deque<AVFrame*> m_RenderQueue;
+    std::deque<AVFrame*> m_PacingQueue;
+    std::deque<int> m_PacingQueueHistory;
+    std::deque<int> m_RenderQueueHistory;
+    std::mutex m_FrameQueueLock;
+    std::condition_variable_any m_RenderQueueNotEmpty;
+    std::condition_variable_any m_PacingQueueNotEmpty;
+    std::condition_variable_any m_VsyncSignalled;
     SDL_Thread* m_RenderThread;
     SDL_Thread* m_VsyncThread;
     AVFrame* m_DeferredFreeFrame;
-    bool m_Stopping;
+    std::atomic<bool> m_Stopping;
 
     IVsyncSource* m_VsyncSource;
+    VsyncSourceFactory m_VsyncSourceFactory;
     IFFmpegRenderer* m_VsyncRenderer;
     int m_MaxVideoFps;
     int m_DisplayFps;

@@ -5,7 +5,7 @@
 #include "streaming/waylandqtsdlbridge.h"
 #endif
 
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include "dxvsyncsource.h"
@@ -16,6 +16,18 @@
 #endif
 
 #include <SDL_syswm.h>
+#include <chrono>
+#include <utility>
+
+namespace {
+template<typename T>
+T takeFront(std::deque<T>& queue)
+{
+    T value = queue.front();
+    queue.pop_front();
+    return value;
+}
+}
 
 // Limit the number of queued frames to prevent excessive memory consumption
 // if the V-Sync source or renderer is blocked for a while. It's important
@@ -33,12 +45,14 @@ static_assert(PACER_MAX_OUTSTANDING_FRAMES == MAX_QUEUED_FRAMES + 2,
 // V-sync happens.
 #define TIMER_SLACK_MS 3
 
-Pacer::Pacer(IFFmpegRenderer* renderer, PVIDEO_STATS videoStats) :
+Pacer::Pacer(IFFmpegRenderer* renderer, PVIDEO_STATS videoStats,
+             VsyncSourceFactory vsyncSourceFactory) :
     m_RenderThread(nullptr),
     m_VsyncThread(nullptr),
     m_DeferredFreeFrame(nullptr),
     m_Stopping(false),
     m_VsyncSource(nullptr),
+    m_VsyncSourceFactory(vsyncSourceFactory),
     m_VsyncRenderer(renderer),
     m_MaxVideoFps(0),
     m_DisplayFps(0),
@@ -49,12 +63,17 @@ Pacer::Pacer(IFFmpegRenderer* renderer, PVIDEO_STATS videoStats) :
 
 Pacer::~Pacer()
 {
-    m_Stopping = true;
+    {
+        // Serialize the stop transition with condition-variable waiters.
+        std::lock_guard<std::mutex> lock(m_FrameQueueLock);
+        m_Stopping = true;
+    }
+    m_PacingQueueNotEmpty.notify_all();
+    m_RenderQueueNotEmpty.notify_all();
+    m_VsyncSignalled.notify_all();
 
     // Stop the V-sync thread
     if (m_VsyncThread != nullptr) {
-        m_PacingQueueNotEmpty.wakeAll();
-        m_VsyncSignalled.wakeAll();
         SDL_WaitThread(m_VsyncThread, nullptr);
     }
 
@@ -64,7 +83,6 @@ Pacer::~Pacer()
 
     // Stop the render thread
     if (m_RenderThread != nullptr) {
-        m_RenderQueueNotEmpty.wakeAll();
         SDL_WaitThread(m_RenderThread, nullptr);
     }
     else {
@@ -74,12 +92,12 @@ Pacer::~Pacer()
     }
 
     // Delete any remaining unconsumed frames
-    while (!m_RenderQueue.isEmpty()) {
-        AVFrame* frame = m_RenderQueue.dequeue();
+    while (!m_RenderQueue.empty()) {
+        AVFrame* frame = takeFront(m_RenderQueue);
         av_frame_free(&frame);
     }
-    while (!m_PacingQueue.isEmpty()) {
-        AVFrame* frame = m_PacingQueue.dequeue();
+    while (!m_PacingQueue.empty()) {
+        AVFrame* frame = takeFront(m_PacingQueue);
         av_frame_free(&frame);
     }
     av_frame_free(&m_DeferredFreeFrame);
@@ -94,8 +112,8 @@ void Pacer::renderOnMainThread()
 
     m_FrameQueueLock.lock();
 
-    if (!m_RenderQueue.isEmpty()) {
-        AVFrame* frame = m_RenderQueue.dequeue();
+    if (!m_RenderQueue.empty()) {
+        AVFrame* frame = takeFront(m_RenderQueue);
         m_FrameQueueLock.unlock();
 
         renderFrame(frame);
@@ -120,7 +138,9 @@ int Pacer::vsyncThread(void *context)
         if (async) {
             // Wait for the VSync source to invoke signalVsync() or 100ms to elapse
             me->m_FrameQueueLock.lock();
-            me->m_VsyncSignalled.wait(&me->m_FrameQueueLock, 100);
+            if (!me->m_Stopping) {
+                me->m_VsyncSignalled.wait_for(me->m_FrameQueueLock, std::chrono::milliseconds(100));
+            }
             me->m_FrameQueueLock.unlock();
         }
         else {
@@ -157,8 +177,8 @@ int Pacer::renderThread(void* context)
         me->m_FrameQueueLock.lock();
 
         // Wait for a frame to be ready to render
-        while (!me->m_Stopping && me->m_RenderQueue.isEmpty()) {
-            me->m_RenderQueueNotEmpty.wait(&me->m_FrameQueueLock);
+        while (!me->m_Stopping && me->m_RenderQueue.empty()) {
+            me->m_RenderQueueNotEmpty.wait(me->m_FrameQueueLock);
         }
 
         if (me->m_Stopping) {
@@ -167,7 +187,7 @@ int Pacer::renderThread(void* context)
             break;
         }
 
-        AVFrame* frame = me->m_RenderQueue.dequeue();
+        AVFrame* frame = takeFront(me->m_RenderQueue);
         me->m_FrameQueueLock.unlock();
 
         me->renderFrame(frame);
@@ -183,12 +203,12 @@ int Pacer::renderThread(void* context)
 void Pacer::enqueueFrameForRenderingAndUnlock(AVFrame *frame)
 {
     dropFrameForEnqueue(m_RenderQueue);
-    m_RenderQueue.enqueue(frame);
+    m_RenderQueue.push_back(frame);
 
     m_FrameQueueLock.unlock();
 
     if (m_RenderThread != nullptr) {
-        m_RenderQueueNotEmpty.wakeOne();
+        m_RenderQueueNotEmpty.notify_one();
     }
     else {
         SDL_Event event;
@@ -227,16 +247,16 @@ void Pacer::handleVsync(int timeUntilNextVsyncMillis)
         }
 
         // Keep a rolling 500 ms window of pacing queue history
-        if (m_PacingQueueHistory.count() == m_DisplayFps / 2) {
-            m_PacingQueueHistory.dequeue();
+        if (static_cast<int>(m_PacingQueueHistory.size()) == m_DisplayFps / 2) {
+            takeFront(m_PacingQueueHistory);
         }
 
-        m_PacingQueueHistory.enqueue(m_PacingQueue.count());
+        m_PacingQueueHistory.push_back(static_cast<int>(m_PacingQueue.size()));
     }
 
     // Catch up if we're several frames ahead
-    while (m_PacingQueue.count() > frameDropTarget) {
-        AVFrame* frame = m_PacingQueue.dequeue();
+    while (static_cast<int>(m_PacingQueue.size()) > frameDropTarget) {
+        AVFrame* frame = takeFront(m_PacingQueue);
 
         // Drop the lock while we call av_frame_free()
         m_FrameQueueLock.unlock();
@@ -245,22 +265,23 @@ void Pacer::handleVsync(int timeUntilNextVsyncMillis)
         m_FrameQueueLock.lock();
     }
 
-    if (m_PacingQueue.isEmpty()) {
-        // Wait for a frame to arrive or our V-sync timeout to expire
-        if (!m_PacingQueueNotEmpty.wait(&m_FrameQueueLock, SDL_max(timeUntilNextVsyncMillis, TIMER_SLACK_MS) - TIMER_SLACK_MS)) {
-            // Wait timed out - unlock and bail
-            m_FrameQueueLock.unlock();
-            return;
+    if (m_PacingQueue.empty()) {
+        // A notification can be spurious; never dequeue an empty frame queue.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(
+            SDL_max(timeUntilNextVsyncMillis, TIMER_SLACK_MS) - TIMER_SLACK_MS);
+        while (!m_Stopping && m_PacingQueue.empty()) {
+            if (m_PacingQueueNotEmpty.wait_until(m_FrameQueueLock, deadline) == std::cv_status::timeout) {
+                break;
+            }
         }
-
-        if (m_Stopping) {
-            m_FrameQueueLock.unlock();
-            return;
-        }
+    }
+    if (m_Stopping || m_PacingQueue.empty()) {
+        m_FrameQueueLock.unlock();
+        return;
     }
 
     // Place the first frame on the render queue
-    enqueueFrameForRenderingAndUnlock(m_PacingQueue.dequeue());
+    enqueueFrameForRenderingAndUnlock(takeFront(m_PacingQueue));
 }
 
 bool Pacer::initialize(SDL_Window* window, int maxVideoFps, bool enablePacing)
@@ -277,32 +298,37 @@ bool Pacer::initialize(SDL_Window* window, int maxVideoFps, bool enablePacing)
                     "Frame pacing: target %d Hz with %d FPS stream",
                     m_DisplayFps, m_MaxVideoFps);
 
-        SDL_SysWMinfo info;
-        SDL_VERSION(&info.version);
-        if (!SDL_GetWindowWMInfo(window, &info)) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "SDL_GetWindowWMInfo() failed: %s",
-                         SDL_GetError());
-            return false;
+        if (m_VsyncSourceFactory != nullptr) {
+            m_VsyncSource = m_VsyncSourceFactory(this);
         }
+        else {
+            SDL_SysWMinfo info;
+            SDL_VERSION(&info.version);
+            if (!SDL_GetWindowWMInfo(window, &info)) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                             "SDL_GetWindowWMInfo() failed: %s",
+                             SDL_GetError());
+                return false;
+            }
 
-        switch (info.subsystem) {
-    #ifdef Q_OS_WIN32
-        case SDL_SYSWM_WINDOWS:
-            m_VsyncSource = new DxVsyncSource(this);
-            break;
-    #endif
+            switch (info.subsystem) {
+        #ifdef _WIN32
+            case SDL_SYSWM_WINDOWS:
+                m_VsyncSource = new DxVsyncSource(this);
+                break;
+        #endif
 
-    #if defined(SDL_VIDEO_DRIVER_WAYLAND) && defined(HAS_WAYLAND)
-        case SDL_SYSWM_WAYLAND:
-            m_VsyncSource = new WaylandVsyncSource(this);
-            break;
-    #endif
+        #if defined(SDL_VIDEO_DRIVER_WAYLAND) && defined(HAS_WAYLAND)
+            case SDL_SYSWM_WAYLAND:
+                m_VsyncSource = new WaylandVsyncSource(this);
+                break;
+        #endif
 
-        default:
-            // Platforms without a VsyncSource will just render frames
-            // immediately like they used to.
-            break;
+            default:
+                // Platforms without a VsyncSource will just render frames
+                // immediately like they used to.
+                break;
+            }
         }
 
         SDL_assert(m_VsyncSource != nullptr || !(m_RendererAttributes & RENDERER_ATTRIBUTE_FORCE_PACING));
@@ -333,7 +359,7 @@ bool Pacer::initialize(SDL_Window* window, int maxVideoFps, bool enablePacing)
 
 void Pacer::signalVsync()
 {
-    m_VsyncSignalled.wakeOne();
+    m_VsyncSignalled.notify_one();
 }
 
 void Pacer::renderFrame(AVFrame* frame)
@@ -382,16 +408,16 @@ void Pacer::renderFrame(AVFrame* frame)
         }
 
         // Keep a rolling 500 ms window of render queue history
-        if (m_RenderQueueHistory.count() == m_MaxVideoFps / 2) {
-            m_RenderQueueHistory.dequeue();
+        if (static_cast<int>(m_RenderQueueHistory.size()) == m_MaxVideoFps / 2) {
+            takeFront(m_RenderQueueHistory);
         }
 
-        m_RenderQueueHistory.enqueue(m_RenderQueue.count());
+        m_RenderQueueHistory.push_back(static_cast<int>(m_RenderQueue.size()));
     }
 
     // Catch up if we're several frames ahead
-    while (m_RenderQueue.count() > frameDropTarget) {
-        AVFrame* frame = m_RenderQueue.dequeue();
+    while (static_cast<int>(m_RenderQueue.size()) > frameDropTarget) {
+        AVFrame* frame = takeFront(m_RenderQueue);
 
         // Drop the lock while we call av_frame_free()
         m_FrameQueueLock.unlock();
@@ -403,11 +429,11 @@ void Pacer::renderFrame(AVFrame* frame)
     m_FrameQueueLock.unlock();
 }
 
-void Pacer::dropFrameForEnqueue(QQueue<AVFrame*>& queue)
+void Pacer::dropFrameForEnqueue(std::deque<AVFrame*>& queue)
 {
     SDL_assert(queue.size() <= MAX_QUEUED_FRAMES);
     if (queue.size() == MAX_QUEUED_FRAMES) {
-        AVFrame* frame = queue.dequeue();
+        AVFrame* frame = takeFront(queue);
         av_frame_free(&frame);
     }
 }
@@ -421,9 +447,9 @@ void Pacer::submitFrame(AVFrame* frame)
     m_FrameQueueLock.lock();
     if (m_VsyncSource != nullptr) {
         dropFrameForEnqueue(m_PacingQueue);
-        m_PacingQueue.enqueue(frame);
+        m_PacingQueue.push_back(frame);
         m_FrameQueueLock.unlock();
-        m_PacingQueueNotEmpty.wakeOne();
+        m_PacingQueueNotEmpty.notify_one();
     }
     else {
         enqueueFrameForRenderingAndUnlock(frame);

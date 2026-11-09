@@ -11,6 +11,16 @@ on:
       - tests/cursor_shape_classification/**
       - tests/sdl_audio_renderer/**
       - tests/audio_pipeline/**
+      - tests/video_pacer/**
+      - tests/video_decode_path/**
+      - app/streaming/video/decodebuffer.*
+      - app/streaming/video/decoder.h
+      - app/streaming/video/videodecoderoptions.h
+      - app/streaming/video/overlayrenderer.h
+      - app/streaming/video/ffmpeg-renderers/renderer.h
+      - app/streaming/video/ffmpeg-renderers/pacer/**
+      - app/streaming/video/ffmpeg_videosamples.cpp
+      - app/streaming/video/av1obu.*
       - tests/touchpad_contacts/**
       - app/streaming/input/touchpadcontacts.h
       - app/streaming/input/touchpad.cpp

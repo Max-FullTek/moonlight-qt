@@ -74,16 +74,16 @@ SLVideoDecoder::getDecoderColorRange()
     return COLOR_RANGE_LIMITED;
 }
 
-QSize SLVideoDecoder::getDecoderMaxResolution()
+VideoResolution SLVideoDecoder::getDecoderMaxResolution()
 {
-    return QSize(1920, 1080);
+    return VideoResolution{1920, 1080};
 }
 
 bool
 SLVideoDecoder::initialize(PDECODER_PARAMETERS params)
 {
     // SLVideo only supports hardware decoding
-    if (params->vds == StreamingPreferences::VDS_FORCE_SOFTWARE) {
+    if (params->vds == VideoDecoderOptions::Software) {
         return false;
     }
 

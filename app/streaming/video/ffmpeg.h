@@ -1,7 +1,8 @@
 #pragma once
 
 #include <functional>
-#include <QQueue>
+#include <deque>
+#include "decodebuffer.h"
 #include <set>
 
 #include "decoder.h"
@@ -24,7 +25,7 @@ public:
     virtual int getDecoderCapabilities() override;
     virtual int getDecoderColorspace() override;
     virtual int getDecoderColorRange() override;
-    virtual QSize getDecoderMaxResolution() override;
+    virtual VideoResolution getDecoderMaxResolution() override;
     virtual int submitDecodeUnit(PDECODE_UNIT du) override;
     virtual void renderFrameOnMainThread() override;
     virtual void setHdrMode(bool enabled) override;
@@ -70,11 +71,11 @@ private:
 
     bool tryInitializeHwAccelDecoder(PDECODER_PARAMETERS params,
                                      int pass,
-                                     QSet<const AVCodec*>& terminallyFailedHardwareDecoders);
+                                     std::set<const AVCodec*>& terminallyFailedHardwareDecoders);
 
     bool tryInitializeNonHwAccelDecoder(PDECODER_PARAMETERS params,
                                         bool requireZeroCopyFormat,
-                                        QSet<const AVCodec*>& terminallyFailedHardwareDecoders);
+                                        std::set<const AVCodec*>& terminallyFailedHardwareDecoders);
 
     bool tryInitializeRendererForUnknownDecoder(const AVCodec* decoder,
                                                 PDECODER_PARAMETERS params,
@@ -95,8 +96,6 @@ private:
 
     void reset();
 
-    void writeBuffer(PLENTRY entry, int& offset);
-
     static
     enum AVPixelFormat ffGetFormat(AVCodecContext* context,
                                    const enum AVPixelFormat* pixFmts);
@@ -108,7 +107,7 @@ private:
     AVPacket* m_Pkt;
     AVCodecContext* m_VideoDecoderCtx;
     enum AVPixelFormat m_RequiredPixelFormat;
-    QByteArray m_DecodeBuffer;
+    VideoDecodeBuffer m_DecodeBuffer;
     const AVCodecHWConfig* m_HwDecodeCfg;
     IFFmpegRenderer* m_BackendRenderer;
     IFFmpegRenderer* m_FrontendRenderer;
@@ -137,17 +136,6 @@ private:
     VideoEnhancement* m_VideoEnhancement;
 
     // Data buffers in the queued DU are not valid
-    QQueue<DECODE_UNIT> m_FrameInfoQueue;
-
-    static const uint8_t k_H264TestFrame[];
-    static const uint8_t k_HEVCMainTestFrame[];
-    static const uint8_t k_HEVCMain10TestFrame[];
-    static const uint8_t k_AV1Main8TestFrame[];
-    static const uint8_t k_AV1Main10TestFrame[];
-    static const uint8_t k_h264High_444TestFrame[];
-    static const uint8_t k_HEVCRExt8_444TestFrame[];
-    static const uint8_t k_HEVCRExt10_444TestFrame[];
-    static const uint8_t k_AV1High8_444TestFrame[];
-    static const uint8_t k_AV1High10_444TestFrame[];
+    std::deque<DECODE_UNIT> m_FrameInfoQueue;
 
 };

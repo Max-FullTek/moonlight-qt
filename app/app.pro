@@ -321,7 +321,10 @@ HEADERS += \
     streaming/audio/renderers/sdl.h \
     gui/computermodel.h \
     gui/appmodel.h \
+    streaming/video/decodebuffer.h \
     streaming/video/decoder.h \
+    streaming/video/videodecoderoptions.h \
+    streaming/video/overlayrenderer.h \
     streaming/network/bandwidth.h \
     streaming/streamutils.h \
     path.h \
@@ -374,6 +377,7 @@ ffmpeg {
 
     DEFINES += HAVE_FFMPEG
     SOURCES += \
+        streaming/video/decodebuffer.cpp \
         streaming/video/ffmpeg.cpp \
         streaming/video/av1obu.cpp \
         streaming/video/ffmpeg-renderers/genhwaccel.cpp \

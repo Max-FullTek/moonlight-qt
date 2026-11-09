@@ -5,7 +5,11 @@
 #include <array>
 
 #include "streaming/video/decoder.h"
-#include "streaming/video/overlaymanager.h"
+#include "streaming/video/overlayrenderer.h"
+
+#ifdef HAVE_EGL
+#include <QStringList>
+#endif
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -415,9 +419,9 @@ public:
         double uvScale = (channelRange - 1) / (uvMax - uvMin);
 
         // Calculate YUV offsets
-        offsets[0] = yMin / (double)(channelRange - 1);
-        offsets[1] = (channelRange / 2) / (double)(channelRange - 1);
-        offsets[2] = (channelRange / 2) / (double)(channelRange - 1);
+        offsets[0] = static_cast<float>(yMin / (double)(channelRange - 1));
+        offsets[1] = static_cast<float>((channelRange / 2) / (double)(channelRange - 1));
+        offsets[2] = static_cast<float>((channelRange / 2) / (double)(channelRange - 1));
 
         // Start with the standard full range color matrix
         switch (getFrameColorspace(frame)) {
@@ -435,10 +439,10 @@ public:
 
         // Scale the color matrix according to the color range
         for (int i = 0; i < 3; i++) {
-            cscMatrix[i] *= yScale;
+            cscMatrix[i] = static_cast<float>(cscMatrix[i] * yScale);
         }
         for (int i = 3; i < 9; i++) {
-            cscMatrix[i] *= uvScale;
+            cscMatrix[i] = static_cast<float>(cscMatrix[i] * uvScale);
         }
     }
 

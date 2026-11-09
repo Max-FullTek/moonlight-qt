@@ -52,7 +52,7 @@ target_compile_definitions(moonlight-common-c PRIVATE
 add_library(h264bitstream STATIC
     "${LITE_SOURCE_ROOT}/h264bitstream/h264_nal.c"
     "${LITE_SOURCE_ROOT}/h264bitstream/h264_stream.c")
-target_include_directories(h264bitstream PUBLIC "${LITE_SOURCE_ROOT}/h264bitstream")
+target_include_directories(h264bitstream SYSTEM PUBLIC "${LITE_SOURCE_ROOT}/h264bitstream")
 
 add_library(AntiHooking SHARED "${LITE_SOURCE_ROOT}/AntiHooking/antihookingprotection.cpp")
 target_compile_features(AntiHooking PRIVATE cxx_std_17)
@@ -98,6 +98,36 @@ target_include_directories(lite-stream-utils PUBLIC "${LITE_SOURCE_ROOT}/app")
 target_link_libraries(lite-stream-utils PUBLIC lite-sdl2)
 # Match the Windows Lite Qt build's window-probing preference.
 target_compile_definitions(lite-stream-utils PRIVATE HAVE_LIBPLACEBO_VULKAN)
+
+foreach(required IN ITEMS include/x64/libavutil/frame.h lib/x64/avutil.lib lib/x64/avutil-61.dll
+                          include/x64/libavcodec/avcodec.h lib/x64/avcodec.lib lib/x64/avcodec-63.dll)
+    if(NOT EXISTS "${LITE_DEPS_ROOT}/${required}")
+        message(FATAL_ERROR "Missing pinned FFmpeg dependency: ${required}")
+    endif()
+endforeach()
+add_library(lite-avutil SHARED IMPORTED)
+set_target_properties(lite-avutil PROPERTIES
+    IMPORTED_IMPLIB "${LITE_DEPS_LIB}/avutil.lib"
+    IMPORTED_LOCATION "${LITE_DEPS_LIB}/avutil-61.dll"
+    INTERFACE_INCLUDE_DIRECTORIES "${LITE_DEPS_ROOT}/include/x64")
+add_library(lite-video-pacer STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/video/ffmpeg-renderers/pacer/pacer.cpp"
+    "${LITE_SOURCE_ROOT}/app/streaming/video/ffmpeg-renderers/pacer/dxvsyncsource.cpp")
+target_compile_features(lite-video-pacer PUBLIC cxx_std_17)
+target_compile_options(lite-video-pacer PRIVATE /W3 /WX)
+target_link_libraries(lite-video-pacer PUBLIC lite-stream-utils lite-avutil moonlight-common-c gdi32 user32)
+add_library(lite-avcodec SHARED IMPORTED)
+set_target_properties(lite-avcodec PROPERTIES
+    IMPORTED_IMPLIB "${LITE_DEPS_LIB}/avcodec.lib"
+    IMPORTED_LOCATION "${LITE_DEPS_LIB}/avcodec-63.dll")
+target_link_libraries(lite-avcodec INTERFACE lite-avutil)
+add_library(lite-video-buffer STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/video/decodebuffer.cpp"
+    "${LITE_SOURCE_ROOT}/app/streaming/video/av1obu.cpp")
+target_compile_features(lite-video-buffer PUBLIC cxx_std_17)
+target_compile_options(lite-video-buffer PRIVATE /W3 /WX)
+target_include_directories(lite-video-buffer PUBLIC "${LITE_SOURCE_ROOT}/app")
+target_link_libraries(lite-video-buffer PUBLIC moonlight-common-c lite-sdl2 lite-avutil h264bitstream)
 
 if(BUILD_TESTING)
     # The pinned fork's decode fixture omits stopVideoDepacketizer() before
@@ -178,4 +208,18 @@ if(BUILD_TESTING)
     target_link_libraries(audio_pipeline PRIVATE lite-audio-pipeline)
     add_test(NAME audio_pipeline COMMAND audio_pipeline)
     set_tests_properties(audio_pipeline PROPERTIES TIMEOUT 15)
+
+    add_executable(video_pacer "${LITE_SOURCE_ROOT}/tests/video_pacer/main.cpp")
+    target_compile_definitions(video_pacer PRIVATE SDL_MAIN_HANDLED)
+    target_compile_options(video_pacer PRIVATE /W3 /WX)
+    target_link_libraries(video_pacer PRIVATE lite-video-pacer)
+    add_test(NAME video_pacer COMMAND video_pacer)
+    set_tests_properties(video_pacer PROPERTIES TIMEOUT 15)
+
+    add_executable(video_decode_path "${LITE_SOURCE_ROOT}/tests/video_decode_path/main.cpp")
+    target_compile_definitions(video_decode_path PRIVATE SDL_MAIN_HANDLED)
+    target_compile_options(video_decode_path PRIVATE /W3 /WX)
+    target_link_libraries(video_decode_path PRIVATE lite-video-buffer lite-video-pacer lite-avcodec)
+    add_test(NAME video_decode_path COMMAND video_decode_path)
+    set_tests_properties(video_decode_path PROPERTIES TIMEOUT 15)
 endif()
