@@ -1,20 +1,25 @@
 #include "sdlvid.h"
 
-#include "streaming/session.h"
 #include "streaming/streamutils.h"
 
 #include <Limelight.h>
 
 #include <SDL_syswm.h>
+#include <algorithm>
+
+#ifdef HAVE_MMAL
+#include <QByteArray>
+#endif
 
 extern "C" {
 #include <libavutil/pixdesc.h>
 #include <libavutil/opt.h>
 }
 
-SdlRenderer::SdlRenderer()
+SdlRenderer::SdlRenderer(ISdlRendererHost* host)
     : IFFmpegRenderer(RendererType::SDL),
       m_VideoFormat(0),
+      m_Host(host),
       m_Renderer(nullptr),
       m_Texture(nullptr),
       m_NeedsYuvToRgbConversion(false),
@@ -82,9 +87,9 @@ bool SdlRenderer::isRenderThreadSupported()
                 "SDL renderer backend: %s",
                 info.name);
 
-    if (info.name != QString("direct3d11") &&
-        info.name != QString("direct3d12") &&
-        info.name != QString("metal")) {
+    if (SDL_strcmp(info.name, "direct3d11") != 0 &&
+        SDL_strcmp(info.name, "direct3d12") != 0 &&
+        SDL_strcmp(info.name, "metal") != 0) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "SDL renderer backend requires main thread rendering");
         return false;
@@ -182,7 +187,7 @@ bool SdlRenderer::initialize(PDECODER_PARAMETERS params)
         break;
     }
 
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
     // We render on a different thread than the main thread which is handling window
     // messages. Without D3DCREATE_MULTITHREADED, this can cause a deadlock by blocking
     // on a window message being processed while the main thread is blocked waiting for
@@ -202,11 +207,10 @@ bool SdlRenderer::initialize(PDECODER_PARAMETERS params)
     // can get spurious SDL_WINDOWEVENT events that will cause us to (again) recreate our
     // renderer. This can lead to an infinite to renderer recreation, so discard all
     // SDL_WINDOWEVENT events after SDL_CreateRenderer().
-    Session* session = Session::get();
-    if (session != nullptr) {
+    if (m_Host != nullptr) {
         // If we get here during a session, we need to synchronize with the event loop
         // to ensure we don't drop any important events.
-        session->flushWindowEvents();
+        m_Host->flushWindowEvents();
     }
     else {
         // If we get here prior to the start of a session, just pump and flush ourselves.
@@ -224,11 +228,11 @@ bool SdlRenderer::initialize(PDECODER_PARAMETERS params)
 
 void SdlRenderer::renderOverlay(Overlay::OverlayType type)
 {
-    if (Session::get()->getOverlayManager().isOverlayEnabled(type)) {
+    if (m_Host != nullptr && m_Host->isOverlayEnabled(type)) {
         // If a new surface has been created for updated overlay data, convert it into a texture.
         // NB: We have to do this conversion at render-time because we can only interact
         // with the renderer on a single thread.
-        SDL_Surface* newSurface = Session::get()->getOverlayManager().getUpdatedOverlaySurface(type);
+        SDL_Surface* newSurface = m_Host->getUpdatedOverlaySurface(type);
         if (newSurface != nullptr) {
             if (m_OverlayTextures[type] != nullptr) {
                 SDL_DestroyTexture(m_OverlayTextures[type]);

@@ -21,7 +21,7 @@
 | 目录/文件 | 用途 |
 |---|---|
 | `clipboard-helper/` | 剪贴板同步 helper(独立进程) |
-| `windows-lite/` | Windows Lite 的无 Qt CMake 入口，构建原生库、输入 helper、音讯 pipeline、压缩影格组装与画面排程；不包含仍依赖 Qt 的完整串流 app 与剪贴板 helper |
+| `windows-lite/` | Windows Lite 的无 Qt CMake 入口，构建原生库、输入 helper、音讯 pipeline、压缩影格组装、画面排程与 SDL 影像输出；不包含仍依赖 Qt 的完整串流 app 与剪贴板 helper |
 | `usb-helper/` | macOS USB/IP 后端 helper(moonlight-usbd,C++23 + CMake,内嵌自己的 third_party 子模块) |
 | `file-mapping/` | 主机文件共享:mount / protocol / vfs 三层(`FileMapping` 命名空间);`smoke/` 是手工冒烟二进制(不在 CI) |
 | `tests/` | 测试目录,CI 覆盖矩阵与约定见 [../tests/README.md](../tests/README.md) |
@@ -62,6 +62,10 @@ Windows Raw Input 触控板的接点集合与帧差异计算由无 Qt 的 `input
 Windows／MSVC 的 `streamutils.cpp` 也已纳入无 Qt 建置：复用既有 SDL 隐藏视窗探测、桌面模式／刷新率查询、比例／座标转换与 AES-NI 检测。原 Qt 异步日志计数的控制函数随日志实现留在 `main.cpp`，不会纳入原生库；其他平台／工具链的 Qt 平台与 DRM 路径保留。`stream_utils` 测试仅用 SDL dummy video，不操作实体显示器；不代表已验收真实 GPU、HDR、DPI 或全屏体验。
 
 测试 PATH 仅包含原生依赖与 Windows 系统目录，不借用开发机 Qt 路径。
+
+Windows Lite 的生产 SDL 影像 renderer 与 `SwFrameMapper` 也纳入无 Qt CMake，使用固定 swscale／avutil／SDL 依赖。`ISdlRendererHost` 只提供视窗事件同步清理、图层开关与更新后的 SDL surface；原 Qt decoder 透过 `SessionSdlRendererHost` adapter 保留即时 Session 查询与既有清理流程。图层 surface 拥有权、texture 快取、位置、渲染线程选择与色彩转换不变，不增加每幀像素中转。完整 worker 仍由 Qt Session 协调；改由原生 owner 提供此介面后即可移除该 adapter，不需要在 renderer 模拟 QObject。其他平台 MMAL／CUDA 条件路径不属于此无 Qt 验收。
+
+`sdl_video_renderer` 默认只验证原生 probe／格式协商，不启动 GPU。显式 `--render` 使用隐藏 Windows 视窗与实际 SDL backend：验证 YUV420／NV12／NV21、4:4:4 CPU 转换、图层更新／快取／开关、尺寸变化与比例，以保留的 SDL target texture 读回像素，避免依赖 Present 后可被丢弃的 window backbuffer。另复用六组 8-bit H.264／HEVC／AV1 的 4:2:0／4:4:4 样本，完成组包→软件解码→生产 Pacer／渲染线程→SDL 实际呈现。此测试不验收硬体解码／copyback、HDR、实体 V-sync 或游戏延迟；SDL 原本拒绝 HDR 的行为保留。
 
 这仅完成原生库建置阶段：GPUI 前端仍由其 Cargo 路径构建，串流 worker、浮动介面与剪贴板 helper 仍需 Qt；现有 portable 封装仍走 qmake／windeployqt。不得把本入口通过视为 Windows Lite 已完成无 Qt 交付。
 

@@ -13,6 +13,9 @@ on:
       - tests/audio_pipeline/**
       - tests/video_pacer/**
       - tests/video_decode_path/**
+      - tests/sdl_video_renderer/**
+      - app/streaming/video/ffmpeg-renderers/sdlvid.*
+      - app/streaming/video/ffmpeg-renderers/swframemapper.*
       - app/streaming/video/decodebuffer.*
       - app/streaming/video/decoder.h
       - app/streaming/video/videodecoderoptions.h

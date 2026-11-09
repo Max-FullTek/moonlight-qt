@@ -11,9 +11,21 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
+// The owner coordinates event flushing and supplies newly rendered overlay
+// surfaces. Surface ownership transfers to SdlRenderer, as before.
+class ISdlRendererHost {
+public:
+    virtual ~ISdlRendererHost() = default;
+    virtual void flushWindowEvents() = 0;
+    virtual bool isOverlayEnabled(Overlay::OverlayType type) = 0;
+    virtual SDL_Surface* getUpdatedOverlaySurface(Overlay::OverlayType type) = 0;
+};
+
 class SdlRenderer : public IFFmpegRenderer {
 public:
-    SdlRenderer();
+    // A non-null host must outlive this renderer. Null is suitable for isolated
+    // rendering without overlays; window events are then flushed locally.
+    explicit SdlRenderer(ISdlRendererHost* host);
     virtual ~SdlRenderer() override;
     virtual bool initialize(PDECODER_PARAMETERS params) override;
     virtual bool prepareDecoderContext(AVCodecContext* context, AVDictionary** options) override;
@@ -32,6 +44,7 @@ private:
     static void ffNoopFree(void *opaque, uint8_t *data);
 
     int m_VideoFormat;
+    ISdlRendererHost* m_Host;
     SDL_Renderer* m_Renderer;
     SDL_Texture* m_Texture;
     SDL_Texture* m_OverlayTextures[Overlay::OverlayMax];

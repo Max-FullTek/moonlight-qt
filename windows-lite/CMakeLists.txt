@@ -129,6 +129,23 @@ target_compile_options(lite-video-buffer PRIVATE /W3 /WX)
 target_include_directories(lite-video-buffer PUBLIC "${LITE_SOURCE_ROOT}/app")
 target_link_libraries(lite-video-buffer PUBLIC moonlight-common-c lite-sdl2 lite-avutil h264bitstream)
 
+foreach(required IN ITEMS include/x64/libswscale/swscale.h lib/x64/swscale.lib lib/x64/swscale-10.dll)
+    if(NOT EXISTS "${LITE_DEPS_ROOT}/${required}")
+        message(FATAL_ERROR "Missing pinned swscale dependency: ${required}")
+    endif()
+endforeach()
+add_library(lite-swscale SHARED IMPORTED)
+set_target_properties(lite-swscale PROPERTIES
+    IMPORTED_IMPLIB "${LITE_DEPS_LIB}/swscale.lib"
+    IMPORTED_LOCATION "${LITE_DEPS_LIB}/swscale-10.dll")
+target_link_libraries(lite-swscale INTERFACE lite-avutil)
+add_library(lite-sdl-video STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/video/ffmpeg-renderers/sdlvid.cpp"
+    "${LITE_SOURCE_ROOT}/app/streaming/video/ffmpeg-renderers/swframemapper.cpp")
+target_compile_features(lite-sdl-video PUBLIC cxx_std_17)
+target_compile_options(lite-sdl-video PRIVATE /W3 /WX)
+target_link_libraries(lite-sdl-video PUBLIC lite-stream-utils lite-swscale moonlight-common-c)
+
 if(BUILD_TESTING)
     # The pinned fork's decode fixture omits stopVideoDepacketizer() before
     # destroying a used queue. Patch a build-directory copy only: the fork is
@@ -222,4 +239,11 @@ if(BUILD_TESTING)
     target_link_libraries(video_decode_path PRIVATE lite-video-buffer lite-video-pacer lite-avcodec)
     add_test(NAME video_decode_path COMMAND video_decode_path)
     set_tests_properties(video_decode_path PROPERTIES TIMEOUT 15)
+
+    add_executable(sdl_video_renderer "${LITE_SOURCE_ROOT}/tests/sdl_video_renderer/main.cpp")
+    target_compile_definitions(sdl_video_renderer PRIVATE SDL_MAIN_HANDLED)
+    target_compile_options(sdl_video_renderer PRIVATE /W3 /WX)
+    target_link_libraries(sdl_video_renderer PRIVATE lite-sdl-video lite-video-pacer lite-video-buffer lite-avcodec)
+    add_test(NAME sdl_video_renderer COMMAND sdl_video_renderer)
+    set_tests_properties(sdl_video_renderer PROPERTIES TIMEOUT 15)
 endif()

@@ -41,6 +41,9 @@ Windows Lite 原生库另有无 Qt 入口 `scripts/build-lite-native.ps1`（CI�
 
 `video_pacer`（仅 CMake）直接编译生产 Pacer／Windows DxVsyncSource，以 SDL dummy 视窗及可控制的 V-sync source 验证主线程／SDL 渲染线程、三幀上限、严格／宽松丢幀、无缓冲 renderer、延后释放、失败回退与反复启停；用实际 AVFrame buffer 回调检查释放，检查渲染及清理的线程一致性。`video_decode_path`（仅 CMake）复用生产探测样本，十组 H.264／HEVC／AV1 的 8／10-bit、4:2:0／4:4:4 经三段组装、实际 FFmpeg 软件解码后，与原包解码逐像素比对，再送入生产 Pacer 的测试 renderer；另覆盖超过 1 MiB 的扩容、缩包重用、FFmpeg 零 padding、AV1 metadata 重排及 H.264 SPS 原样／修正。两者不使用 Qt、实体显示器或主机，不验收 GPU 呈现、实体 V-sync、延迟或游戏体验。
 
+`sdl_video_renderer`（仅 CMake）默认验证不启动视窗的 probe、像素格式协商、HDR 拒绝及视窗变更旗标。显式执行 `build/lite-native/Release/sdl_video_renderer.exe --render`（使用自订 build 目录时对应替换；PATH 需包含固定 `libs/windows/lib/x64`）会建立隐藏 Windows 视窗并使用实际 SDL backend：读回保留的 target texture 验证 YUV420／NV12／NV21、4:4:4 CPU 色彩转换、尺寸／比例、debug／status 图层的位置、更新、快取、开关，以及资源释放和事件清理委派。另让六组生产 8-bit 样本经组包、真实 FFmpeg 软件解码、生产 Pacer 的 SDL 渲染线程到实际 SDL 呈现。SDL 错误日志或断言导致失败；此运行模式需要可用 Windows 图形环境，不纳入无 GPU 的默认 CTest，不验证硬体解码／copyback、HDR、实体 V-sync 或延迟。
+
+
 ## 仅本地/手动
 
 | 目录 | 说明 |
