@@ -1,6 +1,7 @@
 # Builds the slim Windows x64 feature set. This script does not perform a security audit.
 param(
-    [string]$SourceRoot = (Split-Path $PSScriptRoot -Parent)
+    [string]$SourceRoot = (Split-Path $PSScriptRoot -Parent),
+    [string]$BuildDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,7 +15,9 @@ function Invoke-Checked {
 
 $SourceRoot = (Resolve-Path -LiteralPath $SourceRoot).Path
 Set-Location -LiteralPath $SourceRoot
-$root = Join-Path $SourceRoot 'build/portable-ci'
+$root = if ($BuildDirectory) { [IO.Path]::GetFullPath($BuildDirectory) } else {
+    Join-Path $SourceRoot 'build/portable-ci'
+}
 if (Test-Path -LiteralPath $root) {
     throw 'Build destination already exists. Use a fresh checkout; nothing is deleted or overwritten.'
 }
@@ -97,6 +100,9 @@ New-Item -ItemType File -Path (Join-Path $deploy 'portable.dat') | Out-Null
 
 # Focused existing regressions; no streaming host or user credentials are used.
 $env:PATH = "$deploy;$env:PATH"
+# Test executables live outside the deployment folder and cannot infer its TLS
+# plugin path from their own directory. Do not rely on CI's SDK environment.
+$env:QT_PLUGIN_PATH = $deploy
 $testResults = @()
 $env:QT_QPA_PLATFORM = 'offscreen'
 $env:QT_QUICK_BACKEND = 'software'
