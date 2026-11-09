@@ -186,6 +186,17 @@ set_source_files_properties(
     PROPERTIES COMPILE_OPTIONS /wd4244)
 target_link_libraries(lite-d3d11-video PUBLIC lite-stream-utils lite-avcodec lite-amf moonlight-common-c d3d11 dxgi dwmapi)
 
+add_library(lite-dxva2-video STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/video/ffmpeg-renderers/dxva2.cpp")
+target_compile_features(lite-dxva2-video PUBLIC cxx_std_17)
+target_compile_options(lite-dxva2-video PRIVATE /W3 /WX)
+target_compile_definitions(lite-dxva2-video PRIVATE _CRT_SECURE_NO_WARNINGS)
+# Preserve the inherited overlay vertex int-to-float conversions, as above.
+set_source_files_properties(
+    "${LITE_SOURCE_ROOT}/app/streaming/video/ffmpeg-renderers/dxva2.cpp"
+    PROPERTIES COMPILE_OPTIONS /wd4244)
+target_link_libraries(lite-dxva2-video PUBLIC lite-stream-utils lite-avcodec moonlight-common-c d3d9 dxva2 dwmapi)
+
 add_library(lite-native-notification STATIC
     "${LITE_SOURCE_ROOT}/app/streaming/video/nativenotification.cpp")
 target_compile_features(lite-native-notification PUBLIC cxx_std_17)
@@ -243,6 +254,13 @@ if(BUILD_TESTING)
     target_link_libraries(d3d11_video_renderer PRIVATE lite-d3d11-video)
     add_test(NAME d3d11_video_renderer COMMAND d3d11_video_renderer)
     set_tests_properties(d3d11_video_renderer PROPERTIES TIMEOUT 15)
+
+    add_executable(dxva2_video_renderer "${LITE_SOURCE_ROOT}/tests/dxva2_video_renderer/main.cpp")
+    target_compile_definitions(dxva2_video_renderer PRIVATE SDL_MAIN_HANDLED)
+    target_compile_options(dxva2_video_renderer PRIVATE /W3 /WX)
+    target_link_libraries(dxva2_video_renderer PRIVATE lite-dxva2-video)
+    add_test(NAME dxva2_video_renderer COMMAND dxva2_video_renderer)
+    set_tests_properties(dxva2_video_renderer PROPERTIES TIMEOUT 15)
 
     add_executable(native_notification "${LITE_SOURCE_ROOT}/tests/native_notification/main.cpp")
     target_compile_definitions(native_notification PRIVATE SDL_MAIN_HANDLED)

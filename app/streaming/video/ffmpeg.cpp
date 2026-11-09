@@ -101,6 +101,18 @@ public:
     }
 };
 SessionD3D11RendererHost s_D3D11RendererHost;
+class SessionDxva2RendererHost final : public IDxva2RendererHost {
+public:
+    bool isOverlayEnabled(Overlay::OverlayType type) override
+    {
+        return Session::get()->getOverlayManager().isOverlayEnabled(type);
+    }
+    SDL_Surface* getUpdatedOverlaySurface(Overlay::OverlayType type) override
+    {
+        return Session::get()->getOverlayManager().getUpdatedOverlaySurface(type);
+    }
+};
+SessionDxva2RendererHost s_Dxva2RendererHost;
 #endif
 }
 
@@ -1139,7 +1151,7 @@ IFFmpegRenderer* FFmpegVideoDecoder::createHwAccelRenderer(const AVCodecHWConfig
         // Since DXVA2 is in the hwaccel list first, we'll first try to fall back
         // to that before giving D3D11VA another try as a last resort.
         case AV_HWDEVICE_TYPE_DXVA2:
-            return new DXVA2Renderer(pass);
+            return new DXVA2Renderer(pass, s_Dxva2RendererHost);
         case AV_HWDEVICE_TYPE_D3D11VA:
             return new D3D11VARenderer(pass, s_D3D11RendererHost);
 #endif

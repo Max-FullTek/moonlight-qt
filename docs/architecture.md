@@ -73,6 +73,10 @@ Windows Lite 的生产 SDL 影像 renderer 与 `SwFrameMapper` 也纳入无 Qt C
 
 `d3d11_video_renderer` 的预设测试不启动 GPU，验证生产链接、环境覆盖及显式停用后的 fallback；`--probe app/shaders` 则建立隐藏 SDL 视窗、实际 D3D11 装置、五个既有 shader 与 FFmpeg 硬体 context，再清理资源。此检查尚不验收影片解码／呈现、HDR、厂商增强或游戏延迟。AMF 复用 `app.pro` 的同一组内嵌源码；新 CMake 仅对原 renderer 已有的 C4244 数值缩窄警告作局部豁免，不在解除 Qt 时顺便改动 HDR／texture 数值行为。
 
+DXVA2 备援 renderer 同样保持 C++，由 `lite-dxva2-video` 直接构建生产源码；`IDxva2RendererHost` 只提供既有图层状态与 SDL surface，`ffmpeg.cpp` 的过渡 adapter 保留即时 Session 查询。surface 交接、texture 快取、D3D9 装置／video processor、黑名单、quirk、decoder 选择顺序及 HDR 首轮回退不变。环境开关复用相同的原生解析器；x86／x64 判定使用编译器架构宏，不再依赖 Qt 宏。未来原生 owner 接手图层后即可移除 adapter，不新增影像复制或程序。
+
+`dxva2_video_renderer` 默认仅验证原生链接、明确停用时的两轮 fallback、HDR 能力与首轮 HDR 回退，不启动 GPU；显式 `--probe` 建立隐藏 SDL 视窗、实际 DXVA2 装置／processor 及 FFmpeg 硬体 context，并执行图层 surface 交接、无新像素的更新与停用清理，错误日志即失败。探测未送入压缩影片、未读回呈现像素，不代表真实硬体解码、全萤幕、延迟或串流体验通过。无 Qt CMake 对既有顶点 int→float 转换仅作局部 C4244 豁免，保留原数值行为。
+
 Windows Lite 的 GPUI 串流入口使用现有前端视窗中的有焦点控制页，快捷键仍为 Ctrl+Alt+Shift+O；十字键／方向键选择、A／Enter 确认、B／Esc 返回。GPUI session 不建立 Qt 互动选单或浮动按钮；旧 Qt 前端路径保留。原选单位置设定仍保留在隔离 profile 中供旧路径使用，GPUI 设定页不再提供不适用的位置选项。
 
 控制页以既有匿名 pipe 增加 `controls` 命令与状态／导航事件，不传递影像，也不增加程序或定时轮询。worker 收到 pipe 命令时以 SDL user event 唤醒主线程，过渡期由该事件处理既有 Qt 主线程命令。开页时明确释放远端按键／按钮／接点与手把状态、暂停输入计时器；关页时清除控制页期间排队的输入，再恢复原擷取状态，本机仍按住的键鼠／手把按钮必须先放开才可重新送往 host。Windows 两个既有程序透过 `AllowSetForegroundWindow` 交接前景权限，不使用置顶、穿透或不启用焦点的视窗补丁。固定的 GPUI 0.2.2 `activate_window()` 内部会合成 Alt 按键，所以必须先完成 worker 输入交接，才启用 GPUI 视窗。

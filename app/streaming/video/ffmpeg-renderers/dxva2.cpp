@@ -1,14 +1,11 @@
-// minwindef.h defines min() and max() macros that conflict with
-// std::numeric_limits, which Qt uses in some of its headers.
+// Keep Windows macros out of the standard-library environment parser.
 #define NOMINMAX
 
 #include <initguid.h>
 #include "dxva2.h"
 #include "dxutil.h"
-#include "utils.h"
-#include "../ffmpeg.h"
+#include "streaming/environment.h"
 #include <streaming/streamutils.h>
-#include <streaming/session.h>
 
 extern "C" {
 #include <libavutil/hwcontext_dxva2.h>
@@ -30,8 +27,9 @@ typedef struct _VERTEX
     float tu, tv;
 } VERTEX, *PVERTEX;
 
-DXVA2Renderer::DXVA2Renderer(int decoderSelectionPass) :
+DXVA2Renderer::DXVA2Renderer(int decoderSelectionPass, IDxva2RendererHost& host) :
     IFFmpegRenderer(RendererType::DXVA2),
+    m_Host(host),
     m_DecoderSelectionPass(decoderSelectionPass),
     m_HwDeviceContext(nullptr),
     m_OverlayLock(0),
@@ -247,7 +245,7 @@ bool DXVA2Renderer::initializeQuirksForAdapter(IDirect3D9Ex* d3d9ex, int adapter
     SDL_assert(m_DeviceQuirks == 0);
     SDL_assert(!m_Device);
 
-    if (Utils::getEnvironmentVariableOverride("DXVA2_QUIRK_FLAGS", &m_DeviceQuirks)) {
+    if (StreamEnvironment::getOverride("DXVA2_QUIRK_FLAGS", &m_DeviceQuirks)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Using DXVA2 quirk override: 0x%x",
                     m_DeviceQuirks);
@@ -328,7 +326,7 @@ bool DXVA2Renderer::isDecoderBlacklisted()
     HRESULT hr;
     bool result = false;
 
-    if (qgetenv("DXVA2_DISABLE_DECODER_BLACKLIST") == "1") {
+    if (StreamEnvironment::equals("DXVA2_DISABLE_DECODER_BLACKLIST", "1")) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "DXVA2 decoder blacklist is disabled");
         return false;
@@ -564,7 +562,7 @@ bool DXVA2Renderer::initializeDevice(SDL_Window* window, bool enableVsync)
 
 bool DXVA2Renderer::initialize(PDECODER_PARAMETERS params)
 {
-    if (qgetenv("DXVA2_ENABLED") == "0") {
+    if (StreamEnvironment::equals("DXVA2_ENABLED", "0")) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "DXVA2 is disabled by environment variable");
         return false;
@@ -574,8 +572,8 @@ bool DXVA2Renderer::initialize(PDECODER_PARAMETERS params)
         // the HDR colorspace and HDR display metadata required to enable HDR mode properly.
         return false;
     }
-#ifndef Q_PROCESSOR_X86
-    else if (qgetenv("DXVA2_ENABLED") != "1" && m_DecoderSelectionPass == 0) {
+#if !defined(_M_IX86) && !defined(_M_X64) && !defined(__i386__) && !defined(__x86_64__)
+    else if (!StreamEnvironment::equals("DXVA2_ENABLED", "1") && m_DecoderSelectionPass == 0) {
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "DXVA2 is disabled by default on ARM64. Set DXVA2_ENABLED=1 to override.");
         return false;
@@ -603,8 +601,8 @@ void DXVA2Renderer::notifyOverlayUpdated(Overlay::OverlayType type)
 {
     HRESULT hr;
 
-    SDL_Surface* newSurface = Session::get()->getOverlayManager().getUpdatedOverlaySurface(type);
-    bool overlayEnabled = Session::get()->getOverlayManager().isOverlayEnabled(type);
+    SDL_Surface* newSurface = m_Host.getUpdatedOverlaySurface(type);
+    bool overlayEnabled = m_Host.isOverlayEnabled(type);
     if (newSurface == nullptr && overlayEnabled) {
         // The overlay is enabled and there is no new surface. Leave the old texture alone.
         return;
@@ -722,7 +720,7 @@ void DXVA2Renderer::renderOverlay(Overlay::OverlayType type)
 {
     HRESULT hr;
 
-    if (!Session::get()->getOverlayManager().isOverlayEnabled(type)) {
+    if (!m_Host.isOverlayEnabled(type)) {
         return;
     }
 

@@ -46,6 +46,8 @@ Windows Lite 原生库另有无 Qt 入口 `scripts/build-lite-native.ps1`（CI�
 
 ## 仅本地/手动
 
+`dxva2_video_renderer`（仅 CMake）默认验证生产链接、明确停用的两轮 fallback，以及 HDR 首轮回退，不启动 GPU。显式 `build/lite-native/Release/dxva2_video_renderer.exe --probe`（自订 build 目录时替换路径；PATH 包含固定 `libs/windows/lib/x64`）建立隐藏 SDL 视窗、DXVA2 装置／video processor、FFmpeg 硬体 context，并执行图层更新／快取／停用清理；错误日志导致失败。此探测不解码影片、不验证最终像素、全萤幕或真实串流，不纳入默认 CTest。
+
 | 目录 | 说明 |
 |---|---|
 | usb_forwarding_tunnel | USB/IP 隧道手动联调探针:需要 10 个 CLI 参数和真实 usbipd 服务端,不能进 CI。用法看 main.cpp 头注释 |

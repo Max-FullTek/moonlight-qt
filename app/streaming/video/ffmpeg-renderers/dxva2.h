@@ -8,10 +8,20 @@
 
 #include <wrl/client.h>
 
+// The owner retains overlay state and transfers the same SDL surfaces as before.
+// It must outlive the renderer; no Session or Qt dependency belongs here.
+class IDxva2RendererHost
+{
+public:
+    virtual ~IDxva2RendererHost() = default;
+    virtual bool isOverlayEnabled(Overlay::OverlayType type) = 0;
+    virtual SDL_Surface* getUpdatedOverlaySurface(Overlay::OverlayType type) = 0;
+};
+
 class DXVA2Renderer : public IFFmpegRenderer
 {
 public:
-    DXVA2Renderer(int decoderSelectionPass);
+    DXVA2Renderer(int decoderSelectionPass, IDxva2RendererHost& host);
     virtual ~DXVA2Renderer() override;
     virtual bool initialize(PDECODER_PARAMETERS params) override;
     virtual bool prepareDecoderContext(AVCodecContext* context, AVDictionary** options) override;
@@ -22,6 +32,7 @@ public:
     virtual int getDecoderCapabilities() override;
 
 private:
+    IDxva2RendererHost& m_Host;
     bool initializeDecoder();
     bool initializeRenderer();
     bool initializeVideoProcessor();
