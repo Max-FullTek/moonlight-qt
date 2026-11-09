@@ -29,6 +29,8 @@ Uint32 SdlInputHandler::releaseRightButtonTimerCallback(Uint32, void*)
 Uint32 SdlInputHandler::dragTimerCallback(Uint32, void *param)
 {
     auto me = reinterpret_cast<SdlInputHandler*>(param);
+    std::lock_guard<std::mutex> lock(me->m_InputTimerMutex);
+    if (me->m_LocalControlsActive) return 0;
 
     // Check how many fingers are down now to decide
     // which button to hold down

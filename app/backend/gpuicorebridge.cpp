@@ -232,12 +232,14 @@ void GpuiCoreBridge::start() {
                     if (oversized) fail("request_too_large", tr("Request exceeds 64 KiB."));
                     else command(request);
                 }, Qt::QueuedConnection);
+                Session::wakeForCoreCommands();
                 if (!oversized && QJsonDocument::fromJson(line).object().value("command").toString() == "shutdown") return;
                 line.clear(); oversized = false;
             } else if (line.size() < MaxLine) line.append(char(ch));
             else oversized = true;
         }
         QMetaObject::invokeMethod(this, [this] { shutdown(); }, Qt::QueuedConnection);
+        Session::wakeForCoreCommands();
     }).detach();
 }
 void GpuiCoreBridge::publishHosts() {
@@ -277,6 +279,16 @@ void GpuiCoreBridge::command(const QByteArray& line) {
     if (name == "shutdown") { shutdown(); return; }
     if (name == "list") { publishHosts(); return; }
     if (name == "stop") { if (m_Session) m_Session->interrupt(); return; }
+    if (name == "controls") {
+        if (!request["action"].isString() ||
+                (request.contains("value") && !integer(request, "value", 1000, 150000))) {
+            fail("invalid_controls", tr("Invalid control action.")); return;
+        }
+        if (!m_Session || !m_Session->handleGpuiControl(request["action"].toString(), request["value"].toInt())) {
+            fail("controls_unavailable", tr("Controls are unavailable or stream focus could not be restored."));
+        }
+        return;
+    }
     if (m_Session || m_AddPending || m_DeletingHost || m_QuitPending || !m_PairingHost.isEmpty()) { fail("busy", tr("Another operation is still active.")); return; }
     if (name == "add") {
         const auto address = request.value("address").toString().trimmed();
@@ -394,6 +406,9 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         fail("invalid_settings", tr("Streaming settings are invalid.")); return;
     }
     const auto settings=request["settings"].toObject();
+    if (request.contains("client_pid") && !integer(request, "client_pid", 1, 2147483647)) {
+        fail("invalid_controls", tr("Invalid client process.")); return;
+    }
     const auto advanced=settings["advanced"].toObject();
     int clientDisplay=advanced.value("client_display").toInt(0)-1;
     if (clientDisplay<0) {
@@ -415,7 +430,17 @@ void GpuiCoreBridge::command(const QByteArray& line) {
     const int vdd=advanced["vdd"].toInt();
     auto* session = new Session(host, selected, preferences,advanced["host_display"].toString(),vdd==0?std::nullopt:std::optional<bool>(vdd==2));
     session->setClientDisplay(clientDisplay);
+    session->setGpuiControlsClient(static_cast<unsigned long>(request["client_pid"].toInt()));
     m_Session = session;
+    connect(session, &Session::hostQuitFailed, this, [this](const QString& message) {
+        fail("host_quit_failed", message);
+    });
+    connect(session, &Session::gpuiControlsChanged, this, [this](bool active, bool mouse, bool gamepad) {
+        send({{"event", "controls"}, {"active", active}, {"gamepad_mouse", mouse}, {"has_gamepad", gamepad}});
+    });
+    connect(session, &Session::gpuiControlsNavigate, this, [this](const QString& direction) {
+        send({{"event", "controls_navigate"}, {"direction", direction}});
+    });
     connect(session, &Session::stageStarting, this, [this](QString stage) { send({{"event", "stage"}, {"stage", stage}}); });
     connect(session, &Session::stageFailed, this, [this](QString stage, int code, QString) {
         fail("stage_failed", tr("%1 failed (%2)").arg(stage).arg(code));

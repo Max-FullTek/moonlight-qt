@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod advanced;
 mod core;
+mod controls;
 mod i18n;
 mod input;
 
@@ -10,6 +11,7 @@ mod settings;
 mod ui;
 use gpui::{prelude::*, *};
 use settings::Settings;
+use controls::{ControlAction, Controls};
 use std::{borrow::Cow, cell::Cell, rc::Rc};
 
 pub const BG: u32 = 0x10151d;
@@ -101,6 +103,8 @@ enum Action {
     Close,
     SubmitAddress,
     Stop,
+    OpenControls,
+    Control(ControlAction),
     Stream(i32),
     Select(Field),
     Choose(Field, usize),
@@ -130,6 +134,7 @@ enum Modal {
     Add,
     Pair(String),
     Stream,
+    Controls,
     Select(Field),
     AppOptions(i32),
     Advanced(&'static str),
@@ -154,6 +159,8 @@ struct Prototype {
     input_marked: Option<std::ops::Range<usize>>,
     pending: bool,
     streaming: bool,
+    controls: Controls,
+    controls_scroll: ScrollHandle,
     stage: String,
     settings_tab: SettingsTab,
     show_hidden: bool,
@@ -185,6 +192,8 @@ impl Prototype {
             input_marked: None,
             pending: false,
             streaming: false,
+            controls: Controls::default(),
+            controls_scroll: ScrollHandle::new(),
             stage: String::new(),
             settings_tab: SettingsTab::Stream,
             show_hidden: false,
@@ -302,14 +311,34 @@ impl Prototype {
                 }
             }
             Action::Close => {
+                if self.controls.active {
+                    self.act(Action::Control(ControlAction::Resume), window, cx);
+                    return;
+                }
                 if self.pending || self.streaming { self.notice = "操作仍在進行；點選裝置前請等待完成。".into(); }
                 self.modal = None;
             },
             Action::Stop => { self.request(serde_json::json!({"command":"stop"})); }
+            Action::OpenControls => { self.request(serde_json::json!({"command":"controls","action":"open"})); }
+            Action::Control(action) => {
+                self.controls.selected = ControlAction::ALL.iter().position(|&item| item == action).unwrap_or(0);
+                if !self.pending && self.controls.choose(action) {
+                    let mut request = serde_json::json!({"command":"controls","action":action.command()});
+                    if matches!(action, ControlAction::BitrateDown | ControlAction::BitrateUp) {
+                        let step = if action == ControlAction::BitrateDown { -1 } else { 1 };
+                        let bitrate = (self.controls.bitrate as i32 + step).clamp(1, 150) as u32;
+                        request["value"] = serde_json::json!(bitrate * 1000);
+                        if self.request(request) { self.controls.bitrate = bitrate; }
+                    } else if self.request(request) && matches!(action, ControlAction::Disconnect | ControlAction::End) {
+                        self.pending = true;
+                    }
+                }
+            }
             Action::Stream(app) => {
                 if !self.pending && !self.streaming {
                     if let Some(host) = self.selected.clone() {
-                        if self.request(serde_json::json!({"command":"start","host":host,"app":app,"settings":core::stream_settings(&self.saved),"client_center":{"x":f32::from(window.bounds().center().x)*window.scale_factor(),"y":f32::from(window.bounds().center().y)*window.scale_factor()}})) {
+                        if self.request(serde_json::json!({"command":"start","client_pid":std::process::id(),"host":host,"app":app,"settings":core::stream_settings(&self.saved),"client_center":{"x":f32::from(window.bounds().center().x)*window.scale_factor(),"y":f32::from(window.bounds().center().y)*window.scale_factor()}})) {
+                            self.controls = Controls { bitrate: self.saved.bitrate, ..Default::default() };
                             self.pending = true;
                             self.stage = "正在啟動串流…".into();
                             self.modal = Some(Modal::Stream);
@@ -483,24 +512,49 @@ impl Prototype {
                 core::Event::StreamStarted => {
                     self.pending = false;
                     self.streaming = true;
-                    self.stage = "串流進行中；關閉 SDL 視窗或按下方按鈕結束連線。".into();
+                    self.stage = "串流進行中；Ctrl+Alt+Shift+O 開啟控制頁。".into();
                     self.modal = Some(Modal::Stream);
                     window.minimize_window();
                 }
                 core::Event::StreamFinished => {
                     self.pending = false;
                     self.streaming = false;
-                    if matches!(self.modal, Some(Modal::Stream)) {
+                    self.controls = Controls::default();
+                    if matches!(self.modal, Some(Modal::Stream | Modal::Controls)) {
                         self.modal = None;
                     }
                     self.notice = "串流已結束。".into();
                     window.activate_window();
+                }
+                core::Event::Controls { active, gamepad_mouse, has_gamepad } => {
+                    let opening = active && !self.controls.active;
+                    self.controls.active = active;
+                    self.controls.gamepad_mouse = gamepad_mouse;
+                    self.controls.has_gamepad = has_gamepad;
+                    if active {
+                        self.modal = Some(Modal::Controls);
+                        if opening {
+                            self.controls.selected = 0;
+                            self.controls.confirm_end = false;
+                            window.activate_window();
+                            window.focus(&self.modal_focus);
+                        }
+                    } else {
+                        self.modal = Some(Modal::Stream);
+                        window.minimize_window();
+                    }
+                }
+                core::Event::ControlsNavigate { direction } => {
+                    if self.controls.active && window.is_window_active() && matches!(self.modal, Some(Modal::Controls)) {
+                        self.navigate_controls(&direction, window, cx);
+                    }
                 }
                 core::Event::Error { code, message } => {
                     self.pending = false;
                     if matches!(code.as_str(), "core_exited" | "protocol" | "pipe_write") {
                         self.ready = false;
                         self.streaming = false;
+                        self.controls = Controls::default();
                         self.core = None;
                         window.activate_window();
                     }
@@ -512,6 +566,21 @@ impl Prototype {
             window.focus(&self.modal_focus);
         } else if had_modal && self.modal.is_none() {
             window.focus(&self.root_focus);
+        }
+        cx.notify();
+    }
+    fn navigate_controls(&mut self, direction: &str, window: &mut Window, cx: &mut Context<Self>) {
+        match direction {
+            "up" | "down" => {
+                self.controls.move_selection(direction == "down");
+                self.controls_scroll.scroll_to_item(self.controls.selected);
+            }
+            "select" => self.act(Action::Control(ControlAction::ALL[self.controls.selected]), window, cx),
+            "back" => {
+                if self.controls.confirm_end { self.controls.confirm_end = false; }
+                else { self.act(Action::Control(ControlAction::Resume), window, cx); }
+            }
+            _ => {}
         }
         cx.notify();
     }
@@ -533,6 +602,19 @@ impl Render for Prototype {
             .tab_group()
             .tab_stop(false)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if matches!(this.modal, Some(Modal::Controls)) {
+                    let direction = match event.keystroke.key.as_str() {
+                        "up" => Some("up"), "down" | "tab" => Some(if event.keystroke.modifiers.shift { "up" } else { "down" }),
+                        "enter" | "space" => Some("select"), "escape" => Some("back"),
+                        "o" if event.keystroke.modifiers.control && event.keystroke.modifiers.alt && event.keystroke.modifiers.shift => Some("back"),
+                        _ => None,
+                    };
+                    if let Some(direction) = direction {
+                        this.navigate_controls(direction, window, cx);
+                        cx.stop_propagation();
+                        return;
+                    }
+                }
                 if matches!(
                     this.modal,
                     Some(Modal::Add | Modal::EditValue(_) | Modal::RenameHost(_))
@@ -559,8 +641,8 @@ impl Render for Prototype {
                     cx.stop_propagation();
                 }
                 if event.keystroke.key == "escape" && this.modal.is_some() {
-                    this.modal = None;
-                    window.focus(&this.root_focus);
+                    if this.controls.active { this.act(Action::Close, window, cx); }
+                    else { this.modal = None; window.focus(&this.root_focus); }
                     cx.notify();
                     cx.stop_propagation();
                 }
@@ -621,7 +703,7 @@ impl Render for Prototype {
                     ))
                     .child(div().flex_1())
                     .when(self.streaming, |d| {
-                        d.child(self.button("header-stop", "結束連線", Action::Stop, false, cx))
+                        d.child(self.button("header-controls", "串流控制", Action::OpenControls, false, cx))
                     })
                     .when(!narrow, |d| {
                         d.child(self.button("about", "關於", Action::About, false, cx))

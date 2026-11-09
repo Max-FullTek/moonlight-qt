@@ -1,5 +1,71 @@
 //! UI catalog for the Windows PC client. Host/app names bypass this catalog.
 pub(crate) const CATALOG: &[(&str, &str, &str)] = &[
+    ("串流控制", "串流控制", "Stream controls"),
+    ("返回串流", "返回串流", "Return to stream"),
+    ("暫時斷線", "暂时断开", "Disconnect and keep session"),
+    ("結束工作階段", "结束会话", "End host session"),
+    (
+        "再次確認：結束工作階段",
+        "再次确认：结束会话",
+        "Confirm: end host session",
+    ),
+    (
+        "手把滑鼠：未連接手把",
+        "手柄鼠标：未连接手柄",
+        "Gamepad mouse: no controller connected",
+    ),
+    (
+        "手把滑鼠：開啟（操作控制頁期間暫停）",
+        "手柄鼠标：开启（操作控制页期间暂停）",
+        "Gamepad mouse: on (paused while using controls)",
+    ),
+    ("手把滑鼠：關閉", "手柄鼠标：关闭", "Gamepad mouse: off"),
+    (
+        "方向鍵／手把十字鍵選擇，Enter／A 確認，Esc／B 返回串流。",
+        "方向键／手柄十字键选择，Enter／A 确认，Esc／B 返回串流。",
+        "Arrows / D-pad to navigate, Enter / A to select, Esc / B to return.",
+    ),
+    (
+        "暫時斷線會保留 Desktop 工作階段；結束工作階段會請主機清理並依設定還原顯示。",
+        "暂时断开会保留 Desktop 会话；结束会话会请主机清理并按设置还原显示。",
+        "Disconnect keeps the Desktop session. End session asks the host to clean up and restore displays according to its settings.",
+    ),
+    (
+        "串流進行中；Ctrl+Alt+Shift+O 開啟控制頁。",
+        "串流进行中；Ctrl+Alt+Shift+O 打开控制页。",
+        "Streaming; press Ctrl+Alt+Shift+O to open controls.",
+    ),
+    (
+        "效能統計開關",
+        "性能统计开关",
+        "Toggle performance statistics",
+    ),
+    ("全螢幕開關", "全屏开关", "Toggle fullscreen"),
+    ("滑鼠模式切換", "鼠标模式切换", "Switch mouse mode"),
+    ("游標顯示開關", "光标显示开关", "Toggle cursor visibility"),
+    (
+        "游標範圍鎖定開關",
+        "光标范围锁定开关",
+        "Toggle pointer confinement",
+    ),
+    ("降低位元率", "降低码率", "Decrease bitrate"),
+    ("提高位元率", "提高码率", "Increase bitrate"),
+    ("正在結束連線…", "正在结束连接…", "Disconnecting…"),
+    (
+        "控制操作無效。",
+        "控制操作无效。",
+        "Invalid control action.",
+    ),
+    (
+        "客戶端程序無效。",
+        "客户端进程无效。",
+        "Invalid client process.",
+    ),
+    (
+        "控制頁無法使用，或無法恢復串流焦點。",
+        "控制页不可用，或无法恢复串流焦点。",
+        "Controls are unavailable or stream focus could not be restored.",
+    ),
     ("HDR 格式", "HDR 格式", "HDR format"),
     (
         "所選客戶端螢幕已無法使用。",

@@ -73,12 +73,21 @@ pub enum Event {
     },
     StreamStarted,
     StreamFinished,
+    Controls {
+        active: bool,
+        gamepad_mouse: bool,
+        has_gamepad: bool,
+    },
+    ControlsNavigate {
+        direction: String,
+    },
     Error {
         code: String,
         message: String,
     },
 }
 pub struct Client {
+    child_pid: u32,
     commands: Option<mpsc::Sender<Value>>,
     events: mpsc::Receiver<Event>,
 }
@@ -111,6 +120,7 @@ impl Client {
             command.creation_flags(0x08000000); // CREATE_NO_WINDOW, SDL still creates its stream window.
         }
         let mut child = command.spawn()?;
+        let child_pid = child.id();
         let mut stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
         let (tx, rx) = mpsc::channel();
@@ -188,11 +198,19 @@ impl Client {
             });
         });
         Ok(Self {
+            child_pid,
             commands: Some(tx),
             events,
         })
     }
     pub fn send(&self, request: Value) -> anyhow::Result<()> {
+        if request["command"] == "controls" && request["action"] == "resume" {
+            // Let our existing worker restore its SDL window after local input.
+            #[cfg(windows)]
+            unsafe {
+                AllowSetForegroundWindow(self.child_pid);
+            }
+        }
         self.commands
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("核心未啟動"))?
@@ -202,6 +220,11 @@ impl Client {
     pub fn drain(&self) -> Vec<Event> {
         self.events.try_iter().collect()
     }
+}
+#[cfg(windows)]
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn AllowSetForegroundWindow(process_id: u32) -> i32;
 }
 impl Drop for Client {
     fn drop(&mut self) {
@@ -235,6 +258,9 @@ mod tests {
             decode("{\"event\":\"ready\",\"qml_loaded\":false,\"protocol\":1}").unwrap(),
             Event::Ready { qml_loaded: false }
         ));
+        assert!(matches!(decode(r#"{"protocol":1,"event":"controls","active":true,"gamepad_mouse":true,"has_gamepad":true}"#).unwrap(),
+            Event::Controls { active: true, gamepad_mouse: true, has_gamepad: true }));
+        assert!(decode(r#"{"protocol":1,"event":"controls","active":true}"#).is_err());
     }
     #[test]
     fn old_snapshots_default_to_visible_and_direct_launch_excludes_hidden_apps() {

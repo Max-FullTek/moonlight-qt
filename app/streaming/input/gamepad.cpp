@@ -167,6 +167,7 @@ static void applyRadialDeadzone(short* x, short* y, int deadzonePercent)
 
 void SdlInputHandler::sendGamepadState(GamepadState* state)
 {
+    if (m_LocalControlsActive) return;
     SDL_assert(m_GamepadMask == 0x1 || m_MultiController);
 
     // Handle Select+PS as the clickpad button on PS4/5 controllers without a clickpad mapping
@@ -292,6 +293,8 @@ Uint32 SdlInputHandler::mouseEmulationTimerCallback(Uint32 interval, void *param
     // upstream design and tolerated: aligned 16-bit reads don't tear in
     // practice, and a stale sample costs at most one 50 ms tick of latency.
     auto gamepad = reinterpret_cast<GamepadState*>(param);
+    std::lock_guard<std::mutex> lock(gamepad->inputHandler->m_InputTimerMutex);
+    if (gamepad->inputHandler->m_LocalControlsActive) return interval;
 
     int rawX;
     int rawY;
@@ -352,6 +355,7 @@ static void updateTriggerAxis(unsigned char& value, unsigned char newValue, bool
 
 void SdlInputHandler::handleControllerAxisEvent(SDL_ControllerAxisEvent* event)
 {
+    if (m_LocalControlsActive) return;
     SDL_JoystickID gameControllerId = event->which;
     GamepadState* state = findStateForGamepad(gameControllerId);
     if (state == NULL) {
@@ -417,6 +421,7 @@ void SdlInputHandler::handleControllerAxisEvent(SDL_ControllerAxisEvent* event)
 
 void SdlInputHandler::handleControllerButtonEvent(SDL_ControllerButtonEvent* event)
 {
+    if (m_LocalControlsActive) return;
     if (event->button >= SDL_arraysize(k_ButtonMap)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "No mapping for gamepad button: %u",
@@ -426,6 +431,14 @@ void SdlInputHandler::handleControllerButtonEvent(SDL_ControllerButtonEvent* eve
 
     GamepadState* state = findStateForGamepad(event->which);
     if (state == NULL) {
+        return;
+    }
+
+    // A / Start used on the local page must finish locally, including its Up.
+    // Test before face-button remapping: this mask uses physical SDL buttons.
+    const uint32_t localButton = uint32_t(1) << event->button;
+    if (state->localButtonsUntilRelease & localButton) {
+        if (event->state == SDL_RELEASED) state->localButtonsUntilRelease &= ~localButton;
         return;
     }
 
@@ -597,6 +610,7 @@ void SdlInputHandler::handleControllerButtonEvent(SDL_ControllerButtonEvent* eve
 
 void SdlInputHandler::handleControllerSensorEvent(SDL_ControllerSensorEvent* event)
 {
+    if (m_LocalControlsActive) return;
     GamepadState* state = findStateForGamepad(event->which);
     if (state == NULL) {
         return;
@@ -632,6 +646,7 @@ void SdlInputHandler::handleControllerSensorEvent(SDL_ControllerSensorEvent* eve
 
 void SdlInputHandler::handleControllerTouchpadEvent(SDL_ControllerTouchpadEvent* event)
 {
+    if (m_LocalControlsActive) return;
     GamepadState* state = findStateForGamepad(event->which);
     if (state == NULL) {
         return;
@@ -741,6 +756,7 @@ void SdlInputHandler::handleControllerDeviceEvent(SDL_ControllerDeviceEvent* eve
         }
 
         state = &m_GamepadState[i];
+        state->inputHandler = this;
         if (m_MultiController) {
             state->index = i;
 
@@ -762,6 +778,8 @@ void SdlInputHandler::handleControllerDeviceEvent(SDL_ControllerDeviceEvent* eve
         // being false must be initialized here
         state->quitComboLatched = false;
         state->statsComboLatched = false;
+        state->localButtonsUntilRelease = 0;
+        state->mouseEmulationSuspended = false;
 
         hapticCaps = 0;
 #if SDL_VERSION_ATLEAST(2, 0, 18)
@@ -952,10 +970,11 @@ void SdlInputHandler::handleControllerDeviceEvent(SDL_ControllerDeviceEvent* eve
     else if (event->type == SDL_CONTROLLERDEVICEREMOVED) {
         state = findStateForGamepad(event->which);
         if (state != NULL) {
-            if (state->mouseEmulationTimer != 0) {
+            if (state->mouseEmulationTimer != 0 || state->mouseEmulationSuspended) {
                 Session::get()->notifyMouseEmulationMode(false);
-                SDL_RemoveTimer(state->mouseEmulationTimer);
+                if (state->mouseEmulationTimer != 0) SDL_RemoveTimer(state->mouseEmulationTimer);
                 state->mouseEmulationTimer = 0;
+                state->mouseEmulationSuspended = false;
                 releaseMouseEmulationButtons(state);
             }
 
@@ -1328,10 +1347,11 @@ bool SdlInputHandler::toggleGamepadMouseEmulation()
     for (int i = 0; i < MAX_GAMEPADS; i++) {
         if (m_GamepadState[i].controller != nullptr) {
             GamepadState* state = &m_GamepadState[i];
-            if (state->mouseEmulationTimer != 0) {
+            if (state->mouseEmulationTimer != 0 || state->mouseEmulationSuspended) {
                 // Deactivate
-                SDL_RemoveTimer(state->mouseEmulationTimer);
+                if (state->mouseEmulationTimer != 0) SDL_RemoveTimer(state->mouseEmulationTimer);
                 state->mouseEmulationTimer = 0;
+                state->mouseEmulationSuspended = false;
                 releaseMouseEmulationButtons(state);
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "Mouse emulation deactivated (via menu)");
@@ -1341,9 +1361,12 @@ bool SdlInputHandler::toggleGamepadMouseEmulation()
                 // Activate
                 sendGamepadState(state);
                 state->mouseEmulationDeadzonePercent = m_GamepadDeadzone;
-                state->mouseEmulationTimer = SDL_AddTimer(
-                    MOUSE_EMULATION_POLLING_INTERVAL,
-                    SdlInputHandler::mouseEmulationTimerCallback, state);
+                state->mouseEmulationSuspended = m_LocalControlsActive;
+                if (!m_LocalControlsActive) {
+                    state->mouseEmulationTimer = SDL_AddTimer(
+                        MOUSE_EMULATION_POLLING_INTERVAL,
+                        SdlInputHandler::mouseEmulationTimerCallback, state);
+                }
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "Mouse emulation active (via menu)");
                 Session::get()->notifyMouseEmulationMode(true);
@@ -1357,9 +1380,72 @@ bool SdlInputHandler::isMouseEmulationActive()
 {
     for (int i = 0; i < MAX_GAMEPADS; i++) {
         if (m_GamepadState[i].controller != nullptr &&
-            m_GamepadState[i].mouseEmulationTimer != 0) {
+            (m_GamepadState[i].mouseEmulationTimer != 0 || m_GamepadState[i].mouseEmulationSuspended)) {
             return true;
         }
     }
     return false;
+}
+
+void SdlInputHandler::setLocalControlsActive(bool active)
+{
+    if (m_LocalControlsActive == active) return;
+    {
+        // Wait for an in-flight emulation tick before publishing local ownership.
+        // Remove timers outside the mutex so a waiting callback can finish.
+        std::lock_guard<std::mutex> lock(m_InputTimerMutex);
+        m_LocalControlsActive = active;
+    }
+    if (active) {
+        notifyFocusLost();
+        setCaptureActive(false);
+        SDL_CaptureMouse(SDL_FALSE);
+        SDL_RemoveTimer(m_LongPressTimer);
+        m_LongPressTimer = 0;
+        SDL_RemoveTimer(m_LeftButtonReleaseTimer);
+        m_LeftButtonReleaseTimer = 0;
+        SDL_RemoveTimer(m_RightButtonReleaseTimer);
+        m_RightButtonReleaseTimer = 0;
+        LiSendTouchEvent(LI_TOUCH_EVENT_CANCEL_ALL, 0, 0, 0, 0, 0, 0, LI_ROT_UNKNOWN);
+        // Release physical and emulated buttons before the local UI takes over.
+        for (int button = BUTTON_LEFT; button <= BUTTON_X2; ++button) {
+            LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, button);
+        }
+        SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    }
+    for (auto& state : m_GamepadState) {
+        if (!state.controller) continue;
+        if (active) {
+            state.mouseEmulationSuspended = state.mouseEmulationTimer != 0;
+            if (state.mouseEmulationTimer != 0) SDL_RemoveTimer(state.mouseEmulationTimer);
+            state.mouseEmulationTimer = 0;
+            releaseMouseEmulationButtons(&state);
+            state.buttons = 0;
+            state.lt = state.rt = 0;
+            state.lsX = state.lsY = state.rsX = state.rsY = 0;
+            state.lastStartDownTime = 0;
+            state.quitComboLatched = state.statsComboLatched = false;
+            state.emulatedClickpadButtonDown = false;
+            LiSendMultiControllerEvent(state.index, m_GamepadMask, 0, 0, 0, 0, 0, 0, 0);
+        }
+        else {
+            state.localButtonsUntilRelease = 0;
+            for (int button = 0; button < SDL_CONTROLLER_BUTTON_MAX; ++button) {
+                if (SDL_GameControllerGetButton(state.controller, static_cast<SDL_GameControllerButton>(button))) {
+                    state.localButtonsUntilRelease |= uint32_t(1) << button;
+                }
+            }
+            if (state.mouseEmulationSuspended) {
+                state.mouseEmulationSuspended = false;
+                state.mouseEmulationTimer = SDL_AddTimer(MOUSE_EMULATION_POLLING_INTERVAL,
+                    SdlInputHandler::mouseEmulationTimerCallback, &state);
+            }
+        }
+    }
+    if (!active) {
+        const Uint8* keys = SDL_GetKeyboardState(nullptr);
+        for (int key = 0; key < SDL_NUM_SCANCODES; ++key) m_LocalKeysUntilRelease[key] = keys[key] != 0;
+        m_LocalMouseButtonsUntilRelease = SDL_GetMouseState(nullptr, nullptr);
+        SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, m_BackgroundGamepad ? "1" : "0");
+    }
 }

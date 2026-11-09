@@ -179,6 +179,12 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
 
 void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
 {
+    if (m_LocalControlsActive) return;
+    const int scancode = static_cast<int>(event->keysym.scancode);
+    if (scancode >= 0 && scancode < SDL_NUM_SCANCODES && m_LocalKeysUntilRelease[scancode]) {
+        if (event->state == SDL_RELEASED) m_LocalKeysUntilRelease[scancode] = false;
+        return;
+    }
     short keyCode;
     char modifiers;
     char flags;

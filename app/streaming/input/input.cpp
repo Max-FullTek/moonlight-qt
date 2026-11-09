@@ -156,6 +156,7 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     }
 
     // Allow gamepad input when the app doesn't have focus if requested
+    m_BackgroundGamepad = prefs.backgroundGamepad;
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, prefs.backgroundGamepad ? "1" : "0");
 
 #if !SDL_VERSION_ATLEAST(2, 0, 15)
@@ -342,9 +343,9 @@ SdlInputHandler::~SdlInputHandler()
     stopAllRumble();
 
     for (int i = 0; i < MAX_GAMEPADS; i++) {
-        if (m_GamepadState[i].mouseEmulationTimer != 0) {
+        if (m_GamepadState[i].mouseEmulationTimer != 0 || m_GamepadState[i].mouseEmulationSuspended) {
             Session::get()->notifyMouseEmulationMode(false);
-            SDL_RemoveTimer(m_GamepadState[i].mouseEmulationTimer);
+            if (m_GamepadState[i].mouseEmulationTimer != 0) SDL_RemoveTimer(m_GamepadState[i].mouseEmulationTimer);
             // 析构是模拟鼠标键释放的第四条路径:会话结束时按住的键同样要
             // 还给主机,否则主机侧鼠标键卡死
             releaseMouseEmulationButtons(&m_GamepadState[i]);
@@ -890,6 +891,7 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
 
 void SdlInputHandler::setCaptureActive(bool active)
 {
+    if (active && m_LocalControlsActive) return;
     if (active) {
         // If we're in relative mode, try to activate SDL's relative mouse mode
         if (m_AbsoluteMouseMode || SDL_SetRelativeMouseMode(SDL_TRUE) < 0) {
@@ -958,6 +960,7 @@ void SdlInputHandler::setCaptureActive(bool active)
 
 void SdlInputHandler::handleTouchFingerEvent(SDL_TouchFingerEvent* event)
 {
+    if (m_LocalControlsActive) return;
 #ifdef HAS_QT_SDL_WAYLAND_BRIDGE
     SDL_TouchFingerEvent logicalEvent;
     if (m_WaylandCoordinateMetrics.has_value()) {

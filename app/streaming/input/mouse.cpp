@@ -40,6 +40,12 @@ void SdlInputHandler::notifyMouseLeave()
 
 void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
 {
+    if (m_LocalControlsActive) return;
+    if (event->button >= SDL_BUTTON_LEFT && event->button <= SDL_BUTTON_X2 &&
+            (m_LocalMouseButtonsUntilRelease & SDL_BUTTON(event->button))) {
+        if (event->state == SDL_RELEASED) m_LocalMouseButtonsUntilRelease &= ~SDL_BUTTON(event->button);
+        return;
+    }
     int button;
 
     if (isSyntheticPointerMouseEvent(event->which)) {
@@ -117,6 +123,7 @@ void SdlInputHandler::handleMouseButtonEvent(SDL_MouseButtonEvent* event)
 
 void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event)
 {
+    if (m_LocalControlsActive) return;
     if (!isCaptureActive()) {
         // Not capturing
         return;
@@ -220,6 +227,7 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event)
 
 void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
 {
+    if (m_LocalControlsActive) return;
     if (!isCaptureActive()) {
         // Not capturing
         return;

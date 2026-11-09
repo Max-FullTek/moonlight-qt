@@ -302,6 +302,7 @@ void SdlInputHandler::shutdownWindowsPenInput(bool suppressPointer)
 
 bool SdlInputHandler::handleWindowsPenPointerMessage(unsigned int message, Uint64 wParamValue)
 {
+    if (m_LocalControlsActive) return false;
     if (!m_Window || !m_WindowsPenWindow ||
             !(LiGetHostFeatureFlags() & LI_FF_PEN_TOUCH_EVENTS)) {
         return false;

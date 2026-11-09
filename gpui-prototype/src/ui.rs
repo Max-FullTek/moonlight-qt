@@ -56,6 +56,8 @@ impl Prototype {
                         Action::Close
                             | Action::SubmitAddress
                             | Action::Stop
+                            | Action::Control(_)
+                            | Action::OpenControls
                             | Action::Choose(_, _)
                             | Action::AppPreferences(_, _, _)
                             | Action::SetAdvanced(_, _)
@@ -719,6 +721,10 @@ impl Prototype {
     }
     fn advanced_fields(&self, narrow: bool, cx: &Context<Self>) -> AnyElement {
         let mut fields = div();
+        if self.settings_tab == SettingsTab::Interface {
+            fields = fields.child(div().p_4().text_color(rgb(MUTED))
+                .child(self.tr("串流進行中；Ctrl+Alt+Shift+O 開啟控制頁。")));
+        }
         if self.settings_tab == SettingsTab::Host {
             fields = fields.child(self.button(
                 "refresh-displays",
@@ -739,7 +745,9 @@ impl Prototype {
         }
         for spec in advanced::OPTIONS
             .iter()
-            .filter(|s| s.category == self.settings_tab.category())
+            // Placement belongs to the retained Qt frontend. Keep its stored
+            // value for profile compatibility; GPUI controls use a focused page.
+            .filter(|s| s.category == self.settings_tab.category() && s.key != "overlay")
         {
             if (spec.key.starts_with("hdr_")
                 && (!self.draft.hdr
@@ -917,11 +925,37 @@ impl Prototype {
                 title = "串流連線";
                 content = content.child(self.tr(&self.stage)).child(self.button(
                     "stop-stream",
-                    "結束連線",
-                    Action::Stop,
+                      if self.streaming { "串流控制" } else { "結束連線" },
+                      if self.streaming { Action::OpenControls } else { Action::Stop },
                     false,
                     cx,
                 ));
+            }
+            Modal::Controls => {
+                title = "串流控制";
+                content = content
+                    .child(self.tr("方向鍵／手把十字鍵選擇，Enter／A 確認，Esc／B 返回串流。"))
+                    .child(self.tr("暫時斷線會保留 Desktop 工作階段；結束工作階段會請主機清理並依設定還原顯示。"))
+                    .child(div().id("controls-list").overflow_y_scroll().max_h(px(340.))
+                        .track_scroll(&self.controls_scroll).flex().flex_col().gap_2()
+                        .children(ControlAction::ALL.iter().enumerate().map(|(index, &action)| {
+                            let label = match action {
+                                ControlAction::Resume => self.tr("返回串流"),
+                                ControlAction::GamepadMouse => self.tr(if !self.controls.has_gamepad { "手把滑鼠：未連接手把" }
+                                    else if self.controls.gamepad_mouse { "手把滑鼠：開啟（操作控制頁期間暫停）" } else { "手把滑鼠：關閉" }),
+                                ControlAction::Disconnect => self.tr("暫時斷線"),
+                                ControlAction::End => self.tr(if self.controls.confirm_end { "再次確認：結束工作階段" } else { "結束工作階段" }),
+                                ControlAction::Stats => self.tr("效能統計開關"),
+                                ControlAction::Fullscreen => self.tr("全螢幕開關"),
+                                ControlAction::MouseMode => self.tr("滑鼠模式切換"),
+                                ControlAction::Cursor => self.tr("游標顯示開關"),
+                                ControlAction::Paste => self.tr("貼上文字"),
+                                ControlAction::PointerLock => self.tr("游標範圍鎖定開關"),
+                                ControlAction::BitrateDown | ControlAction::BitrateUp => format!("{}  {} Mbps", self.tr(if action == ControlAction::BitrateDown { "降低位元率" } else { "提高位元率" }), self.controls.bitrate).into(),
+                            };
+                            self.button(("control", index), label, Action::Control(action), self.controls.selected == index, cx)
+                        })));
+                if self.pending { content = content.child(self.tr("正在結束連線…")); }
             }
             Modal::AppOptions(id) => {
                 title = "程式選項";

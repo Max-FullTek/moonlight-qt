@@ -129,6 +129,11 @@ public:
 
     // Set only by the Windows GPUI bridge before initialize(). Qt callers retain -1.
     void setClientDisplay(int display) { m_GpuiClientDisplay = display; }
+    void setGpuiControlsClient(unsigned long processId) { m_GpuiControlsClient = processId; }
+    bool usesGpuiControls() const { return m_GpuiControlsClient != 0; }
+    void openGpuiControls();
+    bool handleGpuiControl(const QString& action, int value = 0);
+    static void wakeForCoreCommands();
     Q_INVOKABLE bool initialize(QQuickWindow* qtWindow);
     Q_INVOKABLE void start();
     Q_INVOKABLE void interrupt();
@@ -160,6 +165,9 @@ public:
     void minimizeStreamingWindow();
 
 signals:
+    void gpuiControlsChanged(bool active, bool gamepadMouse, bool hasGamepad);
+    void gpuiControlsNavigate(QString direction);
+    void hostQuitFailed(QString message);
     void stageStarting(QString stage);
 
     void stageFailed(QString stage, int errorCode, QString failingPorts);
@@ -179,6 +187,9 @@ signals:
 
 private:
     int m_GpuiClientDisplay = -1;
+    unsigned long m_GpuiControlsClient = 0;
+    bool m_GpuiControlsActive = false;
+    bool m_GpuiRestoreCapture = false;
     struct WaylandWindowSnapshot
     {
         QSize size;

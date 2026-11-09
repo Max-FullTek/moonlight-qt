@@ -67,7 +67,13 @@ Windows Lite 的生产 SDL 影像 renderer 与 `SwFrameMapper` 也纳入无 Qt C
 
 `sdl_video_renderer` 默认只验证原生 probe／格式协商，不启动 GPU。显式 `--render` 使用隐藏 Windows 视窗与实际 SDL backend：验证 YUV420／NV12／NV21、4:4:4 CPU 转换、图层更新／快取／开关、尺寸变化与比例，以保留的 SDL target texture 读回像素，避免依赖 Present 后可被丢弃的 window backbuffer。另复用六组 8-bit H.264／HEVC／AV1 的 4:2:0／4:4:4 样本，完成组包→软件解码→生产 Pacer／渲染线程→SDL 实际呈现。此测试不验收硬体解码／copyback、HDR、实体 V-sync 或游戏延迟；SDL 原本拒绝 HDR 的行为保留。
 
-这仅完成原生库建置阶段：GPUI 前端仍由其 Cargo 路径构建，串流 worker、浮动介面与剪贴板 helper 仍需 Qt；现有 portable 封装仍走 qmake／windeployqt。不得把本入口通过视为 Windows Lite 已完成无 Qt 交付。
+Windows Lite 的 GPUI 串流入口使用现有前端视窗中的有焦点控制页，快捷键仍为 Ctrl+Alt+Shift+O；十字键／方向键选择、A／Enter 确认、B／Esc 返回。GPUI session 不建立 Qt 互动选单或浮动按钮；旧 Qt 前端路径保留。原选单位置设定仍保留在隔离 profile 中供旧路径使用，GPUI 设定页不再提供不适用的位置选项。
+
+控制页以既有匿名 pipe 增加 `controls` 命令与状态／导航事件，不传递影像，也不增加程序或定时轮询。worker 收到 pipe 命令时以 SDL user event 唤醒主线程，过渡期由该事件处理既有 Qt 主线程命令。开页时明确释放远端按键／按钮／接点与手把状态、暂停输入计时器；关页时清除控制页期间排队的输入，再恢复原擷取状态，本机仍按住的键鼠／手把按钮必须先放开才可重新送往 host。Windows 两个既有程序透过 `AllowSetForegroundWindow` 交接前景权限，不使用置顶、穿透或不启用焦点的视窗补丁。固定的 GPUI 0.2.2 `activate_window()` 内部会合成 Alt 按键，所以必须先完成 worker 输入交接，才启用 GPUI 视窗。
+
+「暂时断线」明确保留 host 工作阶段；「结束工作阶段」在断线后沿用 `NvHTTP::quitApp()` 的 `cancel` 请求，要求主机结束 Desktop／应用程式工作阶段。主机显示还原依 Sunshine／VDD 设定，client 不自行切换 host 萤幕；请求失败会回报错误。控制页另保留统计、全萤幕、滑鼠模式、游标、文字贴上、范围锁定与即时位元率操作。
+
+此控制页尚需真实 Sunshine／Desktop 串流验证 Windows 焦点、全萤幕、手把输入交接及两种断线结果；模擬核心的介面检查不能代替此验收。GPUI 前端仍由其 Cargo 路径构建，串流 worker、被动 toast、统计文字绘制与剪贴板 helper 仍需 Qt；现有 portable 封装仍走 qmake／windeployqt。不得把原生库或控制页编译通过视为 Windows Lite 已完成无 Qt 交付。
 
 ## 历史
 

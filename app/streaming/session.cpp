@@ -56,6 +56,7 @@
 #define SDL_CODE_FLUSH_TOUCHPAD_FRAME 106
 #define SDL_CODE_CURSOR_UPDATE 107
 #define SDL_CODE_FLUSH_CURSOR_VISIBILITY 108
+#define SDL_CODE_PROCESS_CORE_COMMANDS 110
 #if defined(Q_OS_WIN32) || defined(Q_OS_DARWIN) || \
         defined(HAVE_LINUX_DISPLAY_EVENT_MONITOR)
 #define SDL_CODE_PROCESS_QT_OVERLAY_EVENTS 109
@@ -1962,8 +1963,10 @@ private:
             // Logging is already done inside NvHTTP
             try {
                 http.quitApp();
-            } catch (const GfeHttpResponseException&) {
-            } catch (const QtNetworkReplyException&) {
+            } catch (const GfeHttpResponseException& error) {
+                if (m_Session->usesGpuiControls()) emit m_Session->hostQuitFailed(error.toQString());
+            } catch (const QtNetworkReplyException& error) {
+                if (m_Session->usesGpuiControls()) emit m_Session->hostQuitFailed(error.toQString());
             }
 
             // Session is finished now
@@ -2367,6 +2370,10 @@ void Session::syncWaylandSdlWindowState()
 void Session::showQtOverlayMenu(std::optional<QPoint> pointerGlobalPosition,
                                 bool closeWhenPointerOutside)
 {
+    if (usesGpuiControls()) {
+        openGpuiControls();
+        return;
+    }
     if (!m_MenuPanel || m_MenuPanel->isMenuVisible() || m_MenuPanel->isClosing()) return;
     if (!isStreamingWindowVisible()) return;
 
@@ -2462,6 +2469,11 @@ void Session::hideQtOverlayMenu()
 
 void Session::toggleQtOverlayMenu()
 {
+    if (usesGpuiControls()) {
+        if (m_GpuiControlsActive) handleGpuiControl(QStringLiteral("resume"));
+        else openGpuiControls();
+        return;
+    }
     if (!m_MenuPanel) return;
 
     if (m_MenuPanel->isMenuVisible()) {
@@ -2469,6 +2481,107 @@ void Session::toggleQtOverlayMenu()
     } else {
         showQtOverlayMenu();
     }
+}
+
+void Session::wakeForCoreCommands()
+{
+    // A pipe read wakes the SDL loop; no periodic IPC polling is needed.
+    SDL_Event event = {};
+    event.type = SDL_USEREVENT;
+    event.user.code = SDL_CODE_PROCESS_CORE_COMMANDS;
+    SDL_PushEvent(&event);
+}
+
+void Session::openGpuiControls()
+{
+    if (!usesGpuiControls() || !m_InputHandler || !m_Window) return;
+    if (!m_GpuiControlsActive) {
+        m_GpuiRestoreCapture = m_InputHandler->isCaptureActive();
+        m_GpuiControlsActive = true;
+        m_InputHandler->setLocalControlsActive(true);
+        SDL_FlushEvent(SDL_MOUSEMOTION);
+    }
+#ifdef Q_OS_WIN32
+    // The foreground stream grants its existing frontend permission to take
+    // focus. No topmost/non-activating window styles or GPUI patches are used.
+    AllowSetForegroundWindow(m_GpuiControlsClient);
+#endif
+    emit gpuiControlsChanged(true, m_InputHandler->isMouseEmulationActive(),
+                             m_InputHandler->hasConnectedGamepads());
+}
+
+bool Session::handleGpuiControl(const QString& action, int value)
+{
+    if (!usesGpuiControls() || !m_InputHandler || !m_Window) return false;
+    if (action == QStringLiteral("open")) {
+        openGpuiControls();
+        return m_GpuiControlsActive;
+    }
+    if (!m_GpuiControlsActive) return false;
+    if (action == QStringLiteral("disconnect") || action == QStringLiteral("end")) {
+        // Explicit per-session choice overrides the general quit-after setting.
+        m_Preferences->quitAppAfter = action == QStringLiteral("end");
+        interrupt();
+        return true;
+    }
+    if (action == QStringLiteral("resume")) {
+        if (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_MINIMIZED) SDL_RestoreWindow(m_Window);
+        SDL_RaiseWindow(m_Window);
+        SDL_PumpEvents();
+        if (!(SDL_GetWindowFlags(m_Window) & SDL_WINDOW_INPUT_FOCUS)) return false;
+        // Discard local navigation motion before enabling remote input again.
+        SDL_FlushEvent(SDL_MOUSEMOTION);
+        SDL_FlushEvent(SDL_MOUSEBUTTONDOWN);
+        SDL_FlushEvent(SDL_MOUSEBUTTONUP);
+        SDL_FlushEvent(SDL_MOUSEWHEEL);
+        SDL_FlushEvent(SDL_KEYDOWN);
+        SDL_FlushEvent(SDL_KEYUP);
+        SDL_FlushEvent(SDL_CONTROLLERAXISMOTION);
+        SDL_FlushEvent(SDL_CONTROLLERBUTTONDOWN);
+        SDL_FlushEvent(SDL_CONTROLLERBUTTONUP);
+        SDL_FlushEvent(SDL_FINGERDOWN);
+        SDL_FlushEvent(SDL_FINGERMOTION);
+        SDL_FlushEvent(SDL_FINGERUP);
+#if SDL_VERSION_ATLEAST(2, 0, 14)
+        SDL_FlushEvent(SDL_CONTROLLERSENSORUPDATE);
+        SDL_FlushEvent(SDL_CONTROLLERTOUCHPADDOWN);
+        SDL_FlushEvent(SDL_CONTROLLERTOUCHPADMOTION);
+        SDL_FlushEvent(SDL_CONTROLLERTOUCHPADUP);
+#endif
+        m_GpuiControlsActive = false;
+        m_InputHandler->setLocalControlsActive(false);
+        if (m_GpuiRestoreCapture) m_InputHandler->setCaptureActive(true);
+        m_GpuiRestoreCapture = false;
+        emit gpuiControlsChanged(false, m_InputHandler->isMouseEmulationActive(),
+                                 m_InputHandler->hasConnectedGamepads());
+        return true;
+    }
+    if (action == QStringLiteral("gamepad_mouse")) {
+        m_InputHandler->toggleGamepadMouseEmulation();
+    }
+    else if (action == QStringLiteral("bitrate")) {
+        if (value < 1000 || value > 150000) return false;
+        m_Preferences->autoAdjustBitrate = false;
+        m_Preferences->bitrateKbps = value;
+        m_Preferences->save();
+        requestRuntimeBitrateChange(value);
+    }
+    else {
+        SdlInputHandler::KeyCombo combo;
+        if (action == QStringLiteral("stats")) combo = SdlInputHandler::KeyComboToggleStatsOverlay;
+        else if (action == QStringLiteral("fullscreen")) combo = SdlInputHandler::KeyComboToggleFullScreen;
+        else if (action == QStringLiteral("mouse_mode")) combo = SdlInputHandler::KeyComboToggleMouseMode;
+        else if (action == QStringLiteral("cursor")) combo = SdlInputHandler::KeyComboToggleCursorHide;
+        else if (action == QStringLiteral("paste")) combo = SdlInputHandler::KeyComboPasteText;
+        else if (action == QStringLiteral("pointer_lock")) combo = SdlInputHandler::KeyComboTogglePointerRegionLock;
+        else return false;
+        m_InputHandler->performSpecialKeyCombo(combo);
+        // Window-state shortcuts may recapture; the control page still owns input.
+        m_InputHandler->setCaptureActive(false);
+    }
+    emit gpuiControlsChanged(true, m_InputHandler->isMouseEmulationActive(),
+                             m_InputHandler->hasConnectedGamepads());
+    return true;
 }
 
 bool Session::isStreamingWindowVisible() const
@@ -3001,6 +3114,9 @@ void Session::handleSdlUserEvent(const SDL_UserEvent& event)
         break;
     case SDL_CODE_FLUSH_TOUCHPAD_FRAME:
         m_InputHandler->flushPendingTouchpadFrameEvent();
+        break;
+    case SDL_CODE_PROCESS_CORE_COMMANDS:
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         break;
     case SDL_CODE_FLUSH_CURSOR_VISIBILITY:
         if (m_InputHandler != nullptr) {
@@ -4144,11 +4260,12 @@ void Session::exec()
     // Initialize mouse state for menu
     m_WasCapturedBeforeMenu = false;
 
-    // Create Qt-based overlay menu panel (rendered by OS compositor, not D3D11)
+    // The retained Qt frontend uses its overlay windows. GPUI sessions only
+    // retain the passive toast until that rendering path is migrated.
     const OverlayWindowMode overlayWindowMode = m_WaylandStreamWindow != nullptr
                                                     ? OverlayWindowMode::WaylandSubsurface
                                                     : OverlayWindowMode::Detached;
-    m_MenuPanel = new OverlayMenuPanel(m_WaylandStreamWindow, overlayWindowMode);
+    m_MenuPanel = usesGpuiControls() ? nullptr : new OverlayMenuPanel(m_WaylandStreamWindow, overlayWindowMode);
     m_MenuButton = nullptr;
     m_Toast = new OverlayToast(m_WaylandStreamWindow, overlayWindowMode);
     // The GPUI worker has no QML StreamSegue to present launch warnings.
@@ -4167,41 +4284,44 @@ void Session::exec()
                 restoreCaptureAfterStylusReplayPanel();
             });
 #endif
-    m_MenuPanel->setActionCallback([this](OverlayMenuPanel::MenuAction action) {
-        dispatchQtMenuAction(action);
-    });
+    if (m_MenuPanel) {
+        m_MenuPanel->setActionCallback([this](OverlayMenuPanel::MenuAction action) {
+            dispatchQtMenuAction(action);
+        });
 
-    m_MenuPanel->setBitrateChangeCallback([this](int bitrateKbps) {
-        // Manual adjustment takes over from the settings page auto-recompute.
-        m_Preferences->autoAdjustBitrate = false;
-        m_Preferences->bitrateKbps = bitrateKbps;
-        m_Preferences->save();
-        // Applied asynchronously; the toast confirms the value the host
-        // actually accepted (see startRuntimeBitrateWorker()).
-        requestRuntimeBitrateChange(bitrateKbps);
-    });
+        m_MenuPanel->setBitrateChangeCallback([this](int bitrateKbps) {
+            // Manual adjustment takes over from the settings page auto-recompute.
+            m_Preferences->autoAdjustBitrate = false;
+            m_Preferences->bitrateKbps = bitrateKbps;
+            m_Preferences->save();
+            // Applied asynchronously; the toast confirms the value the host
+            // actually accepted (see startRuntimeBitrateWorker()).
+            requestRuntimeBitrateChange(bitrateKbps);
+        });
 
-    m_MenuPanel->setCloseCallback([this]() {
-        // Record close timestamp for edge-trigger debounce
-        m_MenuCloseTicks = SDL_GetTicks();
+        m_MenuPanel->setCloseCallback([this]() {
+            // Record close timestamp for edge-trigger debounce
+            m_MenuCloseTicks = SDL_GetTicks();
 
-        // Restore mouse capture after menu closes
-        // Note: for actions that change window state (fullscreen, minimize),
-        // we defer capture restoration to after the action completes.
-        // See dispatchQtMenuAction() for those cases.
-        if (m_WasCapturedBeforeMenu && !m_DeferCaptureRestore) {
-            if (isStreamingWindowVisible()) {
-                m_InputHandler->setCaptureActive(true);
+            // Restore mouse capture after menu closes
+            // Note: for actions that change window state (fullscreen, minimize),
+            // we defer capture restoration to after the action completes.
+            // See dispatchQtMenuAction() for those cases.
+            if (m_WasCapturedBeforeMenu && !m_DeferCaptureRestore) {
+                if (isStreamingWindowVisible()) {
+                    m_InputHandler->setCaptureActive(true);
+                }
+                m_WasCapturedBeforeMenu = false;
             }
-            m_WasCapturedBeforeMenu = false;
-        }
 
-        syncQtOverlayWindowsWithSdlWindowState();
+            syncQtOverlayWindowsWithSdlWindowState();
 
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "Qt overlay menu closed, capture %s",
-                    m_DeferCaptureRestore ? "deferred" : "restored");
-    });
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                        "Qt overlay menu closed, capture %s",
+                        m_DeferCaptureRestore ? "deferred" : "restored");
+        });
+
+    }
 
     // Keep a hidden button ready so placement can switch during a stream
     // without creating a window from inside an input callback.
@@ -4209,28 +4329,31 @@ void Session::exec()
     m_MacQtEventPumpInputGuard =
             std::make_unique<MacQtEventPumpInputGuard>(m_Window);
 #endif
-    m_MenuButton = new OverlayMenuButton(m_WaylandStreamWindow, overlayWindowMode);
+    if (!usesGpuiControls()) {
+        m_MenuButton = new OverlayMenuButton(m_WaylandStreamWindow, overlayWindowMode);
 #if defined(Q_OS_WIN32) || defined(Q_OS_DARWIN) || \
-        defined(HAVE_LINUX_DISPLAY_EVENT_MONITOR)
-    m_MenuButton->setEventWakeCallback([]() {
-        SDL_Event wakeEvent = {};
-        wakeEvent.type = SDL_USEREVENT;
-        wakeEvent.user.code = SDL_CODE_PROCESS_QT_OVERLAY_EVENTS;
-        pushEventOrWarn(wakeEvent);
-    });
+            defined(HAVE_LINUX_DISPLAY_EVENT_MONITOR)
+        m_MenuButton->setEventWakeCallback([]() {
+            SDL_Event wakeEvent = {};
+            wakeEvent.type = SDL_USEREVENT;
+            wakeEvent.user.code = SDL_CODE_PROCESS_QT_OVERLAY_EVENTS;
+            pushEventOrWarn(wakeEvent);
+        });
 #endif
-    m_MenuButton->setClickCallback([this](const QPoint& globalPosition,
-                                          bool closeWhenPointerOutside) {
-        showQtOverlayMenu(globalPosition, closeWhenPointerOutside);
-    });
+        m_MenuButton->setClickCallback([this](const QPoint& globalPosition,
+                                              bool closeWhenPointerOutside) {
+            showQtOverlayMenu(globalPosition, closeWhenPointerOutside);
+        });
 
-    if (m_Preferences->overlayMenuPosition == StreamingPreferences::OMP_BUTTON) {
-        // Show button at initial position
-        const QRect parentRect = qtOverlayParentGeometry();
-        if (parentRect.isValid()) {
-            m_MenuButton->showButton(parentRect.x(), parentRect.y(),
-                                     parentRect.width(), parentRect.height());
+        if (m_Preferences->overlayMenuPosition == StreamingPreferences::OMP_BUTTON) {
+            // Show button at initial position
+            const QRect parentRect = qtOverlayParentGeometry();
+            if (parentRect.isValid()) {
+                m_MenuButton->showButton(parentRect.x(), parentRect.y(),
+                                         parentRect.width(), parentRect.height());
+            }
         }
+
     }
 
     // Switch to async logging mode when we enter the SDL loop
@@ -4487,6 +4610,7 @@ void Session::exec()
                     m_AudioMuted = false;
                 }
                 m_InputHandler->notifyFocusGained();
+                if (m_GpuiControlsActive) handleGpuiControl(QStringLiteral("resume"));
                 break;
             case SDL_WINDOWEVENT_LEAVE:
                 m_InputHandler->notifyMouseLeave();
@@ -4726,7 +4850,7 @@ void Session::exec()
             const bool overlayMenuShortcut = overlayMenuKey && (event.key.keysym.mod & KMOD_CTRL) &&
                                              (event.key.keysym.mod & KMOD_ALT) &&
                                              (event.key.keysym.mod & KMOD_SHIFT);
-            if (m_WaylandStreamWindow != nullptr && overlayMenuKey) {
+            if ((m_WaylandStreamWindow != nullptr || usesGpuiControls()) && overlayMenuKey) {
                 if (event.type == SDL_KEYDOWN && overlayMenuShortcut) {
                     if (!m_WaylandOverlayShortcutPressed && event.key.repeat == 0) {
                         toggleQtOverlayMenu();
@@ -4899,6 +5023,19 @@ void Session::exec()
             break;
         case SDL_CONTROLLERBUTTONDOWN:
         case SDL_CONTROLLERBUTTONUP:
+            if (m_GpuiControlsActive) {
+                if (event.cbutton.state == SDL_PRESSED) {
+                    switch (event.cbutton.button) {
+                    case SDL_CONTROLLER_BUTTON_DPAD_UP: emit gpuiControlsNavigate(QStringLiteral("up")); break;
+                    case SDL_CONTROLLER_BUTTON_DPAD_DOWN: emit gpuiControlsNavigate(QStringLiteral("down")); break;
+                    case SDL_CONTROLLER_BUTTON_A: emit gpuiControlsNavigate(QStringLiteral("select")); break;
+                    case SDL_CONTROLLER_BUTTON_B:
+                    case SDL_CONTROLLER_BUTTON_START: emit gpuiControlsNavigate(QStringLiteral("back")); break;
+                    default: break;
+                    }
+                }
+                break;
+            }
             presence.runCallbacks();
             // When Qt overlay menu is visible, handle gamepad navigation
             if (m_MenuPanel && m_MenuPanel->isMenuVisible()) {
@@ -4949,6 +5086,10 @@ void Session::exec()
         case SDL_CONTROLLERDEVICEADDED:
         case SDL_CONTROLLERDEVICEREMOVED:
             m_InputHandler->handleControllerDeviceEvent(&event.cdevice);
+            if (m_GpuiControlsActive) {
+                emit gpuiControlsChanged(true, m_InputHandler->isMouseEmulationActive(),
+                                         m_InputHandler->hasConnectedGamepads());
+            }
             updateDualSenseHapticsControllerTarget();
             break;
         case SDL_JOYDEVICEADDED:

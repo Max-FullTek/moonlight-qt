@@ -10,7 +10,7 @@ class Session;
 
 // Protocol 1: newline-delimited JSON on inherited anonymous stdio pipes only.
 // Commands: list, add, pair, rename, remove, quit, displays, app_preferences,
-// start, stop, shutdown. All host/session work is dispatched on Qt's main thread. No QML engine is
+// start, stop, controls, shutdown. All host/session work is dispatched on Qt's main thread. No QML engine is
 // created. stdout is reserved for protocol events; diagnostics stay on stderr.
 class GpuiCoreBridge : public QObject
 {

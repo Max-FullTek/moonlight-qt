@@ -18,6 +18,7 @@
 #include <QSet>
 
 #include <atomic>
+#include <mutex>
 #ifdef HAS_QT_SDL_WAYLAND_BRIDGE
 #include <optional>
 #endif
@@ -28,7 +29,9 @@
 class WindowsTouchpadInput;
 #endif
 
+class SdlInputHandler;
 struct GamepadState {
+    SdlInputHandler* inputHandler;
     SDL_GameController* controller;
     SDL_JoystickID jsId;
     short index;
@@ -46,6 +49,7 @@ struct GamepadState {
 #endif
 
     SDL_TimerID mouseEmulationTimer;
+    bool mouseEmulationSuspended;
     // Copied here when emulation activates: the SDL timer callback is
     // static and can't reach the handler's m_GamepadDeadzone
     int mouseEmulationDeadzonePercent;
@@ -55,6 +59,7 @@ struct GamepadState {
     // one of its own buttons is released (extra held buttons don't re-arm)
     bool quitComboLatched;
     bool statsComboLatched;
+    uint32_t localButtonsUntilRelease;
     uint32_t lastStartDownTime;
 
     bool clickpadButtonEmulationEnabled;
@@ -234,6 +239,9 @@ public:
     void notifyMouseLeave();
 
     void notifyFocusLost();
+    // Explicit ownership handoff to the client control page, independent of
+    // background-gamepad preferences and fullscreen focus behavior.
+    void setLocalControlsActive(bool active);
 
     void notifyFocusGained();
 
@@ -305,6 +313,11 @@ public:
     void setGamepadMouse(bool enabled) { m_GamepadMouse = enabled; }
 
 private:
+    bool m_LocalControlsActive = false;
+    bool m_LocalKeysUntilRelease[SDL_NUM_SCANCODES] = {};
+    Uint32 m_LocalMouseButtonsUntilRelease = 0;
+    std::mutex m_InputTimerMutex;
+    bool m_BackgroundGamepad = false;
     void getWindowCoordinateSize(int* width, int* height) const;
 
     qreal getRemoteCursorScale() const;
