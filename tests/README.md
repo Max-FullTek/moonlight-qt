@@ -37,7 +37,7 @@ main() 短、被测逻辑走生产源文件直编(见各 .pro 的 SOURCES)。
 | settings_localization | 中文翻译 .qm + 设置页布局(qmltestrunner) | Windows |
 | linux_display_event_monitor | Linux 显示事件唤醒 | Linux |
 
-Windows Lite 原生库另有无 Qt 入口 `scripts/build-lite-native.ps1`（CI：`lite-native.yml`），覆盖 Release／Debug，构建并执行协议库已有 CTest、`lite_native` 的实际静态链接／API／H.264 NAL 解析检查，以及 `keyboard_state`、`gamepad_sensor_rate`、`pen_history_selection`、`cursor_shape_classification`。四项输入测试复用现有源文件，键盘与光标分类测试本身已不再依赖 Qt；原 `.pro` 入口保留。光标分类测试覆盖 1x／2x 形状、保守回退、空指针、输入长度／尺寸、alpha 门槛及热点边界，也加入 portable 回归入口。此入口不需要 qmake，不连接真实主机，不读取用户设置或凭证；范围与前提见 [架构文档](../docs/architecture.md#windows-lite-原生库建置)。另有仅 CMake 的 `sdl_audio_renderer`：直接编译生产 SDL renderer 并链接实际 common-c，dummy 驱动覆盖 stereo／5.1／7.1、5／10 ms PCM、空帧与重复开关；SDL 错误／断言导致失败，不使用实体音讯装置。其余 qmake 测试仍属于旧路径。
+Windows Lite 原生库另有无 Qt 入口 `scripts/build-lite-native.ps1`（CI：`lite-native.yml`），覆盖 Release／Debug，构建并执行协议库已有 CTest、`lite_native` 的实际静态链接／API／H.264 NAL 解析检查，以及 `keyboard_state`、`gamepad_sensor_rate`、`pen_history_selection`、`cursor_shape_classification`。四项输入测试复用现有源文件，键盘与光标分类测试本身已不再依赖 Qt；原 `.pro` 入口保留。光标分类测试覆盖 1x／2x 形状、保守回退、空指针、输入长度／尺寸、alpha 门槛及热点边界，也加入 portable 回归入口。此入口不需要 qmake，不连接真实主机，不读取用户设置或凭证；范围与前提见 [架构文档](../docs/architecture.md#windows-lite-原生库建置)。另有仅 CMake 的 `sdl_audio_renderer`：直接编译生产 SDL renderer 并链接实际 common-c，dummy 驱动覆盖 stereo／5.1／7.1、5／10 ms PCM、空帧与重复开关；SDL 错误／断言导致失败，不使用实体音讯装置。浮动介面另覆盖 `overlay_placement_axis`（仅 CMake）、`overlay_event_wake_state` 与 `overlay_toast_event_state`（保留 qmake 入口）；直接复用生产 helper，不启动视窗。旧 `overlay_button_position` 仍覆盖 Qt 包装及 QSettings，并比对原 Qt 公式与无 Qt 计算。其余 qmake 测试仍属于旧路径。
 
 ## 仅本地/手动
 

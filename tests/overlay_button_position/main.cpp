@@ -1,5 +1,6 @@
 #include "streaming/video/overlaybuttonposition.h"
 #include "settings/devicelocalsettings.h"
+#include "streaming/video/overlayplacementaxis.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -29,6 +30,34 @@ int main(int argc, char* argv[])
     QCoreApplication app(argc, argv);
 
     const QRect landscape(100, 200, 1000, 600);
+
+    // Compare native arithmetic with the prior Qt formulas, including negative
+    // monitor origins, collapsed ranges, clipping, and half-pixel rounding.
+    for (int origin : {-1920, -300, 0, 100, 3840}) {
+        for (int parentLength : {0, 24, 36, 601, 1080, 3840}) {
+            for (int testMargin : {-10, 0, 10, 9999}) {
+                const int movable = qMax(0, parentLength - 36);
+                const int safeMargin = qMin(qMax(0, testMargin), movable / 2);
+                const int start = origin + safeMargin;
+                const int end = origin + movable - safeMargin;
+                const auto range = OverlayPlacementAxis::bounds(origin, parentLength, 36, testMargin);
+                require(range.start == start && range.end == end, "native bounds match Qt");
+                for (double value : {-2.0, 0.0, 0.25, 0.5, 0.75, 1.0, 4.0, qInf(), qQNaN()}) {
+                    const double safe = qIsFinite(value) ? qBound(0.0, value, 1.0) : 0.5;
+                    require(OverlayPlacementAxis::resolve(value, range) ==
+                            qRound(start + (end - start) * safe), "native rounding matches Qt");
+                }
+                for (int pixel : {origin - 100, origin, origin + 50, origin + 4000}) {
+                    const int clamped = qBound(start, pixel, end);
+                    const double expected = end > start
+                            ? qBound(0.0, static_cast<double>(clamped - start) / (end - start), 1.0)
+                            : 0.5;
+                    require(OverlayPlacementAxis::normalize(pixel, range) == expected,
+                            "native normalization matches Qt");
+                }
+            }
+        }
+    }
     const QSize button(36, 36);
     constexpr int margin = 10;
 

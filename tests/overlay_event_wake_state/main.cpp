@@ -1,7 +1,7 @@
 #include "streaming/video/overlayeventwakestate.h"
 
-#include <QCoreApplication>
-#include <QtGlobal>
+#include <cstdio>
+#include <cstdlib>
 
 #include <atomic>
 #include <thread>
@@ -11,14 +11,14 @@ namespace {
 void require(bool condition, const char* message)
 {
     if (!condition) {
-        qFatal("%s", message);
+        std::fprintf(stderr, "FAIL: %s\n", message);
+        std::exit(1);
     }
 }
 }
 
-int main(int argc, char* argv[])
+int main()
 {
-    QCoreApplication app(argc, argv);
 
     OverlayEventWakeState state;
     constexpr int keyPairs = 1000000;

@@ -116,9 +116,10 @@ if(BUILD_TESTING)
     add_test(NAME lite-native-link-test COMMAND lite-native-link-test)
     set_tests_properties(lite-native-link-test PROPERTIES TIMEOUT 15)
 
-    # These input-state tests compile the production helpers directly and have
+    # These state/placement tests compile the production helpers directly and have
     # no Qt, SDL window, streaming host, or user-data dependency.
-    foreach(input_test IN ITEMS keyboard_state gamepad_sensor_rate pen_history_selection)
+    foreach(input_test IN ITEMS keyboard_state gamepad_sensor_rate pen_history_selection
+                                overlay_placement_axis overlay_event_wake_state overlay_toast_event_state)
         add_executable(${input_test} "${LITE_SOURCE_ROOT}/tests/${input_test}/main.cpp")
         target_compile_features(${input_test} PRIVATE cxx_std_17)
         target_compile_options(${input_test} PRIVATE /W3 /WX)

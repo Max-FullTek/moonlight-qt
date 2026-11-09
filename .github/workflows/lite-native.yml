@@ -10,6 +10,12 @@ on:
       - tests/keyboard_state/**
       - tests/cursor_shape_classification/**
       - tests/sdl_audio_renderer/**
+      - tests/overlay_placement_axis/**
+      - tests/overlay_event_wake_state/**
+      - tests/overlay_toast_event_state/**
+      - app/streaming/video/overlayeventwakestate.h
+      - app/streaming/video/overlaytoasteventstate.h
+      - app/streaming/video/overlayplacementaxis.h
       - app/streaming/audio/renderers/**
       - app/SDL_compat.h
       - tests/gamepad_sensor_rate/**

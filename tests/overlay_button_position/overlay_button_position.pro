@@ -11,4 +11,5 @@ SOURCES += \
 
 HEADERS += \
     ../../app/settings/devicelocalsettings.h \
-    ../../app/streaming/video/overlaybuttonposition.h
+    ../../app/streaming/video/overlaybuttonposition.h \
+    ../../app/streaming/video/overlayplacementaxis.h

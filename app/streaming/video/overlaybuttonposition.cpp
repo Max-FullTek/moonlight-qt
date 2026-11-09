@@ -1,4 +1,5 @@
 #include "overlaybuttonposition.h"
+#include "overlayplacementaxis.h"
 
 #include "settings/devicelocalsettings.h"
 
@@ -11,37 +12,6 @@ constexpr auto NormalizedXKey = "position/normalizedX";
 constexpr auto NormalizedYKey = "position/normalizedY";
 constexpr int LocalStateVersion = 1;
 
-struct AxisBounds
-{
-    int start;
-    int end;
-};
-
-AxisBounds axisBounds(int origin, int parentLength, int buttonLength, int margin)
-{
-    const int movableLength = qMax(0, parentLength - buttonLength);
-    const int safeMargin = qMin(qMax(0, margin), movableLength / 2);
-    return {origin + safeMargin, origin + movableLength - safeMargin};
-}
-
-int resolveAxis(qreal normalized, const AxisBounds& bounds)
-{
-    const qreal safeNormalized = qIsFinite(normalized)
-            ? qBound<qreal>(0.0, normalized, 1.0)
-            : 0.5;
-    return qRound(bounds.start + (bounds.end - bounds.start) * safeNormalized);
-}
-
-qreal normalizeAxis(int position, const AxisBounds& bounds)
-{
-    const int length = bounds.end - bounds.start;
-    if (length <= 0) {
-        return 0.5;
-    }
-    return qBound<qreal>(0.0,
-                         static_cast<qreal>(position - bounds.start) / length,
-                         1.0);
-}
 }
 
 QPoint OverlayButtonPlacement::defaultPosition(const QRect& parentGeometry,
@@ -60,16 +30,16 @@ QPoint OverlayButtonPlacement::clamp(const QPoint& position,
         return position;
     }
 
-    const AxisBounds horizontal = axisBounds(parentGeometry.x(),
+    const OverlayPlacementAxis::Bounds horizontal = OverlayPlacementAxis::bounds(parentGeometry.x(),
                                              parentGeometry.width(),
                                              buttonSize.width(),
                                              margin);
-    const AxisBounds vertical = axisBounds(parentGeometry.y(),
+    const OverlayPlacementAxis::Bounds vertical = OverlayPlacementAxis::bounds(parentGeometry.y(),
                                            parentGeometry.height(),
                                            buttonSize.height(),
                                            margin);
-    return QPoint(qBound(horizontal.start, position.x(), horizontal.end),
-                  qBound(vertical.start, position.y(), vertical.end));
+    return QPoint(OverlayPlacementAxis::clamp(position.x(), horizontal),
+                  OverlayPlacementAxis::clamp(position.y(), vertical));
 }
 
 QPoint OverlayButtonPlacement::resolve(const QPointF& normalizedPosition,
@@ -81,16 +51,16 @@ QPoint OverlayButtonPlacement::resolve(const QPointF& normalizedPosition,
         return parentGeometry.topLeft();
     }
 
-    const AxisBounds horizontal = axisBounds(parentGeometry.x(),
+    const OverlayPlacementAxis::Bounds horizontal = OverlayPlacementAxis::bounds(parentGeometry.x(),
                                              parentGeometry.width(),
                                              buttonSize.width(),
                                              margin);
-    const AxisBounds vertical = axisBounds(parentGeometry.y(),
+    const OverlayPlacementAxis::Bounds vertical = OverlayPlacementAxis::bounds(parentGeometry.y(),
                                            parentGeometry.height(),
                                            buttonSize.height(),
                                            margin);
-    return QPoint(resolveAxis(normalizedPosition.x(), horizontal),
-                  resolveAxis(normalizedPosition.y(), vertical));
+    return QPoint(OverlayPlacementAxis::resolve(normalizedPosition.x(), horizontal),
+                  OverlayPlacementAxis::resolve(normalizedPosition.y(), vertical));
 }
 
 QPointF OverlayButtonPlacement::normalize(const QPoint& position,
@@ -102,17 +72,17 @@ QPointF OverlayButtonPlacement::normalize(const QPoint& position,
         return QPointF(0.5, 0.5);
     }
 
-    const AxisBounds horizontal = axisBounds(parentGeometry.x(),
+    const OverlayPlacementAxis::Bounds horizontal = OverlayPlacementAxis::bounds(parentGeometry.x(),
                                              parentGeometry.width(),
                                              buttonSize.width(),
                                              margin);
-    const AxisBounds vertical = axisBounds(parentGeometry.y(),
+    const OverlayPlacementAxis::Bounds vertical = OverlayPlacementAxis::bounds(parentGeometry.y(),
                                            parentGeometry.height(),
                                            buttonSize.height(),
                                            margin);
     const QPoint constrained = clamp(position, parentGeometry, buttonSize, margin);
-    return QPointF(normalizeAxis(constrained.x(), horizontal),
-                   normalizeAxis(constrained.y(), vertical));
+    return QPointF(OverlayPlacementAxis::normalize(constrained.x(), horizontal),
+                   OverlayPlacementAxis::normalize(constrained.y(), vertical));
 }
 
 OverlayButtonPositionStore::OverlayButtonPositionStore(const QString& settingsPath)

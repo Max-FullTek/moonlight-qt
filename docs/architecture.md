@@ -49,6 +49,8 @@
 
 SDL 音讯输出与共用音讯 renderer 介面已不依赖 Qt；仍直接复用既有 `sdlaud.cpp`、固定 SDL2／SDL3 依赖与 common-c。`sdl_audio_renderer` 测试用 dummy 音讯驱动验证 stereo／5.1／7.1、5／10 ms PCM 送出与重复开关，不启动串流、不操作实际音讯装置；SDL 错误与断言会明确失败。真实音讯装置切换、影音同步与延迟未由此测试验收。
 
+浮动按钮的单轴边界、归一化与像素还原由无 Qt 的 `overlayplacementaxis.h` 处理，原 Qt 介面直接复用计算；QSettings 路径／格式、窗口与输入处理仍保留。原生测试验证坐标往返与边界，旧 Qt 位置测试另外比对原 Qt 公式及保存还原。喚醒合并与 toast 排程测试也已移除 Qt，相同生产状态 helper 由 CMake 与旧 qmake 测试共用；这不代表浮动介面已完成无 Qt 绘制。
+
 测试 PATH 仅包含原生依赖与 Windows 系统目录，不借用开发机 Qt 路径。
 
 这仅完成原生库建置阶段：GPUI 前端仍由其 Cargo 路径构建，串流 worker、浮动介面与剪贴板 helper 仍需 Qt；现有 portable 封装仍走 qmake／windeployqt。不得把本入口通过视为 Windows Lite 已完成无 Qt 交付。

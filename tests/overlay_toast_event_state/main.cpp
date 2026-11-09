@@ -1,7 +1,7 @@
 #include "streaming/video/overlaytoasteventstate.h"
 
-#include <QCoreApplication>
-#include <QtGlobal>
+#include <cstdio>
+#include <cstdlib>
 
 #include <limits>
 
@@ -9,14 +9,14 @@ namespace {
 void require(bool condition, const char* message)
 {
     if (!condition) {
-        qFatal("%s", message);
+        std::fprintf(stderr, "FAIL: %s\n", message);
+        std::exit(1);
     }
 }
 }
 
-int main(int argc, char* argv[])
+int main()
 {
-    QCoreApplication app(argc, argv);
     OverlayToastEventState state;
 
     require(!state.isVisible(), "new toast state must be hidden");
