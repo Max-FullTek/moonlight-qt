@@ -101,8 +101,9 @@ New-Item -ItemType File -Path (Join-Path $deploy 'portable.dat') | Out-Null
 # Focused existing regressions; no streaming host or user credentials are used.
 $env:PATH = "$deploy;$env:PATH"
 # Test executables live outside the deployment folder and cannot infer its TLS
-# plugin path from their own directory. Do not rely on CI's SDK environment.
-$env:QT_PLUGIN_PATH = $deploy
+# plugin path from their own directory. Retain SDK plugins for the offscreen
+# test platform, which windeployqt does not ship in the user-facing package.
+$env:QT_PLUGIN_PATH = "$deploy;$(& $qmake -query QT_INSTALL_PLUGINS)"
 $testResults = @()
 $env:QT_QPA_PLATFORM = 'offscreen'
 $env:QT_QUICK_BACKEND = 'software'
