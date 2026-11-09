@@ -33,6 +33,7 @@
 // that might include SDL.h themselves.
 #define SDL_MAIN_HANDLED
 #include "SDL_compat.h"
+#include "streaming/streamutils.h"
 
 #ifdef HAVE_FFMPEG
 #include "streaming/video/ffmpeg.h"
@@ -138,6 +139,16 @@ static bool shouldUseChineseWindowsUiFont(StreamingPreferences::Language languag
 //
 // FIXME: Clean this up
 QAtomicInt g_AsyncLoggingEnabled;
+
+void StreamUtils::enterAsyncLoggingMode()
+{
+    g_AsyncLoggingEnabled.ref();
+}
+
+void StreamUtils::exitAsyncLoggingMode()
+{
+    g_AsyncLoggingEnabled.deref();
+}
 
 static QElapsedTimer s_LoggerTime;
 static QTextStream s_LoggerStream(stderr);

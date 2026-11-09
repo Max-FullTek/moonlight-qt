@@ -4,15 +4,21 @@
 #include "waylandqtsdlbridge.h"
 #endif
 
+#if !defined(_WIN32) || !defined(_MSC_VER)
+// Other toolchains retain their existing Qt platform/DRM implementation.
 #include <Qt>
 #include <QDir>
+#endif
 
 #ifdef Q_OS_DARWIN
 #include <ApplicationServices/ApplicationServices.h>
 #endif
 
-#ifdef Q_OS_WINDOWS
+#ifdef _WIN32
 #include <Windows.h>
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+#include <intrin.h>
+#endif
 #endif
 
 #ifdef Q_OS_UNIX
@@ -108,7 +114,8 @@ SDL_Window* StreamUtils::createTestWindow()
     // the current resolution (only differing by refresh rate). Fullscreen
     // desktop mode ensures the window size exactly matches the display mode
     // which prevents false Vulkan renderer failures during decoder probing.
-    if (QString(SDL_GetCurrentVideoDriver()) == "KMSDRM") {
+    const char* videoDriver = SDL_GetCurrentVideoDriver();
+    if (videoDriver && SDL_strcmp(videoDriver, "KMSDRM") == 0) {
         baseFlags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
     }
 
@@ -131,8 +138,8 @@ SDL_Window* StreamUtils::createTestWindow()
 
 void StreamUtils::scaleSourceToDestinationSurface(SDL_Rect* src, SDL_Rect* dst)
 {
-    int dstH = SDL_ceilf((float)dst->w * src->h / src->w);
-    int dstW = SDL_ceilf((float)dst->h * src->w / src->h);
+    int dstH = static_cast<int>(SDL_ceilf((float)dst->w * src->h / src->w));
+    int dstW = static_cast<int>(SDL_ceilf((float)dst->h * src->w / src->h));
 
     if (dstH > dst->h) {
         dst->x += (dst->w - dstW) / 2;
@@ -219,7 +226,13 @@ bool StreamUtils::hasFastAes()
 #define __has_builtin(x) 0
 #endif
 
-#if (__has_builtin(__builtin_cpu_supports) || (defined(__GNUC__) && __GNUC__ >= 6)) && defined(Q_PROCESSOR_X86)
+#if defined(_WIN32) && defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+    int regs[4];
+    __cpuid(regs, 1);
+    return regs[2] & (1 << 25); // AES-NI
+#elif defined(_WIN32) && (defined(_M_ARM) || defined(_M_ARM64))
+    return IsProcessorFeaturePresent(PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE);
+#elif (__has_builtin(__builtin_cpu_supports) || (defined(__GNUC__) && __GNUC__ >= 6)) && defined(Q_PROCESSOR_X86)
     return __builtin_cpu_supports("aes");
 #elif defined(__BUILTIN_CPU_SUPPORTS__) && defined(Q_PROCESSOR_POWER)
     return __builtin_cpu_supports("vcrypto");
@@ -415,7 +428,7 @@ int StreamUtils::getDrmFdForWindow(SDL_Window* window, bool* mustClose)
         }
     }
 #else
-    Q_UNUSED(window);
+    (void)window;
 #endif
 
     return -1;
@@ -466,20 +479,8 @@ int StreamUtils::getDrmFd(bool preferRenderNode)
         }
     }
 #else
-    Q_UNUSED(preferRenderNode);
+    (void)preferRenderNode;
 #endif
 
     return -1;
-}
-
-extern QAtomicInt g_AsyncLoggingEnabled;
-
-void StreamUtils::enterAsyncLoggingMode()
-{
-    g_AsyncLoggingEnabled.ref();
-}
-
-void StreamUtils::exitAsyncLoggingMode()
-{
-    g_AsyncLoggingEnabled.deref();
 }

@@ -79,6 +79,14 @@ target_compile_options(lite-sdl-audio PRIVATE /W3 /WX)
 target_include_directories(lite-sdl-audio PUBLIC "${LITE_SOURCE_ROOT}/app")
 target_link_libraries(lite-sdl-audio PUBLIC moonlight-common-c lite-sdl2)
 
+add_library(lite-stream-utils STATIC "${LITE_SOURCE_ROOT}/app/streaming/streamutils.cpp")
+target_compile_features(lite-stream-utils PUBLIC cxx_std_17)
+target_compile_options(lite-stream-utils PRIVATE /W3 /WX)
+target_include_directories(lite-stream-utils PUBLIC "${LITE_SOURCE_ROOT}/app")
+target_link_libraries(lite-stream-utils PUBLIC lite-sdl2)
+# Match the Windows Lite Qt build's window-probing preference.
+target_compile_definitions(lite-stream-utils PRIVATE HAVE_LIBPLACEBO_VULKAN)
+
 if(BUILD_TESTING)
     # The pinned fork's decode fixture omits stopVideoDepacketizer() before
     # destroying a used queue. Patch a build-directory copy only: the fork is
@@ -143,4 +151,11 @@ if(BUILD_TESTING)
     target_link_libraries(sdl_audio_renderer PRIVATE lite-sdl-audio)
     add_test(NAME sdl_audio_renderer COMMAND sdl_audio_renderer)
     set_tests_properties(sdl_audio_renderer PROPERTIES TIMEOUT 15)
+
+    add_executable(stream_utils "${LITE_SOURCE_ROOT}/tests/stream_utils/main.cpp")
+    target_compile_definitions(stream_utils PRIVATE SDL_MAIN_HANDLED)
+    target_compile_options(stream_utils PRIVATE /W3 /WX)
+    target_link_libraries(stream_utils PRIVATE lite-stream-utils)
+    add_test(NAME stream_utils COMMAND stream_utils)
+    set_tests_properties(stream_utils PROPERTIES TIMEOUT 15)
 endif()
