@@ -22,6 +22,23 @@ if (!(Test-Path -LiteralPath $source)) {
     if (Test-Path -LiteralPath $destination) { throw 'Extraction destination already exists; no files were overwritten.' }
     Expand-Archive -LiteralPath $archive -DestinationPath $destination
 }
+# A cached extraction must still match the verified archive, including build
+# inputs and license text. Never silently reuse locally edited dependency code.
+$zip = [IO.Compression.ZipFile]::OpenRead($archive)
+try {
+    foreach ($entry in $zip.Entries) {
+        if (!$entry.Name) { continue }
+        $relative = $entry.FullName.Substring('curl-8.23.0/'.Length)
+        $file = Join-Path $source $relative
+        if (!(Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing verified curl source file: $relative" }
+        $stream = $entry.Open()
+        try { $archiveHash = (Get-FileHash -InputStream $stream -Algorithm SHA256).Hash }
+        finally { $stream.Dispose() }
+        if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne $archiveHash) {
+            throw "Cached curl source differs from the verified release: $relative"
+        }
+    }
+} finally { $zip.Dispose() }
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
 $cmakePaths = @(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find '**/cmake.exe')
 if ($LASTEXITCODE -ne 0 -or !$cmakePaths.Count) { throw 'Installed VS CMake is required.' }
@@ -55,6 +72,12 @@ try {
             $work = Join-Path $BuildDirectory ('qt-' + $owner + '-scenarios-' + [guid]::NewGuid().ToString('N'))
             & $python (Join-Path $repoRoot 'tests/native_host_http/check.py') (Join-Path $BuildDirectory "$Configuration/native_host_http_qt_owner.exe") (Join-Path $repoRoot 'tests/clipboard_payload_routing/fixtures') $work event-owner
             if ($LASTEXITCODE -ne 0) { throw "Transitional Qt HTTP $owner owner checks failed" }
+        }
+        [Environment]::SetEnvironmentVariable('NATIVE_HTTP_QT_WORKER', $null, 'Process')
+        foreach ($transport in @('native', 'legacy')) {
+            $work = Join-Path $BuildDirectory ('nvhttp-' + $transport + '-' + [guid]::NewGuid().ToString('N'))
+            & $python (Join-Path $repoRoot 'tests/native_host_http/check_nvhttp.py') (Join-Path $BuildDirectory "$Configuration/nvhttp_$transport.exe") (Join-Path $repoRoot 'tests/clipboard_payload_routing/fixtures') $work
+            if ($LASTEXITCODE -ne 0) { throw "Production NvHTTP $transport checks failed" }
         }
     }
 } finally {

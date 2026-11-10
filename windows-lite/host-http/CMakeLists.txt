@@ -26,6 +26,9 @@ set(USE_NGHTTP2 OFF)
 set(CURL_ZLIB OFF)
 set(CURL_BROTLI OFF)
 set(CURL_ZSTD OFF)
+# Match the worker's existing security flags, including all static curl
+# objects. Do not weaken the final link to accept missing EH metadata.
+add_compile_options(/utf-8 /Zi /guard:cf /guard:ehcont)
 add_subdirectory("${CURL_SOURCE_DIRECTORY}" curl)
 add_library(lite-native-host-http STATIC "${REPO_ROOT}/app/backend/nativehttptransport.cpp")
 target_compile_features(lite-native-host-http PUBLIC cxx_std_17)

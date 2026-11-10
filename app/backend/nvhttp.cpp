@@ -17,6 +17,11 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <memory>
+#include <QBuffer>
+#ifdef LITE_NATIVE_HTTP
+#include "qtnativehttptransport.h"
+#include "qtnativehttppolicy.h"
+#endif
 
 #define FAST_FAIL_TIMEOUT_MS 2000
 #define REQUEST_TIMEOUT_MS 5000
@@ -31,7 +36,11 @@
 #endif
 
 NvHTTP::NvHTTP(NvAddress address, uint16_t httpsPort, QSslCertificate serverCert, bool useTrueUid, QNetworkAccessManager* nam, QString uuid) :
+#ifdef LITE_NATIVE_HTTP
+    m_Nam(nam),
+#else
     m_Nam(nam ? nam : new QNetworkAccessManager(this)),
+#endif
     m_ServerCert(serverCert),
     m_UseTrueUid(useTrueUid),
     m_Uuid(uuid)
@@ -42,9 +51,11 @@ NvHTTP::NvHTTP(NvAddress address, uint16_t httpsPort, QSslCertificate serverCert
     setAddress(address);
     setHttpsPort(httpsPort);
 
+#ifndef LITE_NATIVE_HTTP
     // Never use a proxy server
     QNetworkProxy noProxy(QNetworkProxy::NoProxy);
     m_Nam->setProxy(noProxy);
+#endif
 }
 
 NvHTTP::NvHTTP(NvComputer* computer, QNetworkAccessManager* nam) :
@@ -518,14 +529,15 @@ NvHTTP::verifyResponseStatus(QString xml)
 QImage
 NvHTTP::getBoxArt(int appId)
 {
-    QNetworkReply* reply = openConnection(m_BaseUrlHttps,
+    auto reply = openConnection(m_BaseUrlHttps,
                                           "appasset",
                                           "appid="+QString::number(appId)+
                                           "&AssetType=2&AssetIdx=0",
                                           REQUEST_TIMEOUT_MS,
                                           NvLogLevel::NVLL_VERBOSE);
-    QImage image = QImageReader(reply).read();
-    delete reply;
+    QBuffer buffer(&reply.body);
+    buffer.open(QIODevice::ReadOnly);
+    QImage image = QImageReader(&buffer).read();
 
     return image;
 }
@@ -559,12 +571,14 @@ NvHTTP::getXmlString(QString xml,
     return QString();
 }
 
+#ifndef LITE_NATIVE_HTTP
 void NvHTTP::handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors)
 {
     if (PairedCertificate::canIgnoreErrors(m_ServerCert, errors)) {
         reply->ignoreSslErrors(errors);
     }
 }
+#endif
 
 QString
 NvHTTP::openConnectionToString(QUrl baseUrl,
@@ -573,21 +587,16 @@ NvHTTP::openConnectionToString(QUrl baseUrl,
                                int timeoutMs,
                                NvLogLevel logLevel)
 {
-    QNetworkReply* reply = openConnection(baseUrl, command, arguments, timeoutMs, logLevel);
-    QString ret;
-
-    QTextStream stream(reply);
-
+    auto response = openConnection(baseUrl, command, arguments, timeoutMs, logLevel);
+    QBuffer buffer(&response.body);
+    buffer.open(QIODevice::ReadOnly);
+    QTextStream stream(&buffer);
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     stream.setEncoding(QStringConverter::Utf8);
 #else
     stream.setCodec("UTF-8");
 #endif
-
-    ret = stream.readAll();
-    delete reply;
-
-    return ret;
+    return stream.readAll();
 }
 
 UsbForwarding::Capability NvHTTP::getUsbForwardingCapability()
@@ -595,18 +604,18 @@ UsbForwarding::Capability NvHTTP::getUsbForwardingCapability()
     if (m_ServerCert.isNull() || httpsPort() == 0) {
         throw GfeHttpResponseException(401, "USB forwarding requires a paired host");
     }
-    std::unique_ptr<QNetworkReply> reply(openConnection(m_BaseUrlHttps,
-        "api/v1/usb-forwarding", QString(), 5000, NVLL_NONE, 4096));
+    auto reply = openConnection(m_BaseUrlHttps,
+        "api/v1/usb-forwarding", QString(), 5000, NVLL_NONE, 4096);
     // A normally trusted certificate may not emit sslErrors at all. Require
     // the paired leaf certificate even on that path before accepting credentials.
-    if (!PairedCertificate::matches(m_ServerCert, reply->sslConfiguration().peerCertificate())) {
+    if (!reply.paired) {
         throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError,
                                       "USB forwarding host certificate mismatch");
     }
-    if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() != 200) {
+    if (reply.status != 200) {
         throw GfeHttpResponseException(400, "USB capability request failed");
     }
-    const auto capability = UsbForwarding::Capability::parse(reply->readAll());
+    const auto capability = UsbForwarding::Capability::parse(reply.body);
     if (!capability) throw GfeHttpResponseException(400, "Invalid USB capability response");
     return *capability;
 }
@@ -673,7 +682,7 @@ NvHTTP::sendAbrFeedback(double packetLoss,
                                       NvLogLevel::NVLL_ERROR);
 }
 
-QNetworkReply*
+NvHTTP::HttpResponse
 NvHTTP::openConnection(QUrl baseUrl,
                        QString command,
                        QString arguments,
@@ -705,6 +714,45 @@ NvHTTP::openConnection(QUrl baseUrl,
                  "&clientname=" + clientname +
                  (!arguments.isNull() ? ("&" + arguments) : ""));
 
+    return request(url, {}, false, false, timeoutMs, logLevel, maxResponseBytes);
+}
+
+NvHTTP::HttpResponse
+NvHTTP::request(QUrl url, QByteArray body, bool post, bool json,
+                int timeoutMs, NvLogLevel logLevel, qint64 maxResponseBytes)
+{
+#ifdef LITE_NATIVE_HTTP
+    NativeHttp::Request native;
+    native.url = url.toEncoded().toStdString();
+    native.method = post ? NativeHttp::Method::Post : NativeHttp::Method::Get;
+    if (json) native.contentType = "application/json";
+    native.body = body.toStdString();
+    native.timeoutMs = timeoutMs;
+    native.maxResponseBytes = static_cast<size_t>(maxResponseBytes);
+    native.allowUnpairedHttp = url.scheme() == QStringLiteral("http");
+    if (!native.allowUnpairedHttp) {
+        const auto pin = m_ServerCert.toDer();
+        native.pinnedCertificateDer.assign(pin.begin(), pin.end());
+        native.clientCertificatePem = IdentityManager::get()->getCertificate().toStdString();
+        native.clientPrivateKeyPem = IdentityManager::get()->getPrivateKey().toStdString();
+    }
+    if (logLevel >= NVLL_VERBOSE) {
+        qInfo() << "Executing native request:" << url.adjusted(QUrl::RemoveQuery | QUrl::RemoveUserInfo | QUrl::RemoveFragment).toString();
+    }
+    auto response = NativeHttp::performWithQtEvents(native);
+    if (response.error == NativeHttp::Error::ResponseTooLarge) {
+        throw GfeHttpResponseException(400, "USB capability response too large");
+    }
+    const auto error = NativeHttp::qtNetworkError(response);
+    if (error != QNetworkReply::NoError) {
+        throw QtNetworkReplyException(error, NativeHttp::qtErrorText(response));
+    }
+    if (response.httpStatus >= 300 && response.httpStatus < 400) {
+        throw GfeHttpResponseException(static_cast<int>(response.httpStatus), "Host API redirects are not allowed");
+    }
+    return {QByteArray(response.body.data(), static_cast<qsizetype>(response.body.size())),
+            static_cast<int>(response.httpStatus), response.certificateVerified};
+#else
     QNetworkRequest request(url);
 
     // Host-control endpoints must never forward credentials to another URL.
@@ -728,7 +776,8 @@ NvHTTP::openConnection(QUrl baseUrl,
 
     auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
     auto pinnedConnection = PairedCertificate::enforce(m_Nam, this, m_ServerCert);
-    QNetworkReply* reply = m_Nam->get(request);
+    if (json) request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QNetworkReply* reply = post ? m_Nam->post(request, body) : m_Nam->get(request);
 
     // Run the request with a timeout if requested
     QEventLoop loop;
@@ -784,7 +833,7 @@ NvHTTP::openConnection(QUrl baseUrl,
     if (reply->error() != QNetworkReply::NoError)
     {
         if (logLevel >= NvLogLevel::NVLL_ERROR) {
-            qWarning() << command << "request failed with error:" << reply->error();
+            qWarning() << "Host request failed with error:" << reply->error();
         }
 
         if (reply->error() == QNetworkReply::OperationCanceledError) {
@@ -803,7 +852,11 @@ NvHTTP::openConnection(QUrl baseUrl,
         delete reply;
         throw GfeHttpResponseException(httpStatus, "Host API redirects are not allowed");
     }
-    return reply;
+    HttpResponse response{reply->readAll(), httpStatus,
+        PairedCertificate::matches(m_ServerCert, reply->sslConfiguration().peerCertificate())};
+    delete reply;
+    return response;
+#endif
 }
 
 QJsonObject
@@ -814,9 +867,8 @@ NvHTTP::openJsonConnectionToObject(QUrl baseUrl,
                                    int timeoutMs,
                                    NvLogLevel logLevel)
 {
-    QNetworkReply* reply = openJsonConnection(baseUrl, command, body, post, timeoutMs, logLevel);
-    QByteArray response = reply->readAll();
-    delete reply;
+    const auto reply = openJsonConnection(baseUrl, command, body, post, timeoutMs, logLevel);
+    const auto& response = reply.body;
 
     QJsonParseError parseError;
     QJsonDocument document = QJsonDocument::fromJson(response, &parseError);
@@ -828,7 +880,7 @@ NvHTTP::openJsonConnectionToObject(QUrl baseUrl,
     return document.object();
 }
 
-QNetworkReply*
+NvHTTP::HttpResponse
 NvHTTP::openJsonConnection(QUrl baseUrl,
                            QString command,
                            QJsonObject body,
@@ -842,93 +894,6 @@ NvHTTP::openJsonConnection(QUrl baseUrl,
     QUrl url(baseUrl);
     url.setPath("/" + command);
 
-    QNetworkRequest request(url);
-    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                         QNetworkRequest::ManualRedirectPolicy);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    request.setSslConfiguration(IdentityManager::get()->getSslConfig());
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    // Disable HTTP/2 (GFE 3.22 doesn't like it) and Qt 6 enables it by default
-    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
-#endif
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 3, 0)
-    // Use fine-grained idle timeouts to avoid calling QNetworkAccessManager::clearAccessCache(),
-    // which tears down the NAM's global thread each time. We must not keep persistent connections
-    // or GFE will puke.
-    request.setAttribute(QNetworkRequest::ConnectionCacheExpiryTimeoutSecondsAttribute, 0);
-#endif
-
-    auto sslErrorsConnection = connect(m_Nam, &QNetworkAccessManager::sslErrors, this, &NvHTTP::handleSslErrors);
-    auto pinnedConnection = PairedCertificate::enforce(m_Nam, this, m_ServerCert);
-    QNetworkReply* reply = post ?
-                m_Nam->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact)) :
-                m_Nam->get(request);
-
-    QEventLoop loop;
-    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, &loop, &QEventLoop::quit);
-    if (timeoutMs) {
-        QTimer::singleShot(timeoutMs, &loop, &QEventLoop::quit);
-    }
-    if (logLevel >= NvLogLevel::NVLL_VERBOSE) {
-        qInfo() << "Executing JSON request:" << url.adjusted(QUrl::RemoveQuery | QUrl::RemoveUserInfo | QUrl::RemoveFragment).toString();
-    }
-    loop.exec(QEventLoop::ExcludeUserInputEvents);
-
-    if (!reply->isFinished())
-    {
-        if (logLevel >= NvLogLevel::NVLL_ERROR) {
-            qWarning() << "Aborting timed out JSON request for" << url.adjusted(QUrl::RemoveQuery | QUrl::RemoveUserInfo | QUrl::RemoveFragment).toString();
-        }
-        reply->abort();
-    }
-
-#if QT_VERSION < QT_VERSION_CHECK(6, 3, 0)
-    m_Nam->clearAccessCache();
-#endif
-    disconnect(sslErrorsConnection);
-    disconnect(pinnedConnection);
-    if (url.scheme() == QStringLiteral("https") &&
-        (reply->error() == QNetworkReply::NoError ||
-         !reply->sslConfiguration().peerCertificate().isNull()) &&
-        !PairedCertificate::matches(m_ServerCert, reply->sslConfiguration().peerCertificate())) {
-        delete reply;
-        throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError,
-                                      "Server certificate mismatch");
-    }
-
-    if (reply->error() != QNetworkReply::NoError)
-    {
-        if (logLevel >= NvLogLevel::NVLL_ERROR) {
-            qWarning() << command << "JSON request failed with error:" << reply->error();
-        }
-
-        if (reply->error() == QNetworkReply::OperationCanceledError) {
-            QtNetworkReplyException exception(QNetworkReply::TimeoutError, "Request timed out");
-            delete reply;
-            throw exception;
-        } else {
-            QtNetworkReplyException exception(reply->error(), reply->errorString());
-            delete reply;
-            throw exception;
-        }
-    }
-
-    int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    if (httpStatus >= 300 && httpStatus < 400) {
-        delete reply;
-        throw GfeHttpResponseException(httpStatus, "Host API redirects are not allowed");
-    }
-    if (httpStatus >= 400) {
-        QString errorText = QString::fromUtf8(reply->readAll());
-        if (logLevel >= NvLogLevel::NVLL_ERROR) {
-            qWarning() << command << "JSON request failed with HTTP status" << httpStatus << errorText;
-        }
-        delete reply;
-        throw GfeHttpResponseException(httpStatus, errorText);
-    }
-
-    return reply;
+    return request(url, QJsonDocument(body).toJson(QJsonDocument::Compact), post, true,
+                   timeoutMs, logLevel);
 }

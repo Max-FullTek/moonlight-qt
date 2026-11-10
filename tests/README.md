@@ -46,9 +46,11 @@ Windows Lite 原生库另有无 Qt 入口 `scripts/build-lite-native.ps1`（CI�
 
 ## 仅本地/手动
 
-`native_host_http` 直接链接生产 `nativehttptransport.*`，运行 `scripts/test-native-host-http.ps1`（另可传 `-Configuration Debug`）。脚本验证固定 curl 来源杂凑、构建并以不含 Qt 的 PATH 执行 Python loopback TLS fixture；覆盖完整凭证比对先于 HTTP、同公钥换证拒绝、记忆体 mTLS、禁止重新导向、代理绕过、期限和回應上限，并验证取消等待的唤醒、UTF-8 JSON、HTTP 错误 status／body、连续身分切换及未配对 HTTP 的明确开关。只复用公开测试金钥，不连接真实主机或操作用户配对资料。此模组也可透过原生核心的 `-CurlSourceDirectory` 选项构建，现有 Qt worker／portable 尚未切换。
+`native_host_http` 直接链接生产 `nativehttptransport.*`，运行 `scripts/test-native-host-http.ps1`（另可传 `-Configuration Debug`）。脚本验证固定 curl 来源杂凑、构建并以不含 Qt 的 PATH 执行 Python loopback TLS fixture；覆盖完整凭证比对先于 HTTP、同公钥换证拒绝、记忆体 mTLS、禁止重新导向、代理绕过、期限和回應上限，并验证取消等待的唤醒、UTF-8 JSON、HTTP 错误 status／body、连续身分切换及未配对 HTTP 的明确开关。只复用公开测试金钥，不连接真实主机或操作用户配对资料。此模组也可透过原生核心的 `-CurlSourceDirectory` 选项构建，Windows x64 portable 会启用此传输；其他旧建置仍可使用 Qt Network。
 
-脚本也以无 Qt 的 socket owner 测试事件入口：只依 socket／libcurl 单次期限驱动，不持续轮询；验证部分回應的取消／逾时、无限期限取消、主机名称解析及原有 TLS／HTTP 政策。加 `-QtDirectory build/tools/qt/6.12.0/msvc2022_64` 可额外构建 `native_host_http_qt_owner`，直接复用生产过渡接点 `qtnativehttptransport.*`，分别在主线程与测试拥有的工作线程确认等待中其他 Qt 计时事件继续执行、应用 `quit()` 中断无限期限请求，并拒绝隐藏的 stderr 警告。只有此额外测试的 PATH 加入 Qt；原生测试仍排除 Qt。过渡接点尚未用于现有 NvHTTP，不等同正式配对／串流关闭已验收。
+脚本也以无 Qt 的 socket owner 测试事件入口：只依 socket／libcurl 单次期限驱动，不持续轮询；验证部分回應的取消／逾时、无限期限取消、主机名称解析及原有 TLS／HTTP 政策。加 `-QtDirectory build/tools/qt/6.12.0/msvc2022_64` 可额外构建 `native_host_http_qt_owner`，直接复用生产过渡接点 `qtnativehttptransport.*`，分别在主线程与测试拥有的工作线程确认等待中其他 Qt 计时事件继续执行、应用 `quit()` 中断无限期限请求，并拒绝隐藏的 stderr 警告。只有此额外测试的 PATH 加入 Qt；原生测试仍排除 Qt。过渡接点已供 Windows Lite 的 NvHTTP 使用，仍不等同完整配对／真实串流关闭已验收。
+
+指定 QtDirectory 时也构建 `nvhttp_native`／`nvhttp_legacy`，共用生产 NvHTTP、IdentityManager、NvComputer 与 common-c；`check_nvhttp.py` 在唯一 INI 测试目录用公开 mTLS fixture 比较 serverinfo、JSON 位元率、结束工作阶段、launch／resume 查询与 RTSP 回應、box art、503／401、redirect、逾时／应用关闭、错误 JSON、pin 不符及仅远端 XML 401 允许的 HTTP recovery。正式封装脚本先执行这组测试，并把 curl 授权与来源／静态库杂凑纳入交付。无真实 host、旧 profile 或用户私钥参与；完整配对与真实游戏连线仍需后续验收。
 
 `vulkan_video_renderer` 与 `ffmpeg_video_decoder`（仅 CMake）默认不启动 GPU，验证生产链接／owner 生命周期、格式与视窗状态契约，以及通用 hwaccel 能力覆盖。显式 `vulkan_video_renderer.exe --probe` 使用实际 Vulkan 上传、呈现与图层，并建立通用 D3D11 context；`ffmpeg_video_decoder.exe <repo-root> --probe` 复用生产探测影格，分别验证 H.264／HEVC／AV1 的软件及硬体解码和 renderer 映射。两者的 PATH 均需固定 `libs/windows/lib/x64`，无 Qt；未读回最终呈现像素，不验收持续串流、HDR、全萤幕或延迟。探测不纳入默认 CTest。
 

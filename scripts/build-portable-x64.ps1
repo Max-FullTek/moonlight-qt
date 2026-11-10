@@ -60,9 +60,16 @@ $deploy = Join-Path $root 'portable'
 $artifacts = Join-Path $root 'artifacts'
 New-Item -ItemType Directory -Path $build, $deploy, $artifacts | Out-Null
 
+# Prepare and verify the shared production transport before linking NvHTTP.
+# Uses the pinned release archive, existing OpenSSL and isolated loopback tests.
+$nativeHttpBuild = Join-Path $root 'native-http'
+$qtDirectory = Split-Path $qtBins -Parent
+& (Join-Path $PSScriptRoot 'test-native-host-http.ps1') -BuildDirectory $nativeHttpBuild -QtDirectory $qtDirectory
+$env:LITE_NATIVE_HTTP_BUILD = $nativeHttpBuild
+
 Push-Location -LiteralPath $build
 try {
-    Invoke-Checked $qmake @((Join-Path $SourceRoot 'moonlight-qt.pro'))
+    Invoke-Checked $qmake @((Join-Path $SourceRoot 'moonlight-qt.pro'), 'CONFIG+=lite-native-http')
     Invoke-Checked 'nmake.exe' @('/NOLOGO', 'release')
 } finally { Pop-Location }
 
@@ -75,6 +82,7 @@ Copy-Item -LiteralPath (Join-Path $build 'AntiHooking/release/AntiHooking.dll') 
 Copy-Item -LiteralPath (Join-Path $build 'clipboard-helper/release/moonlight-clipboard-helper.exe') -Destination $deploy
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'app/SDL_GameControllerDB/gamecontrollerdb.txt') -Destination $deploy
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'LICENSE') -Destination $deploy
+Copy-Item -LiteralPath (Join-Path $SourceRoot 'build/curl-capability-source/curl-8.23.0/COPYING') -Destination (Join-Path $deploy 'CURL-COPYING.txt')
 
 # Bundle the matching Rust frontend; hashes cover both executables and notices.
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'build/gpui-package/moonlight-lite-gpui-prototype.exe') -Destination $deploy
@@ -105,6 +113,7 @@ $env:PATH = "$deploy;$env:PATH"
 # test platform, which windeployqt does not ship in the user-facing package.
 $env:QT_PLUGIN_PATH = "$deploy;$(& $qmake -query QT_INSTALL_PLUGINS)"
 $testResults = @()
+$testResults += @{ name = 'native-host-http-and-nvhttp'; result = 'passed-loopback-native-and-legacy' }
 $env:QT_QPA_PLATFORM = 'offscreen'
 $env:QT_QUICK_BACKEND = 'software'
 Invoke-Checked (Join-Path $qtBins 'qmltestrunner.exe') @(
@@ -145,6 +154,14 @@ $provenance = [ordered]@{
     runnerImage = if ($githubActions) { "$env:ImageOS/$env:ImageVersion" } else { 'local-windows-x64' }
     qt = @{ version = $qtVersion; qmakeSha256 = (Get-FileHash $qmake -Algorithm SHA256).Hash; origin = 'Qt official prebuilt SDK, installer hash verification enabled' }
     gpui = @{ version = '0.2.2'; rust = '1.99.1'; protocol = 1; qmlInWorker = $false }
+    hostHttp = @{
+        transport = 'libcurl'; version = '8.23.0'; tls = 'existing OpenSSL 3.6.5'
+        source = 'https://github.com/curl/curl/releases/download/curl-8_23_0/curl-8.23.0.zip'
+        sourceSha256 = (Get-FileHash (Join-Path $SourceRoot 'build/curl-8.23.0.zip') -Algorithm SHA256).Hash
+        transportLibrarySha256 = (Get-FileHash (Join-Path $nativeHttpBuild 'host-http/Release/lite-native-host-http.lib') -Algorithm SHA256).Hash
+        curlLibrarySha256 = (Get-FileHash (Join-Path $nativeHttpBuild 'host-http/curl/lib/Release/libcurl.lib') -Algorithm SHA256).Hash
+        owner = 'existing Qt dispatcher; no Qt Network HTTP requests'
+    }
     qtInstaller = @{ repository = 'jdpurcell/naqt'; commit = $env:NAQT_COMMIT }
     msvc = (Get-Item (Get-Command cl.exe).Source).VersionInfo.FileVersion
     windowsSDK = $env:WindowsSDKVersion

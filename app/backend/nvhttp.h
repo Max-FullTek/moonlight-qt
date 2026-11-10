@@ -117,6 +117,8 @@ public:
 
     // An injected manager is exclusive to sequential NvHTTP requests on its
     // owning thread. Changing the paired identity discards cached connections.
+    // LITE_NATIVE_HTTP retains this constructor contract for callers but does
+    // not use or modify the manager; each request owns a native connection.
     explicit NvHTTP(NvAddress address, uint16_t httpsPort, QSslCertificate serverCert, bool useTrueUid = false, QNetworkAccessManager* nam = nullptr, QString uuid = "");
 
     explicit NvHTTP(NvComputer* computer, QNetworkAccessManager* nam = nullptr);
@@ -221,10 +223,19 @@ public:
     QUrl m_BaseUrlHttp;
     QUrl m_BaseUrlHttps;
 private:
+    struct HttpResponse {
+        QByteArray body;
+        int status;
+        bool paired;
+    };
+    HttpResponse request(QUrl url, QByteArray body, bool post, bool json,
+                         int timeoutMs, NvLogLevel logLevel, qint64 maxResponseBytes = 0);
+#ifndef LITE_NATIVE_HTTP
     void
     handleSslErrors(QNetworkReply* reply, const QList<QSslError>& errors);
+#endif
 
-    QNetworkReply*
+    HttpResponse
     openConnection(QUrl baseUrl,
                    QString command,
                    QString arguments,
@@ -232,7 +243,7 @@ private:
                    NvLogLevel logLevel,
                    qint64 maxResponseBytes = 0);
 
-    QNetworkReply*
+    HttpResponse
     openJsonConnection(QUrl baseUrl,
                        QString command,
                        QJsonObject body,

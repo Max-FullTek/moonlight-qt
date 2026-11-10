@@ -12,6 +12,23 @@ unix:!macx {
 
 include(../globaldefs.pri)
 
+# Transitional Windows Lite owner: native HTTP, existing Qt event dispatcher.
+# The build entry prepares verified static libraries; never fetch from qmake.
+lite-native-http {
+    !win32|!contains(QT_ARCH, x86_64): error("Native host HTTP requires Windows x64")
+    NATIVE_HTTP_BUILD = $$(LITE_NATIVE_HTTP_BUILD)
+    isEmpty(NATIVE_HTTP_BUILD): error("Set LITE_NATIVE_HTTP_BUILD to the prepared native HTTP build")
+    DEFINES += LITE_NATIVE_HTTP
+    SOURCES += backend/qtnativehttptransport.cpp
+    HEADERS += backend/nativehttptransport.h backend/qtnativehttptransport.h backend/qtnativehttppolicy.h
+    INCLUDEPATH += $$PWD/../build/curl-capability-source/curl-8.23.0/include
+    CONFIG(release, debug|release): NATIVE_HTTP_CONFIG = Release
+    else: NATIVE_HTTP_CONFIG = Debug
+    NATIVE_HTTP_LIB = $$NATIVE_HTTP_BUILD/host-http/$$NATIVE_HTTP_CONFIG/lite-native-host-http.lib
+    CURL_LIB = $$NATIVE_HTTP_BUILD/host-http/curl/lib/$$NATIVE_HTTP_CONFIG/libcurl.lib
+    LIBS += $$quote($$NATIVE_HTTP_LIB) $$quote($$CURL_LIB) wldap32.lib bcrypt.lib crypt32.lib iphlpapi.lib
+}
+
 win32 {
     VERSION_PYTHON = python
 } else {
