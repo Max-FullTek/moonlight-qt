@@ -27,13 +27,14 @@ def main(executable, generator, reference, qt_bin, work):
     report = work / "parser-comparison.json"
     parsers.main(str(Path(executable).resolve()), str(Path(reference).resolve()), str(report), str(Path(qt_bin).resolve()))
     findings = json.loads(report.read_text(encoding="utf-8"))
-    # Expected differences are measured capability findings, not approved policy.
+    # These standard-parser differences have SA approval. Keep the comparison
+    # as a regression check; only displays is integrated in the product so far.
     expected = {("xml", "internal-entity"), ("xml", "external-entity"), ("xml", "invalid-utf8"),
                 ("json", "unsigned-integer"), ("json", "bad-escape"), ("json", "unpaired-surrogate"),
                 ("json", "candidate-depth-limit")}
     actual = {(item["kind"], item["case"]) for item in findings["differences"]}
     assert actual == expected, findings
-    print("Rust transport scenarios passed; parser differences recorded for SA. Production unchanged.")
+    print("Shared production Rust transport passed; approved parser differences retained. No real host used.")
 
 
 if __name__ == "__main__":

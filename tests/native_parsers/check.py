@@ -85,7 +85,7 @@ def main(native, reference, output, qt_bin):
     # The reference may accept an unpaired UTF-16 surrogate. Keep it escaped
     # rather than attempting to encode that invalid scalar as UTF-8.
     Path(output).write_text(json.dumps({"cases": len(entries), "differences": findings}, ensure_ascii=True, indent=2), encoding="utf-8")
-    print(f"Capability comparison: {len(entries)} cases, {len(findings)} differences; production parsers unchanged.")
+    print(f"Capability comparison: {len(entries)} cases, {len(findings)} differences; this command does not switch product parsers.")
     # Differences are evidence for SA; this is not a production acceptance pass.
 
 

@@ -1,12 +1,14 @@
 //! Protocol 1 uses inherited anonymous pipes, never a listening network socket.
 //! The matching Moonlight.exe must be beside this frontend. Its core flag skips
-//! QML and uses an independent profile. Network/pairing/SDL stay in C++.
+//! QML and uses an independent profile. Display HTTP is Rust-owned; the current
+//! profile, other host APIs, pairing and SDL remain in C++ during migration.
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Write},
     process::{Command, Stdio},
     sync::mpsc,
+    sync::atomic::{AtomicU32, Ordering},
     thread,
     time::{Duration, Instant},
 };
@@ -38,11 +40,7 @@ impl Host {
             .map(|app| app.id)
     }
 }
-#[derive(Clone, Debug, Deserialize)]
-pub struct HostDisplay {
-    pub name: String,
-    pub target: String,
-}
+pub type HostDisplay = moonlight_host_api::Display;
 #[derive(Debug, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
@@ -55,6 +53,13 @@ pub enum Event {
     Displays {
         host: String,
         displays: Vec<HostDisplay>,
+        #[serde(default)]
+        request_id: Option<u32>,
+    },
+    HostApiContext {
+        host: String,
+        request_id: u32,
+        context: moonlight_host_api::HostContext,
     },
     Pairing {
         host: String,
@@ -96,6 +101,8 @@ pub struct Client {
     child_pid: u32,
     commands: Option<mpsc::Sender<Value>>,
     events: mpsc::Receiver<Event>,
+    api: super::host_api::Client,
+    next_api_request: AtomicU32,
 }
 impl Client {
     pub fn process_id(&self) -> u32 { self.child_pid }
@@ -104,14 +111,14 @@ impl Client {
             .parent()
             .unwrap()
             .join("Moonlight.exe");
-        anyhow::ensure!(
-            exe.is_file(),
-            "請使用整合封裝：同一資料夾內需要 Moonlight.exe 核心。"
-        );
         let profile = super::settings::preferences_path()
             .parent()
             .unwrap()
             .join("core");
+        Self::spawn_at(exe, profile)
+    }
+    fn spawn_at(exe: std::path::PathBuf, profile: std::path::PathBuf) -> anyhow::Result<Self> {
+        anyhow::ensure!(exe.is_file(), "請使用整合封裝：同一資料夾內需要 Moonlight.exe 核心。");
         std::fs::create_dir_all(&profile)?;
         let log = std::fs::File::create(profile.join("core-stderr.log"))?;
         let mut command = Command::new(exe);
@@ -126,12 +133,13 @@ impl Client {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000); // CREATE_NO_WINDOW, SDL still creates its stream window.
         }
+        let (tx, rx) = mpsc::channel();
+        let (events_tx, events) = mpsc::channel();
+        let api = super::host_api::Client::spawn(events_tx.clone())?;
         let mut child = command.spawn()?;
         let child_pid = child.id();
         let mut stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
-        let (tx, rx) = mpsc::channel();
-        let (events_tx, events) = mpsc::channel();
         let writer_errors = events_tx.clone();
         thread::spawn(move || {
             while let Ok(value) = rx.recv() {
@@ -162,6 +170,7 @@ impl Client {
                 }
             }
         });
+        let reader_api = api.clone();
         thread::spawn(move || {
             let mut ready = false;
             for line in BufReader::new(stdout).lines() {
@@ -179,6 +188,9 @@ impl Client {
                     }
                 }
                 match event {
+                    Some(Event::HostApiContext {host, request_id, context}) if ready => {
+                        reader_api.context(host, request_id, context);
+                    }
                     Some(Event::Ready { qml_loaded: false }) if !ready => {
                         ready = true;
                         if events_tx.send(Event::Ready { qml_loaded: false }).is_err() {
@@ -199,6 +211,7 @@ impl Client {
                     }
                 }
             }
+            reader_api.stop();
             let _ = events_tx.send(Event::Error {
                 code: "core_exited".into(),
                 message: "核心程序已結束；請重新開啟 GPUI。".into(),
@@ -208,9 +221,21 @@ impl Client {
             child_pid,
             commands: Some(tx),
             events,
+            api,
+            next_api_request: AtomicU32::new(1),
         })
     }
     pub fn send(&self, request: Value) -> anyhow::Result<()> {
+        if request["command"] == "displays" {
+            let host = request["host"].as_str().ok_or_else(|| anyhow::anyhow!("缺少主機識別碼"))?;
+            let request_id = self.next_api_request.try_update(Ordering::Relaxed, Ordering::Relaxed,
+                |id| id.checked_add(1).filter(|next| *next <= i32::MAX as u32))
+                .map_err(|_| anyhow::anyhow!("請重新啟動主機控制服務"))?;
+            self.api.begin(host.to_owned(), request_id)?;
+            self.commands.as_ref().ok_or_else(|| anyhow::anyhow!("核心未啟動"))?
+                .send(json!({"command":"host_api_context", "host":host, "request_id":request_id}))?;
+            return Ok(());
+        }
         if request["command"] == "controls" && request["action"] == "resume" {
             // Let our existing worker restore its SDL window after local input.
             #[cfg(windows)]
@@ -225,7 +250,9 @@ impl Client {
         Ok(())
     }
     pub fn drain(&self) -> Vec<Event> {
-        self.events.try_iter().collect()
+        let latest = self.next_api_request.load(Ordering::Relaxed) - 1;
+        self.events.try_iter().filter(|event| !matches!(event,
+            Event::Displays {request_id: Some(id), ..} if *id != latest)).collect()
     }
 }
 #[cfg(windows)]
@@ -235,6 +262,7 @@ unsafe extern "system" {
 }
 impl Drop for Client {
     fn drop(&mut self) {
+        self.api.stop();
         if let Some(tx) = self.commands.take() {
             let _ = tx.send(json!({"command":"shutdown"}));
         }
@@ -257,6 +285,63 @@ pub fn stream_settings(s: &super::settings::Settings) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn display_requests_use_rust_and_discard_already_queued_old_results() {
+        let (commands, incoming) = mpsc::channel();
+        let (events_tx, events) = mpsc::channel();
+        let api = super::super::host_api::Client::spawn(events_tx.clone()).unwrap();
+        let client = Client {child_pid:0, commands:Some(commands), events, api, next_api_request:AtomicU32::new(1)};
+        client.send(json!({"command":"displays","host":"same"})).unwrap();
+        assert_eq!(incoming.recv().unwrap(), json!({"command":"host_api_context","host":"same","request_id":1}));
+        events_tx.send(Event::Displays {host:"same".into(), displays:Vec::new(), request_id:Some(1)}).unwrap();
+        client.send(json!({"command":"displays","host":"same"})).unwrap();
+        assert_eq!(incoming.recv().unwrap()["request_id"], 2);
+        events_tx.send(Event::Displays {host:"same".into(), displays:Vec::new(), request_id:Some(2)}).unwrap();
+        let results = client.drain();
+        assert_eq!(results.len(), 1);
+        assert!(matches!(results[0], Event::Displays {request_id:Some(2), ..}));
+    }
+    #[test]
+    #[ignore = "requires isolated loopback host and a real worker; run check_bridge.py"]
+    fn rust_displays_through_real_worker_context() -> anyhow::Result<()> {
+        let client = Client::spawn_at(std::env::var("RUST_HOST_API_WORKER")?.into(),
+            std::env::var("RUST_HOST_API_PROFILE")?.into())?;
+        let outcome = (|| -> anyhow::Result<()> {
+            let deadline = Instant::now() + Duration::from_secs(15);
+            loop {
+                anyhow::ensure!(Instant::now() < deadline, "Host did not become ready");
+                if client.drain().iter().any(|event| matches!(event, Event::Hosts {hosts} if hosts.iter().any(|host|
+                    host.id == "rust-display-host" && host.online && host.paired))) { break; }
+                thread::sleep(Duration::from_millis(20));
+            }
+            client.send(json!({"command":"displays", "host":"rust-display-host"}))?;
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                anyhow::ensure!(Instant::now() < deadline, "Rust displays did not complete");
+                for event in client.drain() {
+                    if let Event::Displays {host, displays, ..} = event {
+                        anyhow::ensure!(host == "rust-display-host" && displays.len() == 2, "Incorrect display result");
+                        anyhow::ensure!(displays[0].name == "家中螢幕 🎮" && displays[0].target == "screen-1"
+                            && displays[1].name == "Display 2" && displays[1].target == "Display 2", "Display mapping changed");
+                        return Ok(());
+                    }
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+        })();
+        let _ = client.send(json!({"command":"shutdown"}));
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut exited = false;
+        while Instant::now() < deadline {
+            if client.drain().iter().any(|event| matches!(event, Event::Error {code, ..} if code == "core_exited")) {
+                exited = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        anyhow::ensure!(exited, "Worker did not shut down");
+        outcome
+    }
     #[test]
     fn reject_unknown_protocol_and_non_json() {
         assert!(decode("{\"event\":\"ready\",\"qml_loaded\":false,\"protocol\":2}").is_err());

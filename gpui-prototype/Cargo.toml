@@ -6,6 +6,8 @@ publish = false
 license = "GPL-3.0-only"
 
 [dependencies]
+moonlight-host-api = { path = "../windows-lite/host-api" }
+tokio = { version = "1", features = ["rt", "sync"] }
 gpui = { version = "=0.2.2", default-features = false, features = ["windows-manifest"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

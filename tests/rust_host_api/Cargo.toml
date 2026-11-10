@@ -7,7 +7,7 @@ license = "GPL-3.0-only"
 
 # Capability probe only; deliberately not a dependency of the GPUI frontend.
 [dependencies]
-reqwest = { version = "=0.13.5", default-features = false, features = ["rustls-no-provider"] }
+moonlight-host-api = { path = "../../windows-lite/host-api" }
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pemfile = "=2.2.0"
 quick-xml = "=0.42.0"

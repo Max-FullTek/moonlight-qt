@@ -62,6 +62,10 @@ def check(executable, profile, eof=False, seeded=False):
                 event("host_renamed")
                 send('{"command":"list"}')
                 assert event("hosts")["hosts"][0]["name"] == "測試 Host 😀"
+                send('{"command":"host_api_context","host":"ci-offline-host","request_id":0}')
+                assert event("error")["code"] == "invalid_context_request"
+                send('{"command":"host_api_context","host":"ci-offline-host","request_id":1}')
+                assert event("error")["code"] == "not_ready"
                 for command in ("quit", "displays", "start"):
                     send(json.dumps({"command": command, "host": "ci-offline-host"}))
                     assert event("error")["code"] == "not_ready"
@@ -89,6 +93,7 @@ def check(executable, profile, eof=False, seeded=False):
                     ('{"command":"remove","host":"missing"}', 'host_not_found'),
                     ('{"command":"quit","host":"missing"}', 'host_not_found'),
                     ('{"command":"displays","host":"missing"}', 'host_not_found'),
+                    ('{"command":"host_api_context","host":"missing","request_id":1}', 'host_not_found'),
                     ('x' * (64 * 1024 + 1), 'request_too_large'),
                 ]:
                     send(request)

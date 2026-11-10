@@ -1,4 +1,4 @@
-//! Independent capability candidate. No user profile, GPUI, IPC or native worker.
+//! Host-control HTTP/TLS. The caller owns storage, runtime and cancellation.
 use rustls::{
     DigitallySignedStruct, SignatureScheme,
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},

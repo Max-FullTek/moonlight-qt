@@ -1,5 +1,5 @@
 mod parsers;
-mod transport;
+use moonlight_host_api::transport;
 use std::{
     io::{self, BufRead},
     path::Path,

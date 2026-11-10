@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod advanced;
 mod core;
+mod host_api;
 mod controls;
 mod radial;
 mod stream_window;
@@ -454,6 +455,7 @@ impl Prototype {
         let had_modal = self.modal.is_some();
         for event in events {
             match event {
+                core::Event::HostApiContext { .. } => unreachable!("context belongs to the host API owner"),
                 core::Event::HostRenamed => {
                     self.pending = false;
                     self.modal = None;
@@ -474,7 +476,7 @@ impl Prototype {
                     self.modal = None;
                     self.notice = "主機程式已結束。".into();
                 }
-                core::Event::Displays { host, displays } => {
+                core::Event::Displays { host, displays, .. } => {
                     self.pending = false;
                     if Some(&host) == self.selected.as_ref() {
                         self.host_displays = displays;

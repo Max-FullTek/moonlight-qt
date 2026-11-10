@@ -471,6 +471,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "moonlight-host-api"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "rustls",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -582,8 +595,8 @@ dependencies = [
 name = "rust-host-api-probe"
 version = "0.1.0"
 dependencies = [
+ "moonlight-host-api",
  "quick-xml",
- "reqwest",
  "rustls",
  "rustls-pemfile",
  "serde_json",
@@ -742,6 +755,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]

@@ -23,6 +23,8 @@ try {
     if ($Configuration -eq 'Release') { $profileArgs = @('--release'); $profile = 'release' }
     & cargo +1.99.1 test --locked --manifest-path $manifest @profileArgs
     if ($LASTEXITCODE -ne 0) { throw 'Rust API probe unit checks failed' }
+    & cargo +1.99.1 test --locked --manifest-path $manifest -p moonlight-host-api @profileArgs
+    if ($LASTEXITCODE -ne 0) { throw 'Production Rust API unit checks failed' }
     & cargo +1.99.1 build --locked --manifest-path $manifest @profileArgs
     if ($LASTEXITCODE -ne 0) { throw 'Rust API probe build failed' }
     $python = (Get-Command python.exe -ErrorAction Stop).Source

@@ -86,8 +86,8 @@ fn xml(body: &[u8]) -> Result<Value, ()> {
                     &quick_xml::escape::unescape(&reference).map_err(|_| ())?,
                 );
             }
-            // Candidate only: no entity resolver, files or network access.
-            // Product DTD/invalid-input policy still requires SA confirmation.
+            // Approved standard-input policy: no DTD/entity resolver, files
+            // or network access. This executable remains a comparison probe.
             Event::DocType(_) | Event::CData(_) | Event::GeneralRef(_) => return Err(()),
             Event::Eof => break,
             _ => {}

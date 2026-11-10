@@ -9,6 +9,8 @@
 #include "settings/streamingpreferences.h"
 
 #include <QCoreApplication>
+#include <QHostInfo>
+#include <QUuid>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
@@ -300,10 +302,37 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         m_Manager->addNewHostManually(address);
         return;
     }
-    if (name != "pair" && name != "start" && name != "app_preferences" && name != "displays" &&
+    if (name != "pair" && name != "start" && name != "app_preferences" && name != "displays" && name != "host_api_context" &&
             name != "rename" && name != "remove" && name != "quit") { fail("unknown_command", tr("Unknown command.")); return; }
     auto* host = findHost(request.value("host").toString());
     if (!host) { fail("host_not_found", tr("Host not found.")); return; }
+    if (name == "host_api_context") {
+        if (!integer(request, "request_id", 1, 2147483647)) {
+            fail("invalid_context_request", tr("Invalid host API request identifier.")); return;
+        }
+        QReadLocker lock(&host->lock);
+        if (host->pairState != NvComputer::PS_PAIRED || host->state != NvComputer::CS_ONLINE ||
+                host->serverCert.isNull() || host->activeHttpsPort == 0) {
+            fail("not_ready", tr("Host must be online and paired.")); return;
+        }
+        QUrl base;
+        base.setScheme("https");
+        base.setHost(host->activeAddress.address());
+        base.setPort(host->activeHttpsPort);
+        auto clientName = NvComputer::getPairname(host->uuid);
+        if (clientName.isEmpty()) clientName = QHostInfo::localHostName();
+        // Temporary read-only profile adapter, only on inherited anonymous
+        // stdout. Never log or persist it. Remove with Rust profile ownership.
+        send({{"event", "host_api_context"}, {"host", host->uuid},
+              {"request_id", request["request_id"]},
+              {"context", QJsonObject{{"base_url", base.toString()},
+                  {"server_certificate", QString::fromLatin1(host->serverCert.toPem())},
+                  {"client_certificate", QString::fromLatin1(IdentityManager::get()->getCertificate())},
+                  {"client_key", QString::fromLatin1(IdentityManager::get()->getPrivateKey())},
+                  {"unique_id", host->isNvidiaServerSoftware ? QStringLiteral("0123456789ABCDEF") : IdentityManager::get()->getUniqueId()},
+                  {"client_name", clientName}, {"nonce", QString::fromLatin1(QUuid::createUuid().toRfc4122().toHex())}}}});
+        return;
+    }
     if (name == "rename") {
         const auto label = request["name"].toString().trimmed();
         if (label.isEmpty() || label.size() > 128 || label.contains(QRegularExpression("[\\x00-\\x1f\\x7f]"))) {
