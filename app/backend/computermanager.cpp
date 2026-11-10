@@ -11,6 +11,7 @@
 #include <QThreadPool>
 #include <QCoreApplication>
 #include <QRandomGenerator>
+#include <memory>
 
 #define SER_HOSTS "hosts"
 #define SER_HOSTS_BACKUP "hostsbackup"
@@ -826,6 +827,22 @@ private:
             return QString();
         }
     }
+    std::unique_ptr<NvComputer> fetchComputer(NvHTTP& http)
+    {
+        if (!NvHTTP::usesRustSessionApi()) {
+            const auto xml = fetchServerInfo(http);
+            return xml.isEmpty() ? nullptr : std::make_unique<NvComputer>(http, xml);
+        }
+        if (m_AboutToQuit) return nullptr;
+        // Rust owns the request, parsing and cancellable 503 retry wait.
+        try {
+            return std::make_unique<NvComputer>(http, http.hostInformation());
+        }
+        catch (...) {
+            if (!m_Mdns) emit computerAddCompleted(false, false);
+            return nullptr;
+        }
+    }
 
     void run()
     {
@@ -846,18 +863,18 @@ private:
         }
 
         // Perform initial serverinfo fetch over HTTP since we don't know which cert to use
-        QString serverInfo = fetchServerInfo(http);
-        if (serverInfo.isEmpty() && !m_MdnsIpv6Address.isNull()) {
+        auto discovered = fetchComputer(http);
+        if (!discovered && !m_MdnsIpv6Address.isNull()) {
             // Retry using the global IPv6 address if the IPv4 or link-local IPv6 address fails
             http.setAddress(m_MdnsIpv6Address);
-            serverInfo = fetchServerInfo(http);
+            discovered = fetchComputer(http);
         }
-        if (serverInfo.isEmpty()) {
+        if (!discovered) {
             return;
         }
 
         // Create initial newComputer using HTTP serverinfo with no pinned cert
-        NvComputer* newComputer = new NvComputer(http, serverInfo);
+        NvComputer* newComputer = discovered.get();
         http.setTrueUid(!newComputer->isNvidiaServerSoftware);
         http.setHostUuid(newComputer->uuid);
 
@@ -874,14 +891,13 @@ private:
         // Fetch serverinfo again over HTTPS with the pinned cert
         if (existingComputer != nullptr) {
             Q_ASSERT(http.httpsPort() != 0);
-            serverInfo = fetchServerInfo(http);
-            if (serverInfo.isEmpty()) {
+            auto authenticated = fetchComputer(http);
+            if (!authenticated) {
                 return;
             }
 
             // Update the polled computer with the HTTPS information
-            NvComputer httpsComputer(http, serverInfo);
-            newComputer->update(httpsComputer);
+            newComputer->update(*authenticated);
         }
 
         // Update addresses depending on the context
@@ -930,7 +946,7 @@ private:
             if (existingComputer != nullptr) {
                 // Fold it into the existing PC
                 bool changed = existingComputer->update(*newComputer);
-                delete newComputer;
+                discovered.reset();
 
                 // Drop the lock before notifying
                 m_ComputerManager->m_Lock.unlock();
@@ -949,6 +965,7 @@ private:
             else {
                 // Store this in our active sets
                 m_ComputerManager->m_KnownHosts[newComputer->uuid] = newComputer;
+                discovered.release(); // Ownership passes to the host map.
 
                 // Start polling if enabled (write lock required)
                 m_ComputerManager->startPollingComputer(newComputer);

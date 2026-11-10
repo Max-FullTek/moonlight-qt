@@ -352,7 +352,7 @@ void GpuiCoreBridge::applyMonitorUpdate(const QJsonObject& request) {
         if (info["uuid"].toString()!=uuid || !current["addresses"].toArray().contains(update["address"])) return;
         for (const auto* field:{"name","uuid","local_ip","external_ip","app_version","gfe_version","gpu"}) if (!info[field].isString()) return;
         for (const auto* field:{"codec_support","max_luma_hevc","current_app"}) if (!integer(info,field,INT_MIN,INT_MAX)) return;
-        if (!integer(info,"https_port",1,65535) || !integer(info,"external_port",1,65535) ||
+        if (!integer(info,"https_port",1,65535) || !integer(info,"external_port",1,65535) || !integer(info,"local_port",0,65535) ||
                 !info["paired"].isBool() || !info["nvidia"].isBool() || !info["mac"].isArray() || !info["display_modes"].isArray()) return;
         NvComputer state;
         { QReadLocker lock(&host->lock); state=*host; }
@@ -362,7 +362,7 @@ void GpuiCoreBridge::applyMonitorUpdate(const QJsonObject& request) {
             if (!byte.isDouble() || byte.toInt(-1)<0 || byte.toInt(-1)>255 || byte.toDouble()!=byte.toInt()) return;
             state.macAddress.append(char(byte.toInt()));
         }
-        state.localAddress=NvAddress(info["local_ip"].toString(),address.port());
+        state.localAddress=info["local_port"].toInt()==0?NvAddress():NvAddress(info["local_ip"].toString(),uint16_t(info["local_port"].toInt()));
         state.externalPort=info["external_port"].toInt();
         state.remoteAddress=NvAddress(info["external_ip"].toString(),state.externalPort);
         state.activeAddress=NvAddress(address.host(),address.port());

@@ -13,6 +13,7 @@
 #include <thread>
 #include <iostream>
 #include <future>
+#include <memory>
 
 static QByteArray read(const QString& path)
 {
@@ -97,7 +98,23 @@ int main(int argc, char** argv)
         try {
             if (mode.startsWith("session-")) {
                 const auto input=QJsonDocument::fromJson(read(qEnvironmentVariable("SESSION_FIXTURE_INPUT"))).object();
-                if (mode=="session-parallel") {
+                if (mode=="session-host") {
+                    if (input["unpaired"].toBool()) {http.setServerCert(QSslCertificate());http.setHttpsPort(0);}
+                    std::unique_ptr<NvComputer> computer;
+                    if (NvHTTP::usesRustSessionApi()) computer=std::make_unique<NvComputer>(http,http.hostInformation());
+                    else computer=std::make_unique<NvComputer>(http,http.getServerInfo(NvHTTP::NVLL_NONE));
+                    QJsonArray modes;
+                    for (const auto& mode:computer->displayModes) modes.append(QJsonObject{{"width",mode.width},{"height",mode.height},{"fps",mode.refreshRate}});
+                    details={{"name",computer->name},{"uuid",computer->uuid},{"mac",QString::fromLatin1(computer->macAddress.toHex())},
+                        {"local",computer->localAddress.address()},{"local_port",computer->localAddress.port()},
+                        {"remote",computer->remoteAddress.address()},{"remote_port",computer->remoteAddress.port()},
+                        {"active",computer->activeAddress.address()},{"https_port",computer->activeHttpsPort},
+                        {"codec",computer->serverCodecModeSupport},{"max_luma",computer->maxLumaPixelsHEVC},{"modes",modes},
+                        {"paired",computer->pairState==NvComputer::PS_PAIRED},{"current",computer->currentGameId},
+                        {"version",computer->appVersion},{"gfe",computer->gfeVersion},{"gpu",computer->gpuModel},
+                        {"nvidia",computer->isNvidiaServerSoftware},{"supported",computer->isSupportedServerVersion},
+                        {"has_pin",!computer->serverCert.isNull()}};
+                } else if (mode=="session-parallel") {
                     // Two concurrent C++ callers; each creates its own QObject
                     // on its thread, while the one private pipe multiplexes both.
                     const auto address= http.address(); const auto port=http.httpsPort(); const auto certificate=http.serverCert();
@@ -160,7 +177,7 @@ int main(int argc, char** argv)
                     if (!externalPort) externalPort=http.httpPort();
                     details={{"ok",true},{"value",QJsonObject{{"name",computer.name},{"uuid",computer.uuid},{"mac",mac},
                         {"codec_support",computer.serverCodecModeSupport},{"max_luma_hevc",computer.maxLumaPixelsHEVC},{"display_modes",modes},
-                        {"local_ip",computer.localAddress.address()},{"external_ip",computer.remoteAddress.address()},
+                        {"local_ip",computer.localAddress.address()},{"local_port",computer.localAddress.port()},{"external_ip",computer.remoteAddress.address()},
                         {"https_port",computer.activeHttpsPort},{"external_port",externalPort},{"nvidia",computer.isNvidiaServerSoftware},
                         {"paired",computer.pairState==NvComputer::PS_PAIRED},{"current_app",computer.currentGameId},
                         {"app_version",computer.appVersion},{"gfe_version",computer.gfeVersion},{"gpu",computer.gpuModel}}}};

@@ -321,6 +321,55 @@ pub fn stream_settings(s: &super::settings::Settings) -> Value {
 mod tests {
     use super::*;
     #[test]
+    #[ignore = "requires isolated add fixture and real worker; run check_add.py"]
+    fn rust_add_through_real_worker() -> anyhow::Result<()> {
+        let client=Client::spawn_at(std::env::var("RUST_HOST_API_WORKER")?.into(),std::env::var("RUST_HOST_API_PROFILE")?.into())?;
+        let mode=std::env::var("RUST_ADD_MODE")?;
+        let mut queued=std::collections::VecDeque::new();
+        let mut wait=|predicate:&dyn Fn(&Event)->bool|->anyhow::Result<Event> {
+            let deadline=Instant::now()+Duration::from_secs(20);
+            while Instant::now()<deadline {
+                queued.extend(client.drain());
+                while let Some(event)=queued.pop_front() {
+                    anyhow::ensure!(!matches!(event,Event::SessionApi {..}),"Private API request reached UI");
+                    if predicate(&event) {return Ok(event);}
+                    if let Event::Error {code,..}=event {anyhow::bail!("Unexpected worker error: {code}");}
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            anyhow::bail!("Expected add result did not arrive")
+        };
+        let result=(||->anyhow::Result<()> {
+            wait(&|event|matches!(event,Event::Ready {..}))?;
+            client.send(json!({"command":"add","address":std::env::var("RUST_ADD_ADDRESS")?}))?;
+            if mode=="cancel" {
+                thread::sleep(Duration::from_millis(500));return Ok(());
+            }
+            client.send(json!({"command":"rename","host":"rust-add-host","name":"must-not-apply"}))?;
+            wait(&|event|matches!(event,Event::Error {code,..} if code=="busy"))?;
+            if mode=="bad-pin" || mode=="fail" {
+                wait(&|event|matches!(event,Event::Error {code,..} if code=="add_failed"))?;
+                client.send(json!({"command":"rename","host":"rust-add-host","name":"my-custom-name"}))?;
+                if mode=="bad-pin" {wait(&|event|matches!(event,Event::HostRenamed))?;}
+                else {wait(&|event|matches!(event,Event::Error {code,..} if code=="host_not_found"))?;}
+            } else {
+                wait(&|event|matches!(event,Event::Added))?;
+                client.send(json!({"command":"list"}))?;
+                let event=wait(&|event|matches!(event,Event::Hosts {hosts} if hosts.len()==1 && hosts[0].online))?;
+                if let Event::Hosts {hosts}=event {
+                    let host=&hosts[0];
+                    anyhow::ensure!(host.id=="rust-add-host","Wrong host identity");
+                    if mode=="existing" {anyhow::ensure!(host.name=="my-custom-name" && host.paired && host.apps[0].hidden,"Merge lost existing preferences or pin");}
+                    else {anyhow::ensure!(host.name=="新增主機 🎮" && !host.paired,"New host metadata changed");}
+                }
+            }
+            Ok(())
+        })();
+        client.send(json!({"command":"shutdown"}))?;
+        wait(&|event|matches!(event,Event::Error {code,..} if code=="core_exited"))?;
+        result
+    }
+    #[test]
     #[ignore = "requires isolated loopback host and a real worker; run check_bridge.py with quit"]
     fn rust_quit_through_real_worker_context() -> anyhow::Result<()> {
         let client = Client::spawn_at(std::env::var("RUST_HOST_API_WORKER")?.into(),

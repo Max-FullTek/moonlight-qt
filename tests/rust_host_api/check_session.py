@@ -14,7 +14,7 @@ import time
 from urllib.parse import parse_qs, urlsplit
 
 
-def main(reference, qt_bin, work):
+def main(reference, qt_bin, work, subset="all"):
     root = Path(__file__).resolve().parents[2]
     fixtures = root / "tests/clipboard_payload_routing/fixtures"
     work = Path(work).resolve()
@@ -62,6 +62,14 @@ def main(reference, qt_bin, work):
                 body = b'{"supported":"true","hostMaxBitrate":2147483648,"success":false,"initialBitrate":null}'
             elif scenario == "empty-info" and url.path == "/serverinfo":
                 body = b'<root status_code="200"/>'
+            elif scenario == "loopback-info" and url.path == "/serverinfo":
+                body = (f'<root status_code="200"><HttpsPort>{tls.server_port}</HttpsPort><LocalIP>127.0.0.2</LocalIP>'
+                        '<hostname>主機</hostname><uniqueid>constructor-fixture</uniqueid><mac>01:23:45:67:89:ab</mac>'
+                        '<ExternalIP>remote.test</ExternalIP><ExternalPort>59999</ExternalPort>'
+                        '<PairStatus>1</PairStatus><state>MJOLNIR_SERVER_BUSY</state><currentgame>42</currentgame>'
+                        '<ServerCodecModeSupport>393217</ServerCodecModeSupport><MaxLumaPixelsHEVC>12345</MaxLumaPixelsHEVC>'
+                        '<DisplayMode><Width>3840</Width><Height>2160</Height><RefreshRate>60</RefreshRate></DisplayMode>'
+                        '<DisplayMode><Width>1280</Width><Height>720</Height><RefreshRate>120</RefreshRate></DisplayMode></root>').encode()
             elif scenario == "parallel":
                 body = json.dumps({"success": True, "initialBitrate": 19000, "newBitrate": 17000, "reason": url.path}).encode()
                 if url.path == "/api/abr/feedback":
@@ -139,6 +147,9 @@ def main(reference, qt_bin, work):
              ("bitrate", "normal", {}), ("quit", "normal", {}),
              ("info", "normal", {}), ("info", "empty-info", {}),
              ("parallel", "parallel", {}), ("quit", "owner-error", {})]
+    host_cases=[("host","normal",{}),("host","normal",{"unpaired":True}),
+                ("host","empty-info",{}),("host","loopback-info",{})]
+    cases=host_cases if subset=="host" else cases+host_cases
     try:
         for index, (mode, scenario, params) in enumerate(cases):
             old, old_seen = run(mode, params, False, f"{index}-native")
@@ -152,7 +163,10 @@ def main(reference, qt_bin, work):
                 old_seen.sort(key=lambda entry: entry[1])
                 new_seen.sort(key=lambda entry: entry[1])
             assert old_seen == new_seen, (index, old_seen, new_seen)
-            assert all(entry[4] for entry in new_seen), "Control request downgraded"
+            if mode == "host" and params.get("unpaired"):
+                assert all(not entry[4] for entry in new_seen), "Unpaired discovery used TLS"
+            else:
+                assert all(entry[4] for entry in new_seen), "Control request downgraded"
             assert not any(path == "/redirect-target" for _, path, *_ in new_seen)
             print(f"session {index + 1}/{len(cases)} {mode}/{scenario}: matched", flush=True)
         # A dead Rust owner must wake a blocked caller, never fall back to

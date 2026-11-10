@@ -8,6 +8,9 @@ use std::time::Duration;
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
+    HostInfo {
+        http_url: String,
+    },
     Launch {
         params: Launch,
     },
@@ -216,6 +219,22 @@ pub async fn execute(
     cancel: CancellationToken,
 ) -> Result<Value, hosts::Error> {
     let (url, body, timeout) = match op {
+        Operation::HostInfo { http_url } => {
+            // Preserve the one delayed retry for a host whose HTTP service is
+            // visible before it is ready. Shutdown interrupts the delay.
+            let result =
+                hosts::server_info(context.clone(), &http_url, false, cancel.clone()).await;
+            let info = if matches!(result, Err(hosts::Error::Http(503))) {
+                tokio::select! {
+                    _=cancel.cancelled()=>return Err(hosts::Error::Transport(transport::Error::Cancelled)),
+                    _=tokio::time::sleep(Duration::from_secs(5))=>{}
+                }
+                hosts::server_info(context, &http_url, false, cancel).await?
+            } else {
+                result?
+            };
+            return Ok(serde_json::to_value(info).unwrap());
+        }
         Operation::Quit { http_url } => {
             hosts::quit(context, &http_url, cancel).await?;
             return Ok(json!({}));

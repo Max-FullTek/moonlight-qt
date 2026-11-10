@@ -193,6 +193,7 @@ public:
     quitApp();
     static bool usesRustSessionApi();
     QJsonObject sessionServerInfo();
+    QJsonObject hostInformation();
     void setRuntimeBitrate(int bitrateKbps, const QString& clientName);
 
     void

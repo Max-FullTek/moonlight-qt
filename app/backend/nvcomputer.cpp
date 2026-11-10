@@ -6,6 +6,8 @@
 #include <QHostInfo>
 #include <QNetworkInterface>
 #include <QNetworkProxy>
+#include <QJsonArray>
+#include <climits>
 
 #define SER_NAME "hostname"
 #define SER_UUID "uuid"
@@ -214,6 +216,43 @@ NvComputer::NvComputer(NvHTTP& http, QString serverInfo)
     this->state = NvComputer::CS_ONLINE;
     this->pendingQuit = false;
     this->isSupportedServerVersion = CompatFetcher::isGfeVersionSupported(this->gfeVersion);
+}
+NvComputer::NvComputer(NvHTTP& http,const QJsonObject& info)
+{
+    // Typed private-pipe adapter. No XML parsing or network I/O here.
+    const auto invalid=[] {throw GfeHttpResponseException(-1,"Invalid host information");};
+    const auto integer=[&](const QJsonObject& object,const char* field,int low,int high) {
+        const auto value=object[field];
+        if (!value.isDouble() || value.toDouble()!=value.toInt() || value.toDouble()<low || value.toDouble()>high) invalid();
+        return value.toInt();
+    };
+    for (const auto* field:{"name","uuid","local_ip","external_ip","app_version","gfe_version","gpu"}) if (!info[field].isString()) invalid();
+    if (!info["nvidia"].isBool() || !info["paired"].isBool() || !info["mac"].isArray() || !info["display_modes"].isArray()) invalid();
+    name=info["name"].toString(); uuid=info["uuid"].toString(); hasCustomName=false; serverCert=http.serverCert();
+    serverCodecModeSupport=integer(info,"codec_support",INT_MIN,INT_MAX);
+    maxLumaPixelsHEVC=integer(info,"max_luma_hevc",INT_MIN,INT_MAX);
+    currentGameId=integer(info,"current_app",INT_MIN,INT_MAX);
+    activeHttpsPort=uint16_t(integer(info,"https_port",1,65535));
+    externalPort=uint16_t(integer(info,"external_port",1,65535));
+    for (const auto& value:info["mac"].toArray()) {
+        if (!value.isDouble() || value.toDouble()!=value.toInt() || value.toDouble()<0 || value.toDouble()>255) invalid();
+        macAddress.append(char(value.toInt()));
+    }
+    for (const auto& value:info["display_modes"].toArray()) {
+        if (!value.isObject()) invalid();
+        NvDisplayMode mode; const auto item=value.toObject();
+        mode.width=integer(item,"width",INT_MIN,INT_MAX); mode.height=integer(item,"height",INT_MIN,INT_MAX);
+        mode.refreshRate=integer(item,"refresh_rate",INT_MIN,INT_MAX); displayModes.append(mode);
+    }
+    const int localPort=integer(info,"local_port",0,65535);
+    localAddress=localPort==0?NvAddress():NvAddress(info["local_ip"].toString(),uint16_t(localPort));
+    remoteAddress=info["external_ip"].toString().isEmpty()?NvAddress():NvAddress(info["external_ip"].toString(),externalPort);
+    isNvidiaServerSoftware=info["nvidia"].toBool();
+    pairState=info["paired"].toBool()?PS_PAIRED:PS_NOT_PAIRED;
+    appVersion=info["app_version"].toString();gfeVersion=info["gfe_version"].toString();gpuModel=info["gpu"].toString();
+    activeAddress=http.address(); if (!activeAddress.isNull()) m_TestedAddresses.append(activeAddress);
+    state=CS_ONLINE;pendingQuit=false;
+    isSupportedServerVersion=CompatFetcher::isGfeVersionSupported(gfeVersion);
 }
 
 bool NvComputer::wake() const

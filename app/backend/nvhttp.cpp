@@ -55,6 +55,11 @@ QJsonObject NvHTTP::rustSessionCall(QJsonObject request,unsigned timeoutMs) {
 QJsonObject NvHTTP::sessionServerInfo() {
     return rustSessionCall({{"operation","info"},{"http_url",m_BaseUrlHttp.toString()}},6000);
 }
+QJsonObject NvHTTP::hostInformation() {
+    const auto info=rustSessionCall({{"operation","host_info"},{"http_url",m_BaseUrlHttp.toString()}},30000);
+    if (m_ServerCert.isNull() || httpsPort()==0) setHttpsPort(uint16_t(info["https_port"].toInt()));
+    return info;
+}
 void NvHTTP::setRuntimeBitrate(int bitrateKbps,const QString& clientName) {
     if (usesRustSessionApi()) {rustSessionCall({{"operation","bitrate"},{"bitrate",bitrateKbps},{"client_name",clientName}},5000);return;}
     openConnectionToString(m_BaseUrlHttps,"bitrate",QString("bitrate=%1&clientname=%2").arg(bitrateKbps).arg(clientName),5000);

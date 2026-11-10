@@ -42,6 +42,7 @@ public:
     NvComputer& operator=(const NvComputer &) = default;
 
     explicit NvComputer(NvHTTP& http, QString serverInfo);
+    explicit NvComputer(NvHTTP& http, const QJsonObject& hostInfo);
 
     explicit NvComputer(QSettings& settings);
 

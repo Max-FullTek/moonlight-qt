@@ -46,6 +46,7 @@ pub struct ServerInfo {
     pub max_luma_hevc: i32,
     pub display_modes: Vec<DisplayMode>,
     pub local_ip: String,
+    pub local_port: u16,
     pub external_ip: String,
     pub https_port: u16,
     pub external_port: u16,
@@ -140,6 +141,11 @@ fn server_info_document(document: xml::Document, http_port: u16) -> Result<Serve
         },
         max_luma_hevc: integer(field("MaxLumaPixelsHEVC")),
         display_modes: modes,
+        local_port: if field("LocalIP").starts_with("127.") {
+            0
+        } else {
+            http_port
+        },
         local_ip: if field("LocalIP").starts_with("127.") {
             String::new()
         } else {
