@@ -94,6 +94,9 @@ def check(executable, profile, eof=False, seeded=False):
                     ('{"command":"quit","host":"missing"}', 'host_not_found'),
                     ('{"command":"displays","host":"missing"}', 'host_not_found'),
                     ('{"command":"host_api_context","host":"missing","request_id":1}', 'host_not_found'),
+                    ('{"command":"pair_rust","host":"missing","request_id":1}', 'host_not_found'),
+                    ('{"command":"pair_name","host":"missing","request_id":1,"name":"test"}', 'stale_pairing'),
+                    ('{"command":"pair_complete","host":"missing","request_id":1,"state":0,"certificate":"invalid","error":""}', 'stale_pairing'),
                     ('x' * (64 * 1024 + 1), 'request_too_large'),
                 ]:
                     send(request)

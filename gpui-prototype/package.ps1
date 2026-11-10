@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
+. (Join-Path $repoRoot 'scripts/set-rust-host-api-env.ps1')
 if ([string]::IsNullOrWhiteSpace($env:CARGO_TARGET_DIR)) {
     throw 'Set CARGO_TARGET_DIR before packaging the GPUI frontend.'
 }
@@ -11,6 +12,9 @@ $outDir = Join-Path $repoRoot 'build/gpui-package'
 New-Item -ItemType Directory -Force $outDir | Out-Null
 $exe = Join-Path $env:CARGO_TARGET_DIR 'release/moonlight-lite-gpui-prototype.exe'
 Copy-Item -LiteralPath $exe -Destination $outDir
+foreach ($cryptoDll in @('libcrypto-3-x64.dll', 'libssl-3-x64.dll')) {
+    Copy-Item -LiteralPath (Join-Path $repoRoot "libs/windows/lib/x64/$cryptoDll") -Destination $outDir
+}
 Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination $outDir
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Cargo.lock') -Destination $outDir
 $commit = (git -C $repoRoot rev-parse HEAD).Trim()
@@ -20,6 +24,10 @@ $metadata = cargo +1.99.1 metadata --locked --format-version 1 --manifest-path (
 if ($LASTEXITCODE) { throw 'Cannot collect dependency provenance' }
 $licenseText = [Collections.Generic.List[string]]::new()
 $licenseText.Add("Source: https://github.com/Max-FullTek/moonlight-qt/tree/$commit/gpui-prototype`nPrototype: GPL-3.0-only. Dependencies retain their own licenses.`n")
+$licenseText.Add("`n===== Native OpenSSL 3.6.5 | https://github.com/openssl/openssl/tree/openssl-3.6.5 =====`n")
+foreach ($opensslNotice in @('LICENSE.txt', 'AUTHORS.md')) {
+    $licenseText.Add([IO.File]::ReadAllText((Join-Path $repoRoot "third-party/openssl/$opensslNotice")))
+}
 foreach ($package in ($metadata.packages | Sort-Object name, version)) {
     $licenseText.Add("`n===== $($package.name) $($package.version) | $($package.license) | $($package.repository) =====`n")
     $manifestDir = Split-Path $package.manifest_path -Parent
@@ -28,5 +36,8 @@ foreach ($package in ($metadata.packages | Sort-Object name, version)) {
     }
 }
 [IO.File]::WriteAllLines((Join-Path $outDir 'THIRD-PARTY-NOTICES.txt'), $licenseText, [Text.UTF8Encoding]::new($false))
-$hash = (Get-FileHash -LiteralPath (Join-Path $outDir 'moonlight-lite-gpui-prototype.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
-"$hash  moonlight-lite-gpui-prototype.exe" | Set-Content -LiteralPath (Join-Path $outDir 'SHA256SUMS.txt') -Encoding ascii
+$hashes = foreach ($binary in @('moonlight-lite-gpui-prototype.exe', 'libcrypto-3-x64.dll', 'libssl-3-x64.dll')) {
+    $hash = (Get-FileHash -LiteralPath (Join-Path $outDir $binary) -Algorithm SHA256).Hash.ToLowerInvariant()
+    "$hash  $binary"
+}
+$hashes | Set-Content -LiteralPath (Join-Path $outDir 'SHA256SUMS.txt') -Encoding ascii

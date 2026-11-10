@@ -1,5 +1,7 @@
 //! Windows Lite control API. No profile access, GUI, worker or media transport.
+pub mod pairing;
 pub mod transport;
+pub mod xml;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{fmt, time::Duration};
@@ -138,8 +140,10 @@ pub async fn displays(
     if (300..400).contains(&response.status) {
         return Err(ApiError::Redirect);
     }
-    // Retain NvHTTP::getDisplays semantics: the JSON status_code determines
-    // success, rather than inventing a new HTTP-status acceptance policy.
+    if response.status >= 400 {
+        return Err(ApiError::HostStatus);
+    }
+    // A successful HTTP response still requires the host JSON status_code.
     parse_displays(&response.body)
 }
 

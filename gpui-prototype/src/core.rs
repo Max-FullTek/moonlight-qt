@@ -1,7 +1,8 @@
 //! Protocol 1 uses inherited anonymous pipes, never a listening network socket.
 //! The matching Moonlight.exe must be beside this frontend. Its core flag skips
 //! QML and uses an independent profile. Display HTTP is Rust-owned; the current
-//! profile, other host APIs, pairing and SDL remain in C++ during migration.
+//! profile, other host APIs and SDL remain in C++ during migration. Pairing
+//! crypto/protocol runs in Rust; the worker only supplies/stores profile data.
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
@@ -60,6 +61,11 @@ pub enum Event {
         host: String,
         request_id: u32,
         context: moonlight_host_api::HostContext,
+    },
+    PairContext {
+        host: String,
+        request_id: u32,
+        context: moonlight_host_api::pairing::Context,
     },
     Pairing {
         host: String,
@@ -135,7 +141,7 @@ impl Client {
         }
         let (tx, rx) = mpsc::channel();
         let (events_tx, events) = mpsc::channel();
-        let api = super::host_api::Client::spawn(events_tx.clone())?;
+        let api = super::host_api::Client::spawn(events_tx.clone(), tx.clone())?;
         let mut child = command.spawn()?;
         let child_pid = child.id();
         let mut stdin = child.stdin.take().unwrap();
@@ -188,6 +194,13 @@ impl Client {
                     }
                 }
                 match event {
+                    Some(event @ (Event::Error {..} | Event::Paired)) if ready => {
+                        reader_api.worker_reply();
+                        if events_tx.send(event).is_err() { break; }
+                    }
+                    Some(Event::PairContext {host, request_id, context}) if ready => {
+                        reader_api.pair_context(host, request_id, context);
+                    }
                     Some(Event::HostApiContext {host, request_id, context}) if ready => {
                         reader_api.context(host, request_id, context);
                     }
@@ -226,14 +239,16 @@ impl Client {
         })
     }
     pub fn send(&self, request: Value) -> anyhow::Result<()> {
-        if request["command"] == "displays" {
+        if request["command"] == "displays" || request["command"] == "pair" {
+            let pairing = request["command"] == "pair";
             let host = request["host"].as_str().ok_or_else(|| anyhow::anyhow!("缺少主機識別碼"))?;
             let request_id = self.next_api_request.try_update(Ordering::Relaxed, Ordering::Relaxed,
                 |id| id.checked_add(1).filter(|next| *next <= i32::MAX as u32))
                 .map_err(|_| anyhow::anyhow!("請重新啟動主機控制服務"))?;
-            self.api.begin(host.to_owned(), request_id)?;
+            if pairing { self.api.begin_pair(host.to_owned(), request_id)?; }
+            else { self.api.begin(host.to_owned(), request_id)?; }
             self.commands.as_ref().ok_or_else(|| anyhow::anyhow!("核心未啟動"))?
-                .send(json!({"command":"host_api_context", "host":host, "request_id":request_id}))?;
+                .send(json!({"command":if pairing {"pair_rust"} else {"host_api_context"}, "host":host, "request_id":request_id}))?;
             return Ok(());
         }
         if request["command"] == "controls" && request["action"] == "resume" {
@@ -286,10 +301,51 @@ pub fn stream_settings(s: &super::settings::Settings) -> Value {
 mod tests {
     use super::*;
     #[test]
+    #[ignore = "requires isolated pairing host and real worker; run check_bridge.py with pairing peer"]
+    fn rust_pairing_through_real_worker_context() -> anyhow::Result<()> {
+        let client = Client::spawn_at(std::env::var("RUST_HOST_API_WORKER")?.into(),
+            std::env::var("RUST_HOST_API_PROFILE")?.into())?;
+        let outcome = (|| -> anyhow::Result<()> {
+            let deadline = Instant::now() + Duration::from_secs(15);
+            loop {
+                anyhow::ensure!(Instant::now() < deadline, "Unpaired host did not become ready");
+                if client.drain().iter().any(|event| matches!(event, Event::Hosts {hosts} if hosts.iter().any(|host|
+                    host.id == "rust-display-host" && host.online && !host.paired))) { break; }
+                thread::sleep(Duration::from_millis(20));
+            }
+            client.send(json!({"command":"pair", "host":"rust-display-host"}))?;
+            let expected = std::env::var("RUST_PAIRING_EXPECTED")?;
+            let deadline = Instant::now() + Duration::from_secs(15);
+            loop {
+                anyhow::ensure!(Instant::now() < deadline, "Rust pairing did not complete");
+                for event in client.drain() {
+                    match event {
+                        Event::Pairing {host, pin} => {
+                            anyhow::ensure!(host == "rust-display-host" && pin.len() == 4 && pin.bytes().all(|b| b.is_ascii_digit()), "Invalid pairing PIN");
+                            std::fs::write(std::env::var("RUST_PAIRING_PIN_FILE")?, pin)?;
+                        }
+                        Event::Paired => { anyhow::ensure!(expected == "paired", "Unexpected success"); return Ok(()); }
+                        Event::Error {code, ..} => { anyhow::ensure!(code == expected, "Unexpected pairing error: {code}"); return Ok(()); }
+                        Event::PairContext {..} => anyhow::bail!("Private context reached UI"),
+                        _ => {}
+                    }
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+        })();
+        let _ = client.send(json!({"command":"shutdown"}));
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while Instant::now() < deadline {
+            if client.drain().iter().any(|event| matches!(event, Event::Error {code, ..} if code == "core_exited")) { return outcome; }
+            thread::sleep(Duration::from_millis(20));
+        }
+        anyhow::bail!("Worker did not shut down")
+    }
+    #[test]
     fn display_requests_use_rust_and_discard_already_queued_old_results() {
         let (commands, incoming) = mpsc::channel();
         let (events_tx, events) = mpsc::channel();
-        let api = super::super::host_api::Client::spawn(events_tx.clone()).unwrap();
+        let api = super::super::host_api::Client::spawn(events_tx.clone(), commands.clone()).unwrap();
         let client = Client {child_pid:0, commands:Some(commands), events, api, next_api_request:AtomicU32::new(1)};
         client.send(json!({"command":"displays","host":"same"})).unwrap();
         assert_eq!(incoming.recv().unwrap(), json!({"command":"host_api_context","host":"same","request_id":1}));
@@ -320,6 +376,10 @@ mod tests {
                 anyhow::ensure!(Instant::now() < deadline, "Rust displays did not complete");
                 for event in client.drain() {
                     if let Event::Displays {host, displays, ..} = event {
+                        if std::env::var("RUST_DISPLAY_HTTP_ERROR").as_deref() == Ok("1") {
+                            anyhow::ensure!(host == "rust-display-host" && displays.is_empty(), "HTTP error accepted as a display list");
+                            return Ok(());
+                        }
                         anyhow::ensure!(host == "rust-display-host" && displays.len() == 2, "Incorrect display result");
                         anyhow::ensure!(displays[0].name == "家中螢幕 🎮" && displays[0].target == "screen-1"
                             && displays[1].name == "Display 2" && displays[1].target == "Display 2", "Display mapping changed");

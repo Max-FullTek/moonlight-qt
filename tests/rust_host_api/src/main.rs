@@ -18,6 +18,69 @@ fn certificate(path: &Path) -> Vec<u8> {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.len() == 6 && args[5].starts_with("pair-") {
+        let fixtures = Path::new(&args[3]);
+        let context = moonlight_host_api::pairing::Context {
+            host: moonlight_host_api::HostContext {
+                base_url: args[1].clone(),
+                server_certificate: String::new(),
+                client_certificate: std::fs::read_to_string(fixtures.join("server.pem")).unwrap(),
+                client_key: std::fs::read_to_string(fixtures.join("server-key.pem")).unwrap(),
+                unique_id: "fixture-client".into(),
+                client_name: "fixture".into(),
+                nonce: "0123456789abcdef0123456789abcdef".into(),
+            },
+            http_url: format!(
+                "http://127.0.0.1:{}/",
+                std::env::var("NATIVE_HTTP_FIXTURE_HTTP_PORT").unwrap()
+            ),
+            generation: args[5][5..].parse().unwrap(),
+            pin: if std::env::var_os("NATIVE_HTTP_WRONG_PIN").is_some() {
+                "0000"
+            } else {
+                "1234"
+            }
+            .into(),
+        };
+        let mut saved = String::new();
+        let cancellation = moonlight_host_api::CancellationToken::new();
+        let expected = std::env::var("RUST_PAIRING_EXPECTED_ERROR").unwrap_or_default();
+        if expected == "cancel" {
+            let token = cancellation.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                token.cancel();
+            });
+        }
+        let result = moonlight_host_api::pairing::pair(context, cancellation, |name| {
+            saved = name.to_owned()
+        })
+        .await;
+        if !expected.is_empty() {
+            use moonlight_host_api::pairing::Error as PairError;
+            assert!(
+                match (expected.as_str(), result) {
+                    ("cancel", Err(PairError::Transport(Error::Cancelled))) => true,
+                    ("invalid-xml", Err(PairError::Xml(_))) => true,
+                    (mode, Err(PairError::Http(503))) if mode.starts_with("http-error-") => true,
+                    _ => false,
+                },
+                "Unexpected pairing exception class"
+            );
+            println!("ok=1 error=2 status=0");
+            return;
+        }
+        let result = result.unwrap();
+        assert_eq!(
+            result.certificate.is_some(),
+            result.state == moonlight_host_api::pairing::State::Paired
+        );
+        if result.certificate.is_some() {
+            assert_eq!(saved, "測試主機");
+        }
+        println!("ok=1 error={} status=0", result.state as u8);
+        return;
+    }
     if args.len() == 1 {
         for line in io::stdin().lock().lines() {
             let request: serde_json::Value = serde_json::from_str(&line.unwrap()).unwrap();

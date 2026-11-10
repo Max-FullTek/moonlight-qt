@@ -62,6 +62,7 @@ struct Peer final : NativePairing::Host {
     bool shortChallenge = false, nonBlockChallenge = false, shortSecret = false, rejectPin = false;
     bool pinned = false;
     std::string savedName;
+    std::string expectedPin = "1234";
     std::string pem, keyPem;
     Bytes aesKey, challenge, responseHash;
     const Bytes serverSecret = Bytes(16, 0x37), serverChallenge = Bytes(16, 0xA5);
@@ -115,10 +116,12 @@ struct Peer final : NativePairing::Host {
         if (stage == 1) {
             check(fields["phrase"] == "getservercert");
             const auto client = unhex(fields["clientcert"]);
-            check(std::string(client.begin(), client.end()) == pem);
+            std::unique_ptr<BIO, decltype(&BIO_free)> clientInput(BIO_new_mem_buf(client.data(), static_cast<int>(client.size())), BIO_free);
+            std::unique_ptr<X509, decltype(&X509_free)> clientCert(PEM_read_bio_X509(clientInput.get(), nullptr, nullptr, nullptr), X509_free);
+            check(clientCert && X509_cmp(clientCert.get(), cert.get()) == 0);
             auto input = unhex(fields["salt"]);
             check(input.size() == 16);
-            const std::string pin = badPin ? "9999" : "1234";
+            const std::string pin = badPin ? "9999" : expectedPin;
             input.insert(input.end(), pin.begin(), pin.end());
             aesKey = digest(input, generation);
             aesKey.resize(16);
@@ -167,16 +170,19 @@ struct Peer final : NativePairing::Host {
 int main(int argc, char** argv)
 {
     try {
-        if (argc == 5 && std::string(argv[1]) == "--peer") {
+        if ((argc == 5 || argc == 6) && std::string(argv[1]) == "--peer") {
             const auto pem = file(std::string(argv[2]) + "/server.pem");
             Peer peer(std::stoi(argv[3]), pem, file(std::string(argv[2]) + "/server-key.pem"));
             peer.pinned = true; // Server role; the real client must pin its TLS request.
             const std::string mode = argv[4];
+            if (argc == 6) peer.expectedPin = argv[5];
             peer.busy = mode == "busy"; peer.badSignature = mode == "bad-signature";
             peer.shortChallenge = mode == "short-challenge";
+            peer.nonBlockChallenge = mode == "nonblock-challenge";
             peer.malformedCert = mode == "bad-certificate";
             peer.shortSecret = mode == "short-secret";
             if (mode == "final-reject") peer.failStage = 5;
+            if (mode.compare(0, 7, "reject-") == 0) peer.failStage = std::stoi(mode.substr(7));
             std::string line;
             while (std::getline(std::cin, line)) {
                 check(line.size() > 2);

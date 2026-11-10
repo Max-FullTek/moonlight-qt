@@ -292,6 +292,43 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         }
         return;
     }
+    if (name == "pair_name" || name == "pair_complete") {
+        if (!m_RustPairingRequest || !integer(request,"request_id",1,2147483647) ||
+                request["request_id"].toInt()!=m_RustPairingRequest || request["host"].toString()!=m_PairingHost) {
+            fail("stale_pairing",tr("Pairing operation is no longer active.")); return;
+        }
+        auto* host=findHost(m_PairingHost);
+        if (!host) { fail("host_not_found",tr("Host not found.")); return; }
+        if (name=="pair_name") {
+            if (!request["name"].isString()) { fail("invalid_pairing",tr("Invalid pairing result.")); return; }
+            NvComputer::savePairname(host->uuid,request["name"].toString());
+            return;
+        }
+        if (!integer(request,"state",0,3) || !request["certificate"].isString() || !request["error"].isString()) {
+            fail("invalid_pairing",tr("Invalid pairing result.")); return;
+        }
+        const int state=request["state"].toInt();
+        QSslCertificate certificate(request["certificate"].toString().toLatin1());
+        if (state==0 && (certificate.isNull() || !request["error"].toString().isEmpty())) {
+            fail("invalid_pairing",tr("Invalid pairing certificate.")); return;
+        }
+        m_RustPairingRequest=0;
+        m_PairingHost.clear();
+        if (state==0) {
+            { QWriteLocker lock(&host->lock); host->serverCert=certificate; }
+            m_Manager->clientSideAttributeUpdated(host);
+            send({{"event","paired"}});
+        } else if (request["error"].toString()=="timeout") fail("pair_timeout",tr("Pairing timed out."));
+        else if (state==1) fail("pair_pin_mismatch",tr("The PIN from the PC didn't match. Please try again."));
+        else if (state==3) fail("pair_already_active",tr("Another pairing attempt is already in progress."));
+        else {
+            bool busy;
+            { QReadLocker lock(&host->lock); busy=host->currentGameId!=0; }
+            fail("pair_failed",busy ? tr("You cannot pair while a previous session is still running on the host PC. Quit any running games or reboot the host PC, then try pairing again.") : tr("Pairing failed. Please try again."));
+        }
+        publishHosts();
+        return;
+    }
     if (m_Session || m_AddPending || m_DeletingHost || m_QuitPending || !m_PairingHost.isEmpty()) { fail("busy", tr("Another operation is still active.")); return; }
     if (name == "add") {
         const auto address = request.value("address").toString().trimmed();
@@ -302,7 +339,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         m_Manager->addNewHostManually(address);
         return;
     }
-    if (name != "pair" && name != "start" && name != "app_preferences" && name != "displays" && name != "host_api_context" &&
+    if (name != "pair" && name != "pair_rust" && name != "start" && name != "app_preferences" && name != "displays" && name != "host_api_context" &&
             name != "rename" && name != "remove" && name != "quit") { fail("unknown_command", tr("Unknown command.")); return; }
     auto* host = findHost(request.value("host").toString());
     if (!host) { fail("host_not_found", tr("Host not found.")); return; }
@@ -411,13 +448,33 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         m_Manager->clientSideAttributeUpdated(host);
         return;
     }
-    if (name == "pair") {
+    if (name == "pair" || name == "pair_rust") {
+        if (name=="pair_rust" && !integer(request,"request_id",1,2147483647)) {
+            fail("invalid_pairing",tr("Invalid pairing request identifier.")); return;
+        }
         { QReadLocker lock(&host->lock);
           if (host->pairState == NvComputer::PS_PAIRED) { send({{"event", "paired"}}); return; }
           if (host->state != NvComputer::CS_ONLINE) { fail("offline", tr("Host is offline.")); return; } }
         m_PairingHost = host->uuid;
         const QString pin = m_Manager->generatePinString();
         send({{"event", "pairing"}, {"host", host->uuid}, {"pin", pin}});
+        if (name=="pair_rust") {
+            m_RustPairingRequest=request["request_id"].toInt();
+            QReadLocker lock(&host->lock);
+            QUrl https,http;
+            https.setScheme("https"); https.setHost(host->activeAddress.address()); https.setPort(host->activeHttpsPort);
+            http.setScheme("http"); http.setHost(host->activeAddress.address()); http.setPort(host->activeAddress.port());
+            auto clientName=NvComputer::getPairname(host->uuid);
+            if (clientName.isEmpty()) clientName=QHostInfo::localHostName();
+            send({{"event","pair_context"},{"host",host->uuid},{"request_id",m_RustPairingRequest},
+                {"context",QJsonObject{{"http_url",http.toString()},{"generation",host->appVersion.section('.',0,0).toInt()},{"pin",pin},
+                    {"host",QJsonObject{{"base_url",https.toString()},{"server_certificate",QString()},
+                        {"client_certificate",QString::fromLatin1(IdentityManager::get()->getCertificate())},
+                        {"client_key",QString::fromLatin1(IdentityManager::get()->getPrivateKey())},
+                        {"unique_id",host->isNvidiaServerSoftware ? QStringLiteral("0123456789ABCDEF") : IdentityManager::get()->getUniqueId()},
+                        {"client_name",clientName},{"nonce",QString::fromLatin1(QUuid::createUuid().toRfc4122().toHex())}}}}}});
+            return;
+        }
         m_Manager->pairHost(host, pin);
         return;
     }

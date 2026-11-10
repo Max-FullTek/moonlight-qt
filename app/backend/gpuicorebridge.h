@@ -29,6 +29,7 @@ private:
     ComputerManager* m_Manager;
     QPointer<Session> m_Session;
     QString m_PairingHost;
+    int m_RustPairingRequest = 0;
     NvComputer* m_DeletingHost = nullptr;
     bool m_QuitPending = false;
     bool m_ShuttingDown = false;

@@ -2,11 +2,13 @@ param(
     [string]$QtDirectory,
     [string]$NativeHttpProbe,
     [string]$QtParserReference,
+    [string]$PairingPeer,
     [ValidateSet('Release', 'Debug')][string]$Configuration = 'Release'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repoRoot = Split-Path $PSScriptRoot -Parent
+. (Join-Path $PSScriptRoot 'set-rust-host-api-env.ps1')
 if (!$QtDirectory -or !$NativeHttpProbe -or !$QtParserReference) {
     throw 'Provide QtDirectory, NativeHttpProbe (public fixture generator) and QtParserReference from the existing capability builds.'
 }
@@ -33,6 +35,13 @@ try {
         (Join-Path $env:CARGO_TARGET_DIR "$profile/rust-host-api-probe.exe") `
         $NativeHttpProbe $QtParserReference (Join-Path $QtDirectory 'bin') $work
     if ($LASTEXITCODE -ne 0) { throw 'Rust API capability scenarios failed' }
+    if ($PairingPeer) {
+        & $python (Join-Path $repoRoot 'tests/native_host_http/check_pairing.py') `
+            (Join-Path $env:CARGO_TARGET_DIR "$profile/rust-host-api-probe.exe") $PairingPeer `
+            (Join-Path $repoRoot 'tests/clipboard_payload_routing/fixtures') `
+            ($work + '-pairing') --extended-rust
+        if ($LASTEXITCODE -ne 0) { throw 'Rust pairing scenarios failed' }
+    }
 } finally {
     [Environment]::SetEnvironmentVariable('CARGO_INCREMENTAL', $savedIncremental, 'Process')
 }

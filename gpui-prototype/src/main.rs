@@ -455,7 +455,7 @@ impl Prototype {
         let had_modal = self.modal.is_some();
         for event in events {
             match event {
-                core::Event::HostApiContext { .. } => unreachable!("context belongs to the host API owner"),
+                core::Event::HostApiContext { .. } | core::Event::PairContext { .. } => unreachable!("context belongs to the host API owner"),
                 core::Event::HostRenamed => {
                     self.pending = false;
                     self.modal = None;
