@@ -90,3 +90,7 @@ Rust 配对验证使用同一生产 crate。Cargo／上述 bridge 验证前先 d
 设置 `RUST_DISPLAY_HTTP_ERROR=1` 再执行显示清单 bridge，可验证 HTTP 503 即使带有效清单 body 仍回空清单，保留 NvHTTP 的失败行为。
 
 bridge 命令末端加 `<native_pairing_peer.exe> <ok|wrong-pin|final-reject>`，显式执行 `core::tests::rust_pairing_through_real_worker_context`。测试透过真实 PIN 事件供独立 peer 验证完整协议，检查繁中 pairname 即时用于后续请求、每次 nonce 不重复、只有最终成功储存憑证、失败保留空 pin、身分不进诊断与正常结束。PIN 文件／公开 fixture 仅放唯一 build 目录，LOCALAPPDATA／worker profile 全部隔离。一般前端测试另验证过期配对 context 被忽略及 worker 拒绝后可重试。上述不代表真实 Sunshine、新配对后影音串流、Session 重连、吞吐或延迟已验收。
+
+回归入口加 `-HostReference <nvhttp_native.exe>`，执行 `rust_host_api/check_hosts.py`。35 案包含生产 NvHTTP／NvComputer 的 18 组实际字段比较（非复制 Qt 解析器）：主机能力、版本、MAC、port、数值、display modes、繁中／namespace／CDATA、应用顺序、空标题／不完整项与嵌套字段；另验证已知／探测 port、未配对、pinned XML 401 恢复、TLS 错误不降级、HTTP 错误／redirect、取消／逾时、已确认的严格 XML 及 IPv6 loopback。scoped loopback URL 在现有 native HTTP 与 Rust 都失败，仅核对既有结果，不宣称新增支援。Qt 仅给 reference PATH，Rust 不借用 Qt。
+
+`python tests/rust_host_api/check_monitor.py <worker-exe> <runtime-dll-directory> <qt-sdk-plugins-directory> <unique-work-directory> [large]` 运行真实 `core::tests::rust_monitor_through_real_worker`。隔离 profile 预置自订主机名、两条位址及应用偏好；fixture 同时提供错误 UUID 的 HTTP／TLS peer、正确 mTLS peer、首次失败／空清单及后续成功。验证原主机名、顺序、hidden／direct_launch、两轮位址重试、离线／恢复仍保留快取、删除后不继续请求或复活及正常关闭。`large` 使用 1,203 项清单并实际等待十轮（约 30 秒）确认更新间隔，亦覆盖超过普通控制命令 64 KiB 的 typed IPC。一般前端测试另验证 generation 替换与取消。测试不连接用户 host、不读取旧 profile；尚未测试真实 Sunshine／游戏与效能。

@@ -23,7 +23,8 @@
 #include <thread>
 
 namespace {
-constexpr int MaxLine = 64 * 1024;
+constexpr int MaxControlLine = 64 * 1024;
+constexpr int MaxLine = 4 * 1024 * 1024; // Existing frontend event limit, also for typed host data.
 bool integer(const QJsonObject& object, const char* key, int low, int high) {
     const auto value = object.value(QLatin1String(key));
     return value.isDouble() && value.toDouble() == value.toInt(-999999) &&
@@ -174,7 +175,8 @@ GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent) {
     prefs->richPresence = false;
     prefs->detectNetworkBlocking = false;
     prefs->quitAppAfter = false;
-    m_Manager = new ComputerManager(prefs);
+    m_RustMonitor = qEnvironmentVariable("MOONLIGHT_GPUI_RUST_MONITOR") == "1";
+    m_Manager = new ComputerManager(prefs, m_RustMonitor);
     m_Manager->setParent(this);
     connect(m_Manager, &ComputerManager::hostDeleted, this, [this](const QString& uuid) {
         m_DeletingHost = nullptr;
@@ -258,10 +260,108 @@ void GpuiCoreBridge::publishHosts() {
                                  {"current_app", host->currentGameId}, {"apps", apps}});
     }
     send({{"event", "hosts"}, {"hosts", hosts}});
+    if (m_RustMonitor) publishMonitorContexts();
 }
 NvComputer* GpuiCoreBridge::findHost(const QString& uuid) {
     for (auto* host : m_Manager->getComputers()) if (host != m_DeletingHost && host->uuid == uuid) return host;
     return nullptr;
+}
+void GpuiCoreBridge::publishMonitorContexts() {
+    QHash<QString,QJsonObject> next;
+    bool changed=false;
+    for (auto* host:m_Manager->getComputers()) {
+        if (host==m_DeletingHost) continue;
+        QJsonArray addresses;
+        for (const auto& address:host->uniqueAddresses()) {
+            QUrl url; url.setScheme("http"); url.setHost(address.address()); url.setPort(address.port());
+            addresses.append(url.toString());
+        }
+        QReadLocker lock(&host->lock);
+        auto clientName=NvComputer::getPairname(host->uuid);
+        if (clientName.isEmpty()) clientName=QHostInfo::localHostName();
+        const QJsonObject context{{"base_url",QString()},{"server_certificate",QString::fromLatin1(host->serverCert.toPem())},
+            {"client_certificate",QString::fromLatin1(IdentityManager::get()->getCertificate())},
+            {"client_key",QString::fromLatin1(IdentityManager::get()->getPrivateKey())},
+            {"unique_id",host->isNvidiaServerSoftware?QStringLiteral("0123456789ABCDEF"):IdentityManager::get()->getUniqueId()},
+            {"client_name",clientName},{"nonce",QString()}};
+        const auto previous=m_MonitorContexts.value(host->uuid);
+        if (previous["context"]==context && previous["addresses"]==addresses) next[host->uuid]=previous;
+        else {
+            Q_ASSERT(m_NextMonitorGeneration<2147483647);
+            next[host->uuid]={{"host",host->uuid},{"generation",m_NextMonitorGeneration++},{"context",context},
+                {"addresses",addresses},{"online",host->state==NvComputer::CS_ONLINE},{"has_apps",!host->appList.isEmpty()}};
+            changed=true;
+        }
+    }
+    changed=changed || next.size()!=m_MonitorContexts.size();
+    m_MonitorContexts=next;
+    if (changed) {
+        QJsonArray hosts;
+        for (const auto& context:std::as_const(m_MonitorContexts)) hosts.append(context);
+        // Private inherited pipe only. Never forward to UI or diagnostics.
+        send({{"event","monitor_contexts"},{"hosts",hosts}});
+    }
+}
+void GpuiCoreBridge::applyMonitorUpdate(const QJsonObject& request) {
+    const auto uuid=request["host"].toString();
+    const auto current=m_MonitorContexts.value(uuid);
+    if (current.isEmpty() || !integer(request,"generation",1,2147483647) || request["generation"]!=current["generation"]) return;
+    auto* host=findHost(uuid);
+    if (!host) return; // Includes deletion tombstones; stale results are silent.
+    const auto update=request["update"].toObject();
+    bool changed=false;
+    if (update.contains("apps")) {
+        if (!update["apps"].isArray()) return;
+        QVector<NvApp> apps;
+        for (const auto& value:update["apps"].toArray()) {
+            const auto item=value.toObject();
+            if (!integer(item,"id",INT_MIN,INT_MAX) || (!item["name"].isNull() && !item["name"].isString()) ||
+                    !item["hdr"].isBool() || !item["collector"].isBool()) return;
+            NvApp app;
+            app.id=item["id"].toInt(); app.name=item["name"].isNull()?QString():item["name"].toString();
+            app.hdrSupported=item["hdr"].toBool(); app.isAppCollectorGame=item["collector"].toBool(); apps.append(app);
+        }
+        if (!apps.isEmpty()) { QWriteLocker lock(&host->lock); changed=host->updateAppList(apps); }
+    } else if (update["online"].isBool() && !update["online"].toBool()) {
+        QWriteLocker lock(&host->lock);
+        changed=host->state!=NvComputer::CS_OFFLINE;
+        host->state=NvComputer::CS_OFFLINE;
+    } else if (update["online"].toBool()) {
+        const auto info=update["info"].toObject();
+        if (info["uuid"].toString()!=uuid || !current["addresses"].toArray().contains(update["address"])) return;
+        for (const auto* field:{"name","uuid","local_ip","external_ip","app_version","gfe_version","gpu"}) if (!info[field].isString()) return;
+        for (const auto* field:{"codec_support","max_luma_hevc","current_app"}) if (!integer(info,field,INT_MIN,INT_MAX)) return;
+        if (!integer(info,"https_port",1,65535) || !integer(info,"external_port",1,65535) ||
+                !info["paired"].isBool() || !info["nvidia"].isBool() || !info["mac"].isArray() || !info["display_modes"].isArray()) return;
+        NvComputer state;
+        { QReadLocker lock(&host->lock); state=*host; }
+        const QUrl address(update["address"].toString());
+        state.name=info["name"].toString(); state.macAddress.clear();
+        for (const auto& byte:info["mac"].toArray()) {
+            if (!byte.isDouble() || byte.toInt(-1)<0 || byte.toInt(-1)>255 || byte.toDouble()!=byte.toInt()) return;
+            state.macAddress.append(char(byte.toInt()));
+        }
+        state.localAddress=NvAddress(info["local_ip"].toString(),address.port());
+        state.externalPort=info["external_port"].toInt();
+        state.remoteAddress=NvAddress(info["external_ip"].toString(),state.externalPort);
+        state.activeAddress=NvAddress(address.host(),address.port());
+        state.activeHttpsPort=info["https_port"].toInt();
+        state.serverCodecModeSupport=info["codec_support"].toInt(); state.maxLumaPixelsHEVC=info["max_luma_hevc"].toInt();
+        state.currentGameId=info["current_app"].toInt(); state.isNvidiaServerSoftware=info["nvidia"].toBool();
+        state.pairState=info["paired"].toBool()?NvComputer::PS_PAIRED:NvComputer::PS_NOT_PAIRED;
+        state.state=NvComputer::CS_ONLINE; state.appVersion=info["app_version"].toString();
+        state.gfeVersion=info["gfe_version"].toString(); state.gpuModel=info["gpu"].toString();
+        state.isSupportedServerVersion=CompatFetcher::isGfeVersionSupported(state.gfeVersion);
+        state.displayModes.clear(); state.appList.clear();
+        for (const auto& value:info["display_modes"].toArray()) {
+            const auto mode=value.toObject();
+            for (const auto* field:{"width","height","refresh_rate"}) if (!integer(mode,field,INT_MIN,INT_MAX)) return;
+            NvDisplayMode display; display.width=mode["width"].toInt(); display.height=mode["height"].toInt();
+            display.refreshRate=mode["refresh_rate"].toInt(); state.displayModes.append(display);
+        }
+        changed=host->update(state);
+    }
+    if (changed) m_Manager->clientSideAttributeUpdated(host);
 }
 void GpuiCoreBridge::shutdown() {
     if (m_ShuttingDown) return;
@@ -273,11 +373,15 @@ void GpuiCoreBridge::command(const QByteArray& line) {
     if (m_ShuttingDown) return;
     QJsonParseError error;
     const auto document = QJsonDocument::fromJson(line, &error);
+    if (line.size()>MaxControlLine && (!document.isObject() || document.object()["command"]!="monitor_update")) {
+        fail("request_too_large",tr("Request exceeds 64 KiB.")); return;
+    }
     if (error.error != QJsonParseError::NoError || !document.isObject()) {
         fail("invalid_json", tr("Expected a JSON object.")); return;
     }
     const auto request = document.object();
     const auto name = request.value("command").toString();
+    if (name == "monitor_update") { if (m_RustMonitor) applyMonitorUpdate(request); return; }
     if (name == "shutdown") { shutdown(); return; }
     if (name == "list") { publishHosts(); return; }
     if (name == "stop") { if (m_Session) m_Session->interrupt(); return; }
@@ -302,6 +406,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         if (name=="pair_name") {
             if (!request["name"].isString()) { fail("invalid_pairing",tr("Invalid pairing result.")); return; }
             NvComputer::savePairname(host->uuid,request["name"].toString());
+            if (m_RustMonitor) publishMonitorContexts();
             return;
         }
         if (!integer(request,"state",0,3) || !request["certificate"].isString() || !request["error"].isString()) {

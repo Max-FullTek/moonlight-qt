@@ -23,6 +23,7 @@ class NvComputer
     friend class PcMonitorThread;
     friend class ComputerManager;
     friend class PendingQuitTask;
+    friend class GpuiCoreBridge; // Transitional typed state/profile adapter.
 
 private:
     void sortAppList();

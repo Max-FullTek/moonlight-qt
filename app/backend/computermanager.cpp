@@ -160,8 +160,9 @@ private:
     NvComputer* m_Computer;
 };
 
-ComputerManager::ComputerManager(StreamingPreferences* prefs)
+ComputerManager::ComputerManager(StreamingPreferences* prefs, bool externalPolling)
     : m_Prefs(prefs),
+      m_ExternalPolling(externalPolling),
       m_PollingRef(0),
       m_MdnsBrowser(nullptr),
       m_CompatFetcher(nullptr),
@@ -394,6 +395,7 @@ void ComputerManager::startPolling()
 // Must hold m_Lock for write
 void ComputerManager::startPollingComputer(NvComputer* computer)
 {
+    if (m_ExternalPolling) return;
     if (m_PollingRef == 0) {
         return;
     }

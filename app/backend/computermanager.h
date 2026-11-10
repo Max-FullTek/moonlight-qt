@@ -218,7 +218,7 @@ class ComputerManager : public QObject
     friend class DelayedFlushThread;
 
 public:
-    explicit ComputerManager(StreamingPreferences* prefs);
+    explicit ComputerManager(StreamingPreferences* prefs, bool externalPolling = false);
 
     virtual ~ComputerManager();
 
@@ -272,6 +272,7 @@ private:
     void startPollingComputer(NvComputer* computer);
 
     StreamingPreferences* m_Prefs;
+    bool m_ExternalPolling;
     int m_PollingRef;
     QReadWriteLock m_Lock;
     QMap<QString, NvComputer*> m_KnownHosts;

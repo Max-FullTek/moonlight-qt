@@ -1,8 +1,8 @@
 //! Protocol 1 uses inherited anonymous pipes, never a listening network socket.
 //! The matching Moonlight.exe must be beside this frontend. Its core flag skips
-//! QML and uses an independent profile. Display HTTP is Rust-owned; the current
-//! profile, other host APIs and SDL remain in C++ during migration. Pairing
-//! crypto/protocol runs in Rust; the worker only supplies/stores profile data.
+//! QML and uses an independent profile. Rust owns polling, application/display
+//! queries and pairing. Profile persistence, launch/quit/ABR and SDL remain in
+//! C++ during migration; private context never reaches the UI event consumer.
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
@@ -62,6 +62,7 @@ pub enum Event {
         request_id: u32,
         context: moonlight_host_api::HostContext,
     },
+    MonitorContexts { hosts: Vec<crate::monitor::Spec> },
     PairContext {
         host: String,
         request_id: u32,
@@ -131,6 +132,7 @@ impl Client {
         command
             .arg("--gpui-core")
             .env("MOONLIGHT_GPUI_PROFILE", profile)
+            .env("MOONLIGHT_GPUI_RUST_MONITOR", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::from(log));
@@ -194,6 +196,7 @@ impl Client {
                     }
                 }
                 match event {
+                    Some(Event::MonitorContexts {hosts}) if ready => reader_api.monitors(hosts),
                     Some(event @ (Event::Error {..} | Event::Paired)) if ready => {
                         reader_api.worker_reply();
                         if events_tx.send(event).is_err() { break; }
@@ -300,6 +303,64 @@ pub fn stream_settings(s: &super::settings::Settings) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires isolated lifecycle fixture; run check_monitor.py"]
+    fn rust_monitor_through_real_worker() -> anyhow::Result<()> {
+        let client = Client::spawn_at(std::env::var("RUST_HOST_API_WORKER")?.into(),
+            std::env::var("RUST_HOST_API_PROFILE")?.into())?;
+        let wait_host = |predicate: &dyn Fn(&Host)->bool| -> anyhow::Result<Host> {
+            let deadline=Instant::now()+Duration::from_secs(20);
+            while Instant::now()<deadline {
+                for event in client.drain() {
+                    match event {
+                        Event::Hosts {hosts} => if let Some(host)=hosts.into_iter().find(|host| predicate(host)) {return Ok(host);},
+                        Event::Error {code,..} => anyhow::bail!("Worker error: {code}"),
+                        Event::MonitorContexts {..} => anyhow::bail!("Private monitor context reached UI"),
+                        _=>{}
+                    }
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+            anyhow::bail!("Expected monitored host state did not arrive")
+        };
+        let outcome=(||->anyhow::Result<()> {
+            let count=std::env::var("RUST_MONITOR_APP_COUNT")?.parse::<usize>()?;
+            let host=wait_host(&|host| host.online && host.apps.len()==count)?;
+            anyhow::ensure!(host.name=="custom-name" && host.paired && host.current_app==42,"Host metadata changed");
+            anyhow::ensure!(host.apps.iter().take(3).map(|app| app.id).collect::<Vec<_>>()==[7,99,42],"App order changed");
+            anyhow::ensure!(host.apps[0].hidden && host.apps[2].direct_launch && host.apps[2].name=="桌面 🎮","Client app preferences lost");
+            let phase=std::env::var("RUST_MONITOR_PHASE")?;
+            if std::env::var("RUST_MONITOR_CHECK_INTERVAL").as_deref()==Ok("1") {
+                std::fs::write(&phase,"steady")?;
+                thread::sleep(Duration::from_secs(31));
+            }
+            std::fs::write(&phase,"offline")?;
+            let host=wait_host(&|host| !host.online)?;
+            anyhow::ensure!(host.apps.len()==count && host.apps[2].direct_launch,"Offline state removed cached apps");
+            std::fs::write(&phase,"recover")?;
+            let host=wait_host(&|host| host.online)?;
+            anyhow::ensure!(host.apps.len()==count && host.apps[2].direct_launch,"Reconnect lost cached preferences");
+            client.send(json!({"command":"remove","host":"rust-monitor-host"}))?;
+            let deadline=Instant::now()+Duration::from_secs(10);
+            let mut removed=false;
+            while Instant::now()<deadline && !removed {
+                removed=client.drain().iter().any(|event| matches!(event,Event::HostRemoved {host} if host=="rust-monitor-host"));
+                thread::sleep(Duration::from_millis(20));
+            }
+            anyhow::ensure!(removed,"Host removal did not finish");
+            std::fs::write(&phase,"removed")?;
+            thread::sleep(Duration::from_millis(3300));
+            anyhow::ensure!(!client.drain().iter().any(|event| matches!(event,Event::Hosts {hosts} if !hosts.is_empty())),"Deleted host reappeared");
+            Ok(())
+        })();
+        let _=client.send(json!({"command":"shutdown"}));
+        let deadline=Instant::now()+Duration::from_secs(15);
+        while Instant::now()<deadline {
+            if client.drain().iter().any(|event| matches!(event,Event::Error {code,..} if code=="core_exited")) {return outcome;}
+            thread::sleep(Duration::from_millis(20));
+        }
+        anyhow::bail!("Worker did not shut down")
+    }
     #[test]
     #[ignore = "requires isolated pairing host and real worker; run check_bridge.py with pairing peer"]
     fn rust_pairing_through_real_worker_context() -> anyhow::Result<()> {

@@ -1,4 +1,5 @@
 //! Windows Lite control API. No profile access, GUI, worker or media transport.
+pub mod hosts;
 pub mod pairing;
 pub mod transport;
 pub mod xml;
@@ -9,7 +10,7 @@ pub use tokio_util::sync::CancellationToken;
 
 // Temporary read-only context from the current profile owner. It is consumed
 // per operation, never persisted, logged or returned to the C++ HTTP layer.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct HostContext {
     pub base_url: String,
     pub server_certificate: String,

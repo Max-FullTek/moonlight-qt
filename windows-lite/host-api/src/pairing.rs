@@ -177,6 +177,7 @@ impl Peer {
         if endpoint == "/unpair" {
             return Ok(xml::Document {
                 fields: Default::default(),
+                elements: Vec::new(),
             });
         }
         xml::parse(&response.body).map_err(Error::Xml)

@@ -3,6 +3,7 @@ param(
     [string]$NativeHttpProbe,
     [string]$QtParserReference,
     [string]$PairingPeer,
+    [string]$HostReference,
     [ValidateSet('Release', 'Debug')][string]$Configuration = 'Release'
 )
 $ErrorActionPreference = 'Stop'
@@ -41,6 +42,12 @@ try {
             (Join-Path $repoRoot 'tests/clipboard_payload_routing/fixtures') `
             ($work + '-pairing') --extended-rust
         if ($LASTEXITCODE -ne 0) { throw 'Rust pairing scenarios failed' }
+    }
+    if ($HostReference) {
+        & $python (Join-Path $repoRoot 'tests/rust_host_api/check_hosts.py') `
+            (Join-Path $env:CARGO_TARGET_DIR "$profile/rust-host-api-probe.exe") $HostReference `
+            (Join-Path $QtDirectory 'bin') ($work + '-hosts')
+        if ($LASTEXITCODE -ne 0) { throw 'Rust host query comparison failed' }
     }
 } finally {
     [Environment]::SetEnvironmentVariable('CARGO_INCREMENTAL', $savedIncremental, 'Process')

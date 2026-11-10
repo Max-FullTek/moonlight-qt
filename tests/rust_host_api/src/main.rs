@@ -18,6 +18,65 @@ fn certificate(path: &Path) -> Vec<u8> {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.len() == 6
+        && matches!(
+            args[5].as_str(),
+            "status-fields" | "app-fields" | "status-discover" | "status-unpaired"
+        )
+    {
+        use moonlight_host_api::{HostContext, hosts};
+        let fixtures = Path::new(&args[3]);
+        let context = HostContext {
+            base_url: if args[5] == "status-discover" {
+                String::new()
+            } else {
+                args[1].clone()
+            },
+            server_certificate: if args[5] == "status-unpaired" {
+                String::new()
+            } else {
+                std::fs::read_to_string(&args[2]).unwrap()
+            },
+            client_certificate: std::fs::read_to_string(fixtures.join("server.pem")).unwrap(),
+            client_key: std::fs::read_to_string(fixtures.join("server-key.pem")).unwrap(),
+            unique_id: "fixture-client".into(),
+            client_name: "fixture-client-name".into(),
+            nonce: String::new(),
+        };
+        let cancellation = moonlight_host_api::CancellationToken::new();
+        if std::env::var_os("RUST_HOST_QUERY_CANCEL").is_some() {
+            let token = cancellation.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                token.cancel();
+            });
+        }
+        let result = if args[5] == "app-fields" {
+            hosts::apps(context, cancellation)
+                .await
+                .map(|value| serde_json::to_value(value).unwrap())
+        } else {
+            let http_url = std::env::var("RUST_HOST_QUERY_HTTP_URL").unwrap_or_else(|_| {
+                format!(
+                    "http://127.0.0.1:{}/",
+                    std::env::var("NATIVE_HTTP_FIXTURE_HTTP_PORT").unwrap()
+                )
+            });
+            hosts::server_info(context, &http_url, true, cancellation)
+                .await
+                .map(|value| serde_json::to_value(value).unwrap())
+        };
+        println!(
+            "{}",
+            match result {
+                Ok(value) => serde_json::json!({"ok":true,"value":value}),
+                Err(hosts::Error::InvalidAppList) =>
+                    serde_json::json!({"ok":false,"kind":"invalid_apps"}),
+                Err(error) => serde_json::json!({"ok":false,"error":format!("{error:?}")}),
+            }
+        );
+        return;
+    }
     if args.len() == 6 && args[5].starts_with("pair-") {
         let fixtures = Path::new(&args[3]);
         let context = moonlight_host_api::pairing::Context {

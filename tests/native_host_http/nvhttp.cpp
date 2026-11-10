@@ -5,6 +5,9 @@
 #include <QFile>
 #include <QImage>
 #include <QTimer>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <cstdio>
 
 static QByteArray read(const QString& path)
@@ -63,11 +66,39 @@ int main(int argc, char** argv)
     if (qEnvironmentVariableIsSet("NATIVE_HTTP_FIXTURE_HTTP_PORT")) {
         http.m_BaseUrlHttp.setPort(qEnvironmentVariableIntValue("NATIVE_HTTP_FIXTURE_HTTP_PORT"));
     }
+    const bool fields = mode == "status-fields" || mode == "app-fields" || mode == "status-discover" || mode == "status-unpaired";
+    if (mode == "status-discover") http.setHttpsPort(0);
+    if (mode == "status-unpaired") http.setServerCert(QSslCertificate());
+    QJsonObject details;
     int error = 0, status = 0;
     bool ok = false;
     QTimer::singleShot(0, &app, [&] {
         try {
-            if (mode.startsWith("pair-")) {
+            if (fields) {
+                if (mode == "app-fields") {
+                    QJsonArray apps;
+                    for (const auto& item : http.getAppList()) {
+                        apps.append(QJsonObject{{"id",item.id},{"name",item.name.isNull()?QJsonValue(QJsonValue::Null):QJsonValue(item.name)},
+                            {"hdr",item.hdrSupported},{"collector",item.isAppCollectorGame}});
+                    }
+                    details = {{"ok",true},{"value",apps}};
+                } else {
+                    const auto body = http.getServerInfo(NvHTTP::NVLL_NONE, true);
+                    NvComputer computer(http,body);
+                    QJsonArray modes,mac;
+                    for (const auto& item : computer.displayModes) modes.append(QJsonObject{{"width",item.width},{"height",item.height},{"refresh_rate",item.refreshRate}});
+                    for (unsigned char byte : computer.macAddress) mac.append(int(byte));
+                    auto externalPort=NvHTTP::getXmlString(body,"ExternalPort").toUShort();
+                    if (!externalPort) externalPort=http.httpPort();
+                    details={{"ok",true},{"value",QJsonObject{{"name",computer.name},{"uuid",computer.uuid},{"mac",mac},
+                        {"codec_support",computer.serverCodecModeSupport},{"max_luma_hevc",computer.maxLumaPixelsHEVC},{"display_modes",modes},
+                        {"local_ip",computer.localAddress.address()},{"external_ip",computer.remoteAddress.address()},
+                        {"https_port",computer.activeHttpsPort},{"external_port",externalPort},{"nvidia",computer.isNvidiaServerSoftware},
+                        {"paired",computer.pairState==NvComputer::PS_PAIRED},{"current_app",computer.currentGameId},
+                        {"app_version",computer.appVersion},{"gfe_version",computer.gfeVersion},{"gpu",computer.gpuModel}}}};
+                }
+            }
+            else if (mode.startsWith("pair-")) {
                 NvComputer computer;
                 computer.activeAddress = NvAddress(url.host(), static_cast<uint16_t>(qEnvironmentVariableIntValue("NATIVE_HTTP_FIXTURE_HTTP_PORT")));
                 computer.activeHttpsPort = static_cast<uint16_t>(url.port());
@@ -109,9 +140,13 @@ int main(int argc, char** argv)
         }
         catch (const QtNetworkReplyException& exception) { error = exception.getError(); }
         catch (const GfeHttpResponseException& exception) { status = exception.getStatusCode(); }
+        catch (const std::runtime_error&) { if (fields) details={{"ok",false},{"kind","invalid_apps"}}; else throw; }
         app.quit();
     });
     app.exec();
-    std::printf("ok=%d error=%d status=%d\n", ok, error, status);
+    if (fields) {
+        if (details.isEmpty()) details={{"ok",false},{"kind",error?"transport":"xml"},{"status",status}};
+        std::puts(QJsonDocument(details).toJson(QJsonDocument::Compact).constData());
+    } else std::printf("ok=%d error=%d status=%d\n", ok, error, status);
     return 0;
 }

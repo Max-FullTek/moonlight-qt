@@ -9,12 +9,14 @@ pub enum Error {
 }
 pub struct Document {
     pub fields: HashMap<String, String>,
+    pub elements: Vec<(String, String, bool)>,
 }
 struct Element {
     name: String,
     value: String,
     first: bool,
     child: bool,
+    index: usize,
 }
 pub fn parse(body: &[u8]) -> Result<Document, Error> {
     let input = std::str::from_utf8(body).map_err(|_| Error::Invalid)?;
@@ -23,6 +25,7 @@ pub fn parse(body: &[u8]) -> Result<Document, Error> {
     reader.config_mut().check_comments = true;
     let mut stack: Vec<Element> = Vec::new();
     let mut fields = HashMap::new();
+    let mut elements = Vec::new();
     let mut status = None;
     let mut root = false;
     loop {
@@ -59,17 +62,21 @@ pub fn parse(body: &[u8]) -> Result<Document, Error> {
                     parent.child = true;
                 }
                 stack.push(Element {
-                    name,
+                    name: name.clone(),
                     value: String::new(),
                     first,
                     child: false,
+                    index: elements.len(),
                 });
+                elements.push((name, String::new(), false));
             }
             Event::End(_) => {
                 let element = stack.pop().ok_or(Error::Invalid)?;
                 if element.first {
-                    fields.insert(element.name, element.value);
+                    fields.insert(element.name, element.value.clone());
                 }
+                elements[element.index].1 = element.value;
+                elements[element.index].2 = element.child;
             }
             Event::Text(text) => {
                 let text = text.xml10_content();
@@ -110,7 +117,7 @@ pub fn parse(body: &[u8]) -> Result<Document, Error> {
     if status != Some(200) {
         return Err(Error::Status(status.unwrap_or(0)));
     }
-    Ok(Document { fields })
+    Ok(Document { fields, elements })
 }
 // QByteArray::fromHex compatibility: skip nonhex and left-pad odd digits.
 pub fn unhex(text: &str) -> Vec<u8> {

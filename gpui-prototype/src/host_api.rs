@@ -1,11 +1,12 @@
 //! One control runtime. Context temporarily comes from the current profile
-//! owner; display queries and the pairing protocol are owned solely by Rust.
+//! owner; host polling, display queries and pairing are owned solely by Rust.
 use crate::core::Event;
 use moonlight_host_api::{CancellationToken, HostContext};
 use std::{future::Future, pin::Pin, sync::mpsc};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 enum Command {
+    Monitors(Vec<crate::monitor::Spec>),
     ResetPairWait,
     BeginPair {
         host: String,
@@ -47,10 +48,26 @@ impl Client {
             let mut pair_pending: Option<(String, u32)> = None;
             let mut pair_job: Option<PairJob> = None;
             let pair_cancellation = CancellationToken::new();
+            let mut monitors: std::collections::HashMap<String, (u32, CancellationToken, tokio::task::JoinHandle<()>)> = std::collections::HashMap::new();
             loop {
                 tokio::select! {
                     biased;
                     command = receiver.recv() => match command {
+                        Some(Command::Monitors(specs)) => {
+                            monitors.retain(|host, (_, token, job)| {
+                                if specs.iter().any(|spec| &spec.host == host) { true }
+                                else { token.cancel(); job.abort(); false }
+                            });
+                            for spec in specs {
+                                if monitors.get(&spec.host).is_some_and(|(id, _, _)| *id == spec.generation) { continue; }
+                                if let Some((_, token, job)) = monitors.remove(&spec.host) { token.cancel(); job.abort(); }
+                                let token = CancellationToken::new();
+                                let host = spec.host.clone();
+                                let id = spec.generation;
+                                let job = tokio::spawn(crate::monitor::run(spec, commands.clone(), token.clone()));
+                                monitors.insert(host, (id, token, job));
+                            }
+                        }
                         Some(Command::ResetPairWait) => {
                             if pair_job.is_none() { pair_pending = None; }
                         }
@@ -76,7 +93,11 @@ impl Client {
                                 job = Some(Box::pin(moonlight_host_api::displays(context, cancellation.clone())));
                             }
                         }
-                        Some(Command::Stop) | None => { cancellation.cancel(); pair_cancellation.cancel(); break; }
+                        Some(Command::Stop) | None => {
+                            cancellation.cancel(); pair_cancellation.cancel();
+                            for (_, (_, token, job)) in monitors.drain() { token.cancel(); job.abort(); }
+                            break;
+                        }
                     },
                     result = async { match job.as_mut() {
                         Some(job) => job.await,
@@ -139,6 +160,9 @@ impl Client {
     pub fn stop(&self) {
         let _ = self.0.send(Command::Stop);
     }
+    pub fn monitors(&self, specs: Vec<crate::monitor::Spec>) {
+        let _ = self.0.send(Command::Monitors(specs));
+    }
 }
 
 #[cfg(test)]
@@ -148,6 +172,38 @@ mod tests {
     fn context() -> HostContext {
         serde_json::from_value(serde_json::json!({"base_url":"invalid", "server_certificate":"", "client_certificate":"",
             "client_key":"", "unique_id":"", "client_name":"", "nonce":""})).unwrap()
+    }
+    #[test]
+    fn monitor_generation_replacement_cancels_old_tasks_and_stops() {
+        let (events, _) = mpsc::channel();
+        let (commands, replies) = mpsc::channel();
+        let client = Client::spawn(events, commands).unwrap();
+        let spec = |generation| crate::monitor::Spec {
+            host: "host".into(),
+            generation,
+            context: context(),
+            addresses: vec!["invalid".into()],
+            online: false,
+            has_apps: false,
+        };
+        client.monitors(vec![spec(1)]);
+        client.monitors(vec![spec(2)]);
+        // A result already queued before replacement may retain generation 1;
+        // the worker gate must ignore it. The replacement must still run.
+        loop {
+            let reply = replies.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert_eq!(reply["command"], "monitor_update");
+            if reply["generation"] == 2 {
+                break;
+            }
+            assert_eq!(reply["generation"], 1);
+        }
+        client.monitors(Vec::new());
+        client.stop();
+        assert!(matches!(
+            replies.recv_timeout(Duration::from_secs(2)),
+            Err(mpsc::RecvTimeoutError::Disconnected)
+        ));
     }
     #[test]
     fn pairing_rejects_stale_context_and_retries_after_worker_rejection() {
