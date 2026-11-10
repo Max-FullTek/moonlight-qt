@@ -21,7 +21,7 @@ async fn main() {
     if args.len() == 6
         && matches!(
             args[5].as_str(),
-            "status-fields" | "app-fields" | "status-discover" | "status-unpaired"
+            "status-fields" | "app-fields" | "status-discover" | "status-unpaired" | "quit"
         )
     {
         use moonlight_host_api::{HostContext, hosts};
@@ -51,7 +51,10 @@ async fn main() {
                 token.cancel();
             });
         }
-        let result = if args[5] == "app-fields" {
+        let result = if args[5] == "quit" {
+            let http_url = format!("http://127.0.0.1:{}/", std::env::var("NATIVE_HTTP_FIXTURE_HTTP_PORT").unwrap());
+            hosts::quit(context, &http_url, cancellation).await.map(|_| serde_json::Value::Null)
+        } else if args[5] == "app-fields" {
             hosts::apps(context, cancellation)
                 .await
                 .map(|value| serde_json::to_value(value).unwrap())

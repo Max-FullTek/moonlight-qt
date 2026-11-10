@@ -1,7 +1,8 @@
 //! Protocol 1 uses inherited anonymous pipes, never a listening network socket.
 //! The matching Moonlight.exe must be beside this frontend. Its core flag skips
 //! QML and uses an independent profile. Rust owns polling, application/display
-//! queries and pairing. Profile persistence, launch/quit/ABR and SDL remain in
+//! queries, pairing and control-page quit. Profile persistence, session launch/
+//! teardown/ABR and SDL remain in
 //! C++ during migration; private context never reaches the UI event consumer.
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -63,6 +64,12 @@ pub enum Event {
         context: moonlight_host_api::HostContext,
     },
     MonitorContexts { hosts: Vec<crate::monitor::Spec> },
+    QuitContext {
+        host: String,
+        request_id: u32,
+        context: moonlight_host_api::HostContext,
+        http_url: String,
+    },
     PairContext {
         host: String,
         request_id: u32,
@@ -197,7 +204,10 @@ impl Client {
                 }
                 match event {
                     Some(Event::MonitorContexts {hosts}) if ready => reader_api.monitors(hosts),
-                    Some(event @ (Event::Error {..} | Event::Paired)) if ready => {
+                    Some(Event::QuitContext {host, request_id, context, http_url}) if ready => {
+                        reader_api.quit_context(host, request_id, context, http_url);
+                    }
+                    Some(event @ (Event::Error {..} | Event::Paired | Event::AppQuit)) if ready => {
                         reader_api.worker_reply();
                         if events_tx.send(event).is_err() { break; }
                     }
@@ -242,16 +252,18 @@ impl Client {
         })
     }
     pub fn send(&self, request: Value) -> anyhow::Result<()> {
-        if request["command"] == "displays" || request["command"] == "pair" {
+        if request["command"] == "displays" || request["command"] == "pair" || request["command"] == "quit" {
             let pairing = request["command"] == "pair";
+            let quitting = request["command"] == "quit";
             let host = request["host"].as_str().ok_or_else(|| anyhow::anyhow!("缺少主機識別碼"))?;
             let request_id = self.next_api_request.try_update(Ordering::Relaxed, Ordering::Relaxed,
                 |id| id.checked_add(1).filter(|next| *next <= i32::MAX as u32))
                 .map_err(|_| anyhow::anyhow!("請重新啟動主機控制服務"))?;
-            if pairing { self.api.begin_pair(host.to_owned(), request_id)?; }
+            if quitting { self.api.begin_quit(host.to_owned(), request_id)?; }
+            else if pairing { self.api.begin_pair(host.to_owned(), request_id)?; }
             else { self.api.begin(host.to_owned(), request_id)?; }
             self.commands.as_ref().ok_or_else(|| anyhow::anyhow!("核心未啟動"))?
-                .send(json!({"command":if pairing {"pair_rust"} else {"host_api_context"}, "host":host, "request_id":request_id}))?;
+                .send(json!({"command":if quitting {"quit_rust"} else if pairing {"pair_rust"} else {"host_api_context"}, "host":host, "request_id":request_id}))?;
             return Ok(());
         }
         if request["command"] == "controls" && request["action"] == "resume" {
@@ -303,6 +315,60 @@ pub fn stream_settings(s: &super::settings::Settings) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires isolated loopback host and a real worker; run check_bridge.py with quit"]
+    fn rust_quit_through_real_worker_context() -> anyhow::Result<()> {
+        let client = Client::spawn_at(std::env::var("RUST_HOST_API_WORKER")?.into(),
+            std::env::var("RUST_HOST_API_PROFILE")?.into())?;
+        let wait = |predicate: &dyn Fn(&Event)->bool| -> anyhow::Result<Event> {
+            let deadline=Instant::now()+Duration::from_secs(15);
+            while Instant::now()<deadline {
+                for event in client.drain() {
+                    anyhow::ensure!(!matches!(event,Event::QuitContext {..}),"Private quit context reached UI");
+                    if predicate(&event) { return Ok(event); }
+                    anyhow::ensure!(!matches!(event,Event::AppQuit),"Unexpected quit completion");
+                    if let Event::Error {code,..} = event { anyhow::bail!("Unexpected error: {code}"); }
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            anyhow::bail!("Expected quit event did not arrive")
+        };
+        let outcome=(|| -> anyhow::Result<()> {
+            wait(&|event| matches!(event,Event::Hosts {hosts} if hosts.iter().any(|h| h.online && h.paired && h.current_app==42)))?;
+            // A success response alone is insufficient: the server stays busy.
+            client.send(json!({"command":"quit","host":"rust-display-host"}))?;
+            client.send(json!({"command":"quit_complete","host":"rust-display-host","request_id":999,"error":""}))?;
+            client.send(json!({"command":"rename","host":"rust-display-host","name":"must-not-apply"}))?;
+            wait(&|event| matches!(event,Event::Error {code,..} if code=="busy"))?;
+            let result=wait(&|event| matches!(event,Event::Error {code,..} if code=="quit_failed"))?;
+            anyhow::ensure!(matches!(result,Event::Error {message,..} if message.contains("wasn't started")),"Ownership failure lost");
+            // Failure must release the operation lock and allow a retry.
+            std::fs::write(std::env::var("RUST_QUIT_PHASE")?,"accept")?;
+            client.send(json!({"command":"quit","host":"rust-display-host"}))?;
+            wait(&|event| matches!(event,Event::AppQuit))?;
+            client.send(json!({"command":"list"}))?;
+            wait(&|event| matches!(event,Event::Hosts {hosts} if hosts.iter().any(|h| h.current_app==0)))?;
+            // Already-free hosts acknowledge without another mutation.
+            client.send(json!({"command":"quit","host":"rust-display-host"}))?;
+            wait(&|event| matches!(event,Event::AppQuit))?;
+            // EOF must drop an in-flight mutation without issuing verification
+            // or reporting success. The fixture signals when cancel is pending.
+            let phase=std::path::PathBuf::from(std::env::var("RUST_QUIT_PHASE")?);
+            std::fs::write(&phase,"restart")?;
+            wait(&|event| matches!(event,Event::Hosts {hosts} if hosts.iter().any(|h| h.current_app==42)))?;
+            std::fs::write(&phase,"hold")?;
+            client.send(json!({"command":"quit","host":"rust-display-host"}))?;
+            let deadline=Instant::now()+Duration::from_secs(5);
+            while !phase.with_extension("started").exists() {
+                anyhow::ensure!(Instant::now()<deadline,"Pending cancellation did not start");
+                thread::sleep(Duration::from_millis(10));
+            }
+            Ok(())
+        })();
+        let _=client.send(json!({"command":"shutdown"}));
+        wait(&|event| matches!(event,Event::Error {code,..} if code=="core_exited"))?;
+        outcome
+    }
     #[test]
     #[ignore = "requires isolated lifecycle fixture; run check_monitor.py"]
     fn rust_monitor_through_real_worker() -> anyhow::Result<()> {

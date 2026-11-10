@@ -21,6 +21,7 @@ pub enum Error {
     Redirect,
     Xml(xml::Error),
     InvalidAppList,
+    Rejected { code: i32, message: String },
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct App {
@@ -68,6 +69,9 @@ fn port(text: &str, fallback: u16) -> u16 {
 }
 pub fn parse_server_info(body: &[u8], http_port: u16) -> Result<ServerInfo, Error> {
     let document = xml::parse(body).map_err(Error::Xml)?;
+    server_info_document(document, http_port)
+}
+fn server_info_document(document: xml::Document, http_port: u16) -> Result<ServerInfo, Error> {
     let field = |key: &str| document.fields.get(key).map(String::as_str).unwrap_or("");
     let mut modes: Vec<DisplayMode> = Vec::new();
     for (name, value, child) in &document.elements {
@@ -272,6 +276,33 @@ pub async fn apps(
     let url = base(&context.base_url, "https")?;
     parse_apps(&request(&context, url, "/applist", 5000, &cancellation).await?)
 }
+/// The host may acknowledge cancel without terminating another client's
+/// session. Verify server state just as NvHTTP::quitApp does; never retry a
+/// mutation or downgrade its TLS request.
+pub async fn quit(
+    context: HostContext,
+    http_url: &str,
+    cancellation: CancellationToken,
+) -> Result<(), Error> {
+    let url = base(&context.base_url, "https")?;
+    let body = request(&context, url, "/cancel", 30000, &cancellation).await?;
+    let (_, code, message) = xml::parse_response(&body).map_err(Error::Xml)?;
+    if code != 200 {
+        return Err(Error::Rejected { code, message });
+    }
+    let http = base(http_url, "http")?;
+    let http_port = http.port_or_known_default().ok_or(Error::InvalidContext)?;
+    let (document, code, message) =
+        pinned_server_response(&context, http, 5000, &cancellation).await?;
+    if code != 200 {
+        return Err(Error::Rejected { code, message });
+    }
+    let info = server_info_document(document, http_port)?;
+    if info.current_app != 0 {
+        return Err(Error::Xml(xml::Error::Status(599)));
+    }
+    Ok(())
+}
 /// Empty base_url means the HTTPS port has not been discovered. A stored pin
 /// requires a pinned TLS request after HTTP port discovery; TLS failures never
 /// permit downgrade. Only XML status 401 from the pinned peer permits recovery.
@@ -306,13 +337,25 @@ pub async fn server_info(
             .map_err(|_| Error::InvalidContext)?;
         context.base_url = https.to_string();
     }
-    let https = base(&context.base_url, "https")?;
-    let body = request(&context, https, "/serverinfo", timeout, &cancellation).await?;
-    match parse_server_info(&body, http_port) {
-        Err(Error::Xml(xml::Error::Status(401))) => {
-            let body = request(&context, http, "/serverinfo", timeout, &cancellation).await?;
-            parse_server_info(&body, http_port)
-        }
-        result => result,
+    let (document, code, _) =
+        pinned_server_response(&context, http, timeout, &cancellation).await?;
+    if code != 200 {
+        return Err(Error::Xml(xml::Error::Status(code)));
     }
+    server_info_document(document, http_port)
+}
+async fn pinned_server_response(
+    context: &HostContext,
+    http: reqwest::Url,
+    timeout: u64,
+    cancellation: &CancellationToken,
+) -> Result<(xml::Document, i32, String), Error> {
+    let https = base(&context.base_url, "https")?;
+    let body = request(context, https, "/serverinfo", timeout, cancellation).await?;
+    let response = xml::parse_response(&body).map_err(Error::Xml)?;
+    if response.1 == 401 {
+        let body = request(context, http, "/serverinfo", timeout, cancellation).await?;
+        return xml::parse_response(&body).map_err(Error::Xml);
+    }
+    Ok(response)
 }

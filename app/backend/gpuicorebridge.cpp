@@ -382,6 +382,37 @@ void GpuiCoreBridge::command(const QByteArray& line) {
     const auto request = document.object();
     const auto name = request.value("command").toString();
     if (name == "monitor_update") { if (m_RustMonitor) applyMonitorUpdate(request); return; }
+    if (name == "quit_complete") {
+        // Only the matching in-flight operation may change UI/profile state.
+        if (!m_RustQuitRequest || !integer(request,"request_id",1,2147483647) ||
+                request["request_id"].toInt()!=m_RustQuitRequest || request["host"].toString()!=m_RustQuitHost) return;
+        if (!request["error"].isString()) return;
+        auto* host=findHost(m_RustQuitHost);
+        m_RustQuitRequest=0; m_RustQuitHost.clear(); m_QuitPending=false;
+        if (!host) return;
+        const auto error=request["error"].toString();
+        if (error.isEmpty()) {
+            // Rust verified /serverinfo after /cancel. Refresh only the field
+            // that was verified; later normal polls retain profile ownership.
+            { QWriteLocker lock(&host->lock); host->currentGameId=0; }
+            m_Manager->clientSideAttributeUpdated(host);
+            send({{"event","app_quit"}});
+        } else if (error=="not_owner") {
+            fail("quit_failed",tr("The running game wasn't started by this PC. You must quit the game on the host PC manually or use the device that originally started the game."));
+        } else if (error=="host" && integer(request,"status",INT_MIN,INT_MAX) && request["message"].isString()) {
+            auto message=request["message"].toString();
+            int status=request["status"].toInt();
+            if (status==-1 && message=="Invalid") {
+                status=418;
+                message=tr("Missing audio capture device. Reinstalling GeForce Experience should resolve this error.");
+            }
+            fail("quit_failed",message+QStringLiteral(" (Error %1)").arg(status));
+        } else if (error=="http" && integer(request,"status",400,599)) {
+            fail("quit_failed",tr("Unable to end the host session. Please try again.")+QStringLiteral(" (HTTP %1)").arg(request["status"].toInt()));
+        } else fail("quit_failed",tr("Unable to end the host session. Please try again."));
+        publishHosts();
+        return;
+    }
     if (name == "shutdown") { shutdown(); return; }
     if (name == "list") { publishHosts(); return; }
     if (name == "stop") { if (m_Session) m_Session->interrupt(); return; }
@@ -445,10 +476,10 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         return;
     }
     if (name != "pair" && name != "pair_rust" && name != "start" && name != "app_preferences" && name != "displays" && name != "host_api_context" &&
-            name != "rename" && name != "remove" && name != "quit") { fail("unknown_command", tr("Unknown command.")); return; }
+            name != "rename" && name != "remove" && name != "quit" && name != "quit_rust") { fail("unknown_command", tr("Unknown command.")); return; }
     auto* host = findHost(request.value("host").toString());
     if (!host) { fail("host_not_found", tr("Host not found.")); return; }
-    if (name == "host_api_context") {
+    if (name == "host_api_context" || name == "quit_rust") {
         if (!integer(request, "request_id", 1, 2147483647)) {
             fail("invalid_context_request", tr("Invalid host API request identifier.")); return;
         }
@@ -456,6 +487,11 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         if (host->pairState != NvComputer::PS_PAIRED || host->state != NvComputer::CS_ONLINE ||
                 host->serverCert.isNull() || host->activeHttpsPort == 0) {
             fail("not_ready", tr("Host must be online and paired.")); return;
+        }
+        const bool quitting=name=="quit_rust";
+        if (quitting && host->currentGameId==0) { send({{"event","app_quit"}}); return; }
+        if (quitting) {
+            m_QuitPending=true; m_RustQuitHost=host->uuid; m_RustQuitRequest=request["request_id"].toInt();
         }
         QUrl base;
         base.setScheme("https");
@@ -465,7 +501,9 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         if (clientName.isEmpty()) clientName = QHostInfo::localHostName();
         // Temporary read-only profile adapter, only on inherited anonymous
         // stdout. Never log or persist it. Remove with Rust profile ownership.
-        send({{"event", "host_api_context"}, {"host", host->uuid},
+        QUrl http=base; http.setScheme("http"); http.setPort(host->activeAddress.port());
+        send({{"event", quitting ? "quit_context" : "host_api_context"}, {"host", host->uuid},
+              {"http_url",http.toString()},
               {"request_id", request["request_id"]},
               {"context", QJsonObject{{"base_url", base.toString()},
                   {"server_certificate", QString::fromLatin1(host->serverCert.toPem())},

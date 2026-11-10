@@ -1,11 +1,13 @@
 //! One control runtime. Context temporarily comes from the current profile
-//! owner; host polling, display queries and pairing are owned solely by Rust.
+//! owner; polling, display queries, pairing and control-page quit use Rust.
 use crate::core::Event;
 use moonlight_host_api::{CancellationToken, HostContext};
 use std::{future::Future, pin::Pin, sync::mpsc};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 enum Command {
+    BeginQuit { host: String, id: u32 },
+    QuitContext { host: String, id: u32, context: HostContext, http_url: String },
     Monitors(Vec<crate::monitor::Spec>),
     ResetPairWait,
     BeginPair {
@@ -48,11 +50,24 @@ impl Client {
             let mut pair_pending: Option<(String, u32)> = None;
             let mut pair_job: Option<PairJob> = None;
             let pair_cancellation = CancellationToken::new();
+            type QuitJob = Pin<Box<dyn Future<Output = Result<(), moonlight_host_api::hosts::Error>> + Send>>;
+            let mut quit_pending: Option<(String, u32)> = None;
+            let mut quit_job: Option<QuitJob> = None;
+            let quit_cancellation = CancellationToken::new();
             let mut monitors: std::collections::HashMap<String, (u32, CancellationToken, tokio::task::JoinHandle<()>)> = std::collections::HashMap::new();
             loop {
                 tokio::select! {
                     biased;
                     command = receiver.recv() => match command {
+                        Some(Command::BeginQuit {host, id}) => {
+                            if quit_pending.is_none() { quit_pending = Some((host, id)); }
+                        }
+                        Some(Command::QuitContext {host, id, context, http_url}) => {
+                            if quit_job.is_none() && quit_pending.as_ref() == Some(&(host, id)) {
+                                let token = quit_cancellation.clone();
+                                quit_job = Some(Box::pin(async move { moonlight_host_api::hosts::quit(context, &http_url, token).await }));
+                            }
+                        }
                         Some(Command::Monitors(specs)) => {
                             monitors.retain(|host, (_, token, job)| {
                                 if specs.iter().any(|spec| &spec.host == host) { true }
@@ -70,6 +85,7 @@ impl Client {
                         }
                         Some(Command::ResetPairWait) => {
                             if pair_job.is_none() { pair_pending = None; }
+                            if quit_job.is_none() { quit_pending = None; }
                         }
                         Some(Command::BeginPair {host, id}) => {
                             if pair_pending.is_none() { pair_pending = Some((host, id)); }
@@ -95,8 +111,27 @@ impl Client {
                         }
                         Some(Command::Stop) | None => {
                             cancellation.cancel(); pair_cancellation.cancel();
+                            quit_cancellation.cancel();
                             for (_, (_, token, job)) in monitors.drain() { token.cancel(); job.abort(); }
                             break;
+                        }
+                    },
+                    result = async { match quit_job.as_mut() {
+                        Some(job) => job.await,
+                        None => std::future::pending().await,
+                    }} => {
+                        quit_job = None;
+                        if let Some((host, id)) = quit_pending.take() {
+                            let (error, status, message) = match result {
+                                Ok(()) => ("", 0, String::new()),
+                                Err(moonlight_host_api::hosts::Error::Xml(moonlight_host_api::xml::Error::Status(599))) |
+                                Err(moonlight_host_api::hosts::Error::Rejected {code:599,..}) => ("not_owner", 599, String::new()),
+                                Err(moonlight_host_api::hosts::Error::Rejected {code, message}) => ("host", code, message),
+                                Err(moonlight_host_api::hosts::Error::Http(code)) => ("http", code as i32, String::new()),
+                                Err(_) => ("failed", 0, String::new()),
+                            };
+                            let _ = commands.send(serde_json::json!({"command":"quit_complete", "host":host,
+                                "request_id":id, "error":error, "status":status, "message":message}));
                         }
                     },
                     result = async { match job.as_mut() {
@@ -146,6 +181,13 @@ impl Client {
     pub fn worker_reply(&self) {
         let _ = self.0.send(Command::ResetPairWait);
     }
+    pub fn begin_quit(&self, host: String, id: u32) -> anyhow::Result<()> {
+        self.0.send(Command::BeginQuit {host, id})
+            .map_err(|_| anyhow::anyhow!("主機控制服務已結束"))
+    }
+    pub fn quit_context(&self, host: String, id: u32, context: HostContext, http_url: String) {
+        let _ = self.0.send(Command::QuitContext {host, id, context, http_url});
+    }
     pub fn pair_context(
         &self,
         host: String,
@@ -172,6 +214,28 @@ mod tests {
     fn context() -> HostContext {
         serde_json::from_value(serde_json::json!({"base_url":"invalid", "server_certificate":"", "client_certificate":"",
             "client_key":"", "unique_id":"", "client_name":"", "nonce":""})).unwrap()
+    }
+    #[test]
+    fn quit_rejects_stale_context_and_retries_after_worker_rejection() {
+        let (events, _) = mpsc::channel();
+        let (commands, replies) = mpsc::channel();
+        let client = Client::spawn(events, commands).unwrap();
+        client.begin_quit("old".into(), 1).unwrap();
+        client.worker_reply(); // Not ready, or already free: no context follows.
+        client.begin_quit("new".into(), 2).unwrap();
+        client.quit_context("old".into(), 1, context(), "invalid".into());
+        client.quit_context("new".into(), 2, context(), "invalid".into());
+        let result = replies.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(result["command"], "quit_complete");
+        assert_eq!(result["host"], "new");
+        assert_eq!(result["request_id"], 2);
+        assert_eq!(result["error"], "failed");
+        client.begin_quit("again".into(), 3).unwrap();
+        client.quit_context("new".into(), 2, context(), "invalid".into());
+        client.quit_context("again".into(), 3, context(), "invalid".into());
+        assert_eq!(replies.recv_timeout(Duration::from_secs(2)).unwrap()["request_id"], 3);
+        client.stop();
+        assert!(matches!(replies.recv_timeout(Duration::from_secs(2)), Err(mpsc::RecvTimeoutError::Disconnected)));
     }
     #[test]
     fn monitor_generation_replacement_cancels_old_tasks_and_stops() {

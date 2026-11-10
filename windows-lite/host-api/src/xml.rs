@@ -19,6 +19,15 @@ struct Element {
     index: usize,
 }
 pub fn parse(body: &[u8]) -> Result<Document, Error> {
+    let (document, status, _) = parse_response(body)?;
+    if status != 200 {
+        return Err(Error::Status(status));
+    }
+    Ok(document)
+}
+/// Retain host status diagnostics for APIs that surface errors to the user.
+/// Parsing and document validation remain identical to `parse`.
+pub(crate) fn parse_response(body: &[u8]) -> Result<(Document, i32, String), Error> {
     let input = std::str::from_utf8(body).map_err(|_| Error::Invalid)?;
     let mut reader = NsReader::from_str(input);
     reader.config_mut().expand_empty_elements = true;
@@ -27,6 +36,7 @@ pub fn parse(body: &[u8]) -> Result<Document, Error> {
     let mut fields = HashMap::new();
     let mut elements = Vec::new();
     let mut status = None;
+    let mut status_message = String::new();
     let mut root = false;
     loop {
         match reader.read_event().map_err(|_| Error::Invalid)? {
@@ -50,6 +60,9 @@ pub fn parse(body: &[u8]) -> Result<Document, Error> {
                     if stack.is_empty() && attribute.key.as_ref() == "status_code" {
                         // Qt reads u32 then casts, including GFE's 0xffffffff.
                         status = Some(value.trim().parse::<u32>().unwrap_or(0) as i32);
+                    }
+                    if stack.is_empty() && attribute.key.as_ref() == "status_message" {
+                        status_message = value.into_owned();
                     }
                 }
                 // getXmlString finds the first matching local name at any
@@ -114,10 +127,11 @@ pub fn parse(body: &[u8]) -> Result<Document, Error> {
     if !root || !stack.is_empty() {
         return Err(Error::Invalid);
     }
-    if status != Some(200) {
-        return Err(Error::Status(status.unwrap_or(0)));
-    }
-    Ok(Document { fields, elements })
+    Ok((
+        Document { fields, elements },
+        status.unwrap_or(0),
+        status_message,
+    ))
 }
 // QByteArray::fromHex compatibility: skip nonhex and left-pad odd digits.
 pub fn unhex(text: &str) -> Vec<u8> {

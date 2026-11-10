@@ -48,6 +48,10 @@ try {
             (Join-Path $env:CARGO_TARGET_DIR "$profile/rust-host-api-probe.exe") $HostReference `
             (Join-Path $QtDirectory 'bin') ($work + '-hosts')
         if ($LASTEXITCODE -ne 0) { throw 'Rust host query comparison failed' }
+        & $python (Join-Path $repoRoot 'tests/rust_host_api/check_quit.py') `
+            (Join-Path $env:CARGO_TARGET_DIR "$profile/rust-host-api-probe.exe") $HostReference `
+            (Join-Path $QtDirectory 'bin') ($work + '-quit')
+        if ($LASTEXITCODE -ne 0) { throw 'Rust session quit comparison failed' }
     }
 } finally {
     [Environment]::SetEnvironmentVariable('CARGO_INCREMENTAL', $savedIncremental, 'Process')

@@ -15,6 +15,9 @@ from urllib.parse import parse_qs, urlsplit
 
 
 def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode="ok"):
+    quit_mode = peer_executable == "quit"
+    if quit_mode:
+        peer_executable = None
     root = Path(__file__).resolve().parents[2]
     worker = Path(worker).resolve()
     runtime = Path(runtime_directory).resolve()
@@ -25,6 +28,9 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
     peer = None
     paired = not peer_executable
     pin_file = work / "pin.txt"
+    phase_file = work / "quit-phase.txt"
+    phase_file.write_text("reject")
+    running = True
 
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -33,13 +39,16 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
             pass
 
         def do_GET(self):
-            nonlocal peer, paired
+            nonlocal peer, paired, running
             url = urlsplit(self.path)
             seen.append((url.path, parse_qs(url.query)))
             if url.path == "/serverinfo":
+                if quit_mode and phase_file.read_text() == "restart":
+                    running = True
                 body = (f'<root status_code="200"><hostname>fixture</hostname><uniqueid>rust-display-host</uniqueid>'
                         f'<HttpsPort>{tls.server_port}</HttpsPort><PairStatus>{int(paired)}</PairStatus>'
-                        '<state>SUNSHINE_SERVER_FREE</state><appversion>7.1.0.0</appversion>'
+                        f'<state>SUNSHINE_SERVER_{"BUSY" if quit_mode and running else "FREE"}</state>'
+                        f'<currentgame>{42 if quit_mode and running else 0}</currentgame><appversion>7.1.0.0</appversion>'
                         '<GfeVersion>3.26.0.0</GfeVersion></root>').encode()
             elif url.path == "/pair":
                 if peer is None:
@@ -72,12 +81,25 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
             elif url.path == "/displays":
                 body = json.dumps({"status_code": 200, "displays": [
                     {"friendly_name": "家中螢幕 🎮", "display_name": "screen", "device_id": "screen-1"}, {}]}, ensure_ascii=False).encode()
+            elif url.path == "/cancel" and quit_mode:
+                assert isinstance(self.connection, ssl.SSLSocket), "Cancel was not pinned TLS"
+                phase = phase_file.read_text()
+                if phase == "hold":
+                    phase_file.with_suffix(".started").write_text("started")
+                time.sleep(1.0 if phase == "hold" else 0.4)
+                if phase == "accept":
+                    running = False
+                body = b'<root status_code="200"/>'
             else:
                 body = b'<root status_code="404"/>'
-            self.send_response(503 if url.path == "/displays" and os.environ.get("RUST_DISPLAY_HTTP_ERROR") == "1" else 200)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.send_response(503 if url.path == "/displays" and os.environ.get("RUST_DISPLAY_HTTP_ERROR") == "1" else 200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except OSError:
+                if not quit_mode:
+                    raise
 
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(fixtures / "server.pem", fixtures / "server-key.pem")
@@ -105,12 +127,13 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
         thread.start()
     env = dict(os.environ, RUST_HOST_API_WORKER=str(worker), RUST_HOST_API_PROFILE=str(profile),
                RUST_PAIRING_PIN_FILE=str(pin_file), RUST_PAIRING_EXPECTED=("paired" if mode == "ok" else "pair_pin_mismatch" if mode == "wrong-pin" else "pair_failed"),
+               RUST_QUIT_PHASE=str(phase_file),
                LOCALAPPDATA=str(work / "local"), QT_QPA_PLATFORM="offscreen", QT_PLUGIN_PATH=str(Path(qt_plugins).resolve()),
                QT_QPA_PLATFORM_PLUGIN_PATH=str(Path(qt_plugins).resolve() / "platforms"),
                PATH=str(runtime) + ";" + os.environ["PATH"])
     try:
         subprocess.run(["cargo", "+1.99.1", "test", "--release", "--locked", "--manifest-path",
-                        str(root / "gpui-prototype/Cargo.toml"), "core::tests::rust_pairing_through_real_worker_context" if peer_executable else "core::tests::rust_displays_through_real_worker_context",
+                        str(root / "gpui-prototype/Cargo.toml"), "core::tests::rust_quit_through_real_worker_context" if quit_mode else "core::tests::rust_pairing_through_real_worker_context" if peer_executable else "core::tests::rust_displays_through_real_worker_context",
                         "--", "--exact", "--ignored", "--nocapture"], env=env, check=True, timeout=90)
         if peer_executable:
             pairs = [entry for entry in seen if entry[0] == "/pair"]
@@ -123,7 +146,14 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
             assert "rust-display-host=測試主機" in saved, "Pair name was not saved"
             assert len([entry for entry in seen if entry[0] == "/unpair"]) == (0 if mode == "ok" else 1), seen
         displays = [entry for entry in seen if entry[0] == "/displays"]
-        if not peer_executable:
+        if quit_mode:
+            cancellations = [entry for entry in seen if entry[0] == "/cancel"]
+            assert len(cancellations) == 3, seen
+            assert len({entry[1]["uuid"][0] for entry in cancellations}) == 3, "Cancel nonce reused"
+            assert all(entry[1]["uniqueid"] == ["fixture-client"] for entry in cancellations)
+            assert running  # The last operation was cancelled during shutdown.
+            assert seen[-1][0] == "/cancel", "Shutdown continued into verification"
+        elif not peer_executable:
             assert len(displays) == 1, seen
             query = displays[0][1]
             assert query["uniqueid"] == ["fixture-client"] and query["clientname"] == ["fixture-client-name"], query
@@ -132,7 +162,9 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
         assert b"/displays" not in log, "C++ still requested displays"
         assert b"PRIVATE KEY" not in log and b"BEGIN CERTIFICATE" not in log, "Identity appeared in diagnostics"
         assert b"pair stage" not in log, "C++ still performed pairing"
-        print(f"Real worker context, Rust {'pairing ' + mode if peer_executable else 'display query'}, persistence and shutdown: passed")
+        if quit_mode:
+            assert b"Quit response:" not in log, "C++ still performed cancellation"
+        print(f"Real worker context, Rust {'session quit' if quit_mode else 'pairing ' + mode if peer_executable else 'display query'}, persistence and shutdown: passed")
     finally:
         for server in (tls, plain):
             server.shutdown()
