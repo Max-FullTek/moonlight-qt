@@ -1,6 +1,7 @@
 //! Windows Lite control API. No profile access, GUI, worker or media transport.
 pub mod hosts;
 pub mod pairing;
+pub mod session;
 pub mod transport;
 pub mod xml;
 use serde::{Deserialize, Serialize};

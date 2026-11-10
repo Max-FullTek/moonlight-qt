@@ -14,7 +14,9 @@ class Session;
 // start, stop, controls, shutdown, host_api_context (read-only profile adapter
 // for Rust-owned displays), pair_rust/pair_name/pair_complete and monitor_update
 // (typed Rust poll results), quit_rust/quit_complete (Rust cancel/verification).
-// Host/session commands dispatch on Qt's main thread. No QML engine is
+// session_api events carry typed C++ control requests; session_api_result is
+// completed directly on the pipe reader without a Qt/main-thread dependency.
+// Other host/session commands dispatch on Qt's main thread. No QML engine is
 // created. stdout is reserved for protocol events; diagnostics stay on stderr.
 class GpuiCoreBridge : public QObject
 {

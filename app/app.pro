@@ -301,6 +301,7 @@ SOURCES += \
 
 HEADERS += \
     backend/gpuicorebridge.h \
+    backend/sessionapirpc.h \
     versionutils.h \
     backend/pairedcertificate.h \
     SDL_compat.h \

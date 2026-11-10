@@ -52,6 +52,13 @@ try {
             (Join-Path $env:CARGO_TARGET_DIR "$profile/rust-host-api-probe.exe") $HostReference `
             (Join-Path $QtDirectory 'bin') ($work + '-quit')
         if ($LASTEXITCODE -ne 0) { throw 'Rust session quit comparison failed' }
+        & $python (Join-Path $repoRoot 'tests/rust_host_api/check_session.py') `
+            $HostReference (Join-Path $QtDirectory 'bin') ($work + '-session')
+        if ($LASTEXITCODE -ne 0) { throw 'Rust session API comparison failed' }
+        $rpcProbe = Join-Path (Split-Path $HostReference -Parent) 'native_session_rpc.exe'
+        if (!(Test-Path -LiteralPath $rpcProbe)) { throw 'Build the native_session_rpc CMake target beside HostReference.' }
+        & $rpcProbe
+        if ($LASTEXITCODE -ne 0) { throw 'Native session RPC lifecycle checks failed' }
     }
 } finally {
     [Environment]::SetEnvironmentVariable('CARGO_INCREMENTAL', $savedIncremental, 'Process')

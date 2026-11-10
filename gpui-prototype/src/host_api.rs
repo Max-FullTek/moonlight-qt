@@ -1,11 +1,12 @@
 //! One control runtime. Context temporarily comes from the current profile
-//! owner; polling, display queries, pairing and control-page quit use Rust.
+//! owner; polling, displays, pairing and streaming control requests use Rust.
 use crate::core::Event;
 use moonlight_host_api::{CancellationToken, HostContext};
 use std::{future::Future, pin::Pin, sync::mpsc};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 enum Command {
+    Session(SessionRequest),
     BeginQuit { host: String, id: u32 },
     QuitContext { host: String, id: u32, context: HostContext, http_url: String },
     Monitors(Vec<crate::monitor::Spec>),
@@ -29,6 +30,15 @@ enum Command {
         context: HostContext,
     },
     Stop,
+}
+#[derive(serde::Deserialize)]
+pub struct SessionRequest {
+    pub request_id: u64,
+    pub context: HostContext,
+    pub request: moonlight_host_api::session::Operation,
+}
+impl std::fmt::Debug for SessionRequest {
+    fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result {f.debug_struct("SessionRequest").field("request_id",&self.request_id).finish_non_exhaustive()}
 }
 #[derive(Clone)]
 pub struct Client(UnboundedSender<Command>);
@@ -54,11 +64,29 @@ impl Client {
             let mut quit_pending: Option<(String, u32)> = None;
             let mut quit_job: Option<QuitJob> = None;
             let quit_cancellation = CancellationToken::new();
+            let session_cancellation=CancellationToken::new();
+            let mut session_jobs=tokio::task::JoinSet::new();
             let mut monitors: std::collections::HashMap<String, (u32, CancellationToken, tokio::task::JoinHandle<()>)> = std::collections::HashMap::new();
             loop {
                 tokio::select! {
                     biased;
                     command = receiver.recv() => match command {
+                        Some(Command::Session(request)) => {
+                            let token=session_cancellation.clone();
+                            session_jobs.spawn(async move {
+                                let result=moonlight_host_api::session::execute(request.context,request.request,token).await;
+                                use moonlight_host_api::hosts::Error;
+                                let response=match result {
+                                    Ok(value)=>serde_json::json!({"ok":true,"value":value}),
+                                    Err(Error::Rejected {code,message})=>serde_json::json!({"ok":false,"kind":"host","code":code,"message":message}),
+                                    Err(Error::Xml(moonlight_host_api::xml::Error::Status(code)))=>serde_json::json!({"ok":false,"kind":"host","code":code,"message":""}),
+                                    Err(Error::Http(code))=>serde_json::json!({"ok":false,"kind":"http","code":code}),
+                                    Err(Error::Transport(moonlight_host_api::transport::Error::Timeout))=>serde_json::json!({"ok":false,"kind":"timeout"}),
+                                    Err(_)=>serde_json::json!({"ok":false,"kind":"failed"}),
+                                };
+                                (request.request_id,response)
+                            });
+                        }
                         Some(Command::BeginQuit {host, id}) => {
                             if quit_pending.is_none() { quit_pending = Some((host, id)); }
                         }
@@ -112,8 +140,14 @@ impl Client {
                         Some(Command::Stop) | None => {
                             cancellation.cancel(); pair_cancellation.cancel();
                             quit_cancellation.cancel();
+                            session_cancellation.cancel();session_jobs.abort_all();
                             for (_, (_, token, job)) in monitors.drain() { token.cancel(); job.abort(); }
                             break;
+                        }
+                    },
+                    Some(result)=session_jobs.join_next(), if !session_jobs.is_empty() => {
+                        if let Ok((id,result))=result {
+                            let _=commands.send(serde_json::json!({"command":"session_api_result","request_id":id,"result":result}));
                         }
                     },
                     result = async { match quit_job.as_mut() {
@@ -181,6 +215,7 @@ impl Client {
     pub fn worker_reply(&self) {
         let _ = self.0.send(Command::ResetPairWait);
     }
+    pub fn session(&self,request:SessionRequest) {let _=self.0.send(Command::Session(request));}
     pub fn begin_quit(&self, host: String, id: u32) -> anyhow::Result<()> {
         self.0.send(Command::BeginQuit {host, id})
             .map_err(|_| anyhow::anyhow!("主機控制服務已結束"))
@@ -211,6 +246,65 @@ impl Client {
 mod tests {
     use super::*;
     use std::time::Duration;
+    #[test]
+    fn session_requests_keep_ids_and_hide_private_context() {
+        let (events,_)=mpsc::channel();let (commands,replies)=mpsc::channel();
+        let api=Client::spawn(events,commands).unwrap();
+        for id in [42,7] {
+            let mut context=context();context.client_key="private-secret".into();
+            let request=SessionRequest {request_id:id,context,request:moonlight_host_api::session::Operation::AbrCapabilities};
+            assert!(!format!("{request:?}").contains("private-secret"));
+            api.session(request);
+        }
+        let mut ids=Vec::new();
+        for _ in 0..2 {
+            let reply=replies.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert_eq!(reply["command"],"session_api_result");
+            assert_eq!(reply["result"]["ok"],false);
+            ids.push(reply["request_id"].as_u64().unwrap());
+        }
+        ids.sort_unstable();assert_eq!(ids,[7,42]);
+        api.stop();
+        assert!(matches!(replies.recv_timeout(Duration::from_secs(2)),Err(mpsc::RecvTimeoutError::Disconnected)));
+    }
+    #[test]
+    #[ignore = "requires native NvHTTP peer and pinned loopback fixture; run check_session.py"]
+    fn session_api_through_native_callers() -> anyhow::Result<()> {
+        use std::io::{BufRead,BufReader,Write};
+        use std::process::{Command,Stdio};
+        let args:Vec<String>=serde_json::from_str(&std::env::var("SESSION_FIXTURE_ARGS")?)?;
+        let mut child=Command::new(std::env::var("SESSION_FIXTURE_PEER")?).args(args)
+            .env("SESSION_FIXTURE_RPC","1").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+        let mut stdin=child.stdin.take().unwrap();
+        let stdout=child.stdout.take().unwrap();
+        let stderr=child.stderr.take().unwrap();
+        let diagnostics=std::thread::spawn(move || {let mut reader=BufReader::new(stderr);let mut bytes=Vec::new();std::io::Read::read_to_end(&mut reader,&mut bytes).unwrap();bytes});
+        let (events,_)=mpsc::channel();let (commands,replies)=mpsc::channel();
+        let api=Client::spawn(events,commands)?;
+        let writer=std::thread::spawn(move || {for reply in replies {serde_json::to_writer(&mut stdin,&reply).unwrap();writeln!(stdin).unwrap();stdin.flush().unwrap();}});
+        let outcome=(||->anyhow::Result<()> {
+            for line in BufReader::new(stdout).lines() {
+                let value:serde_json::Value=serde_json::from_str(&line?)?;
+                if value["done"]==true {
+                    std::fs::write(std::env::var("SESSION_FIXTURE_RESULT")?,serde_json::to_vec(&value)?)?;return Ok(());
+                }
+                let event:crate::core::Event=serde_json::from_value(value)?;
+                if let crate::core::Event::SessionApi {request}=event {
+                    api.session(request);
+                    if std::env::var("SESSION_FIXTURE_STOP").as_deref()==Ok("1") {
+                        std::thread::sleep(Duration::from_millis(150)); api.stop();
+                    }
+                } else {anyhow::bail!("Unexpected native event");}
+            }
+            anyhow::bail!("No native result")
+        })();
+        api.stop();drop(api);writer.join().unwrap();
+        anyhow::ensure!(child.wait()?.success(),"Native caller failed");
+        let bytes=diagnostics.join().unwrap();
+        let log=String::from_utf8_lossy(&bytes);
+        anyhow::ensure!(!log.contains("PRIVATE KEY") && !log.contains("BEGIN CERTIFICATE") && !log.contains("Launch response:") && !log.contains("Executing native request:"),"Native caller leaked data or performed network I/O");
+        outcome
+    }
     fn context() -> HostContext {
         serde_json::from_value(serde_json::json!({"base_url":"invalid", "server_certificate":"", "client_certificate":"",
             "client_key":"", "unique_id":"", "client_name":"", "nonce":""})).unwrap()

@@ -1,6 +1,7 @@
 #include "backend/nvhttp.h"
 #include "backend/nvpairingmanager.h"
 #include "backend/qtnativehttppolicy.h"
+#include "backend/sessionapirpc.h"
 #include <QCoreApplication>
 #include <QFile>
 #include <QImage>
@@ -9,6 +10,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <cstdio>
+#include <thread>
+#include <iostream>
+#include <future>
 
 static QByteArray read(const QString& path)
 {
@@ -27,6 +31,23 @@ int main(int argc, char** argv)
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, argv[4]);
     QSettings settings;
     const QString mode = QString::fromUtf8(argv[5]);
+    if (qEnvironmentVariableIsSet("SESSION_FIXTURE_RPC")) {
+        SessionApiRpc::broker().install([](uint64_t id,const std::string& payload) {
+            auto request=QJsonDocument::fromJson(QByteArray::fromStdString(payload)).object();
+            request["request_id"]=double(id); request["event"]="session_api"; request["protocol"]=1;
+            auto bytes=QJsonDocument(request).toJson(QJsonDocument::Compact)+'\n';
+            return fwrite(bytes.constData(),1,size_t(bytes.size()),stdout)==size_t(bytes.size()) && fflush(stdout)==0;
+        });
+        std::thread([] {
+            std::string line;
+            while(std::getline(std::cin,line)) {
+                auto response=QJsonDocument::fromJson(QByteArray::fromStdString(line)).object();
+                SessionApiRpc::broker().complete(uint64_t(response["request_id"].toDouble()),
+                    QJsonDocument(response["result"].toObject()).toJson(QJsonDocument::Compact).toStdString());
+            }
+            SessionApiRpc::broker().close();
+        }).detach();
+    }
     if (mode == "identity-new" || mode == "identity-existing" || mode == "identity-repair") {
         const auto certificate = settings.value("certificate").toByteArray();
         const auto key = settings.value("key").toByteArray();
@@ -74,7 +95,54 @@ int main(int argc, char** argv)
     bool ok = false;
     QTimer::singleShot(0, &app, [&] {
         try {
-            if (fields) {
+            if (mode.startsWith("session-")) {
+                const auto input=QJsonDocument::fromJson(read(qEnvironmentVariable("SESSION_FIXTURE_INPUT"))).object();
+                if (mode=="session-parallel") {
+                    // Two concurrent C++ callers; each creates its own QObject
+                    // on its thread, while the one private pipe multiplexes both.
+                    const auto address= http.address(); const auto port=http.httpsPort(); const auto certificate=http.serverCert();
+                    auto feedback=std::async(std::launch::async,[=] {
+                        NvHTTP client(address,port,certificate,true);
+                        return client.sendAbrFeedback(0.5,23.25,59.94,3,18000,2000);
+                    });
+                    auto config=std::async(std::launch::async,[=] {
+                        NvHTTP client(address,port,certificate,true);
+                        return client.configureAbr(true,1000,20000,"balanced",2000);
+                    });
+                    details={{"feedback",feedback.get()},{"configure",config.get()}};
+                } else if (mode=="session-launch" || mode=="session-resume") {
+                    STREAM_CONFIGURATION config{};
+                    config.width=input["width"].toInt(1920);config.height=input["height"].toInt(1080);config.fps=input["fps"].toInt(60);
+                    config.audioConfiguration=AUDIO_CONFIGURATION_STEREO;
+                    config.hdrMode=input["hdr_mode"].toInt();config.supportedVideoFormats=input["ten_bit"].toBool()?VIDEO_FORMAT_MASK_10BIT:1;
+                    for (int i=0;i<16;i++) config.remoteInputAesKey[i]=char(i);
+                    config.remoteInputAesIv[0]=char(0x80);config.remoteInputAesIv[3]=1;
+                    RemoteStreamConfig remote(input["remote_resolution"].toBool(),input["remote_width"].toInt(),input["remote_height"].toInt(),
+                        input["remote_fps"].toBool(),input["remote_fps_rate"].toInt(),input["original_width"].toInt(),input["original_height"].toInt(),
+                        float(input["max_brightness"].toDouble()),float(input["min_brightness"].toDouble()),float(input["average_brightness"].toDouble()),float(input["sdr_white"].toDouble()));
+                    QString session;
+                    http.startApp(mode=="session-resume"?"resume":"launch",input["is_gfe"].toBool(),42,&config,true,false,3,true,session,
+                        input["screen_mode"].toInt(-1),input["use_vdd"].isBool()?std::optional<bool>(input["use_vdd"].toBool()):std::nullopt,input["display"].toString(),remote);
+                    details={{"session_url",session}};
+                } else if (mode=="session-capabilities") {
+                    int maximum=0;bool supported=http.getAbrCapabilities(&maximum);details={{"supported",supported},{"hostMaxBitrate",maximum}};
+                } else if (mode=="session-configure") details=http.configureAbr(input["enabled"].toBool(),1000,20000,"balanced",2000);
+                else if (mode=="session-feedback") details=http.sendAbrFeedback(0.5,23.25,59.94,3,18000,2000);
+                else if (mode=="session-bitrate") {http.setRuntimeBitrate(18000,"fixture-client");details={{"done",true}};}
+                else if (mode=="session-quit") {http.quitApp();details={{"done",true}};}
+                else if (mode=="session-info") {
+                    if (NvHTTP::usesRustSessionApi()) details=http.sessionServerInfo();
+                    else {
+                        auto xml=http.getServerInfo(NvHTTP::NVLL_NONE,true);
+                        auto codec=NvHTTP::getXmlString(xml,"ServerCodecModeSupport");
+                        details={{"codec_support",codec.isEmpty()?QJsonValue(QJsonValue::Null):QJsonValue(codec.toInt())},
+                            {"app_version",NvHTTP::getXmlString(xml,"appversion")},{"gfe_version",NvHTTP::getXmlString(xml,"GfeVersion")},
+                            {"current_app",NvHTTP::getCurrentGame(xml)}};
+                    }
+                }
+                ok=true;
+            }
+            else if (fields) {
                 if (mode == "app-fields") {
                     QJsonArray apps;
                     for (const auto& item : http.getAppList()) {
@@ -144,7 +212,9 @@ int main(int argc, char** argv)
         app.quit();
     });
     app.exec();
-    if (fields) {
+    if (mode.startsWith("session-")) {
+        std::puts(QJsonDocument(QJsonObject{{"done",true},{"ok",ok},{"status",status},{"error",error},{"value",details}}).toJson(QJsonDocument::Compact).constData());
+    } else if (fields) {
         if (details.isEmpty()) details={{"ok",false},{"kind",error?"transport":"xml"},{"status",status}};
         std::puts(QJsonDocument(details).toJson(QJsonDocument::Compact).constData());
     } else std::printf("ok=%d error=%d status=%d\n", ok, error, status);

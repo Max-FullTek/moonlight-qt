@@ -2914,19 +2914,10 @@ void Session::startRuntimeBitrateWorker()
                                    uuid, certificate, clientname] {
         try {
             NvHTTP http(address, httpsPort, certificate, true, nullptr, uuid);
-            QString args = QString("bitrate=%1&clientname=%2")
-                               .arg(*bitrateToApply)
-                               .arg(clientname);
-            QString response = http.openConnectionToString(
-                http.m_BaseUrlHttps,
-                "bitrate",
-                args,
-                5000,
-                NvHTTP::NVLL_VERBOSE);
+            http.setRuntimeBitrate(*bitrateToApply,clientname);
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Runtime bitrate change to %d kbps: %s",
-                        *bitrateToApply,
-                        response.toUtf8().constData());
+                        "Runtime bitrate change to %d kbps completed",
+                        *bitrateToApply);
             appliedBitrate->store(*bitrateToApply);
         }
         catch (const GfeHttpResponseException& e) {
@@ -3489,6 +3480,18 @@ void updateHostConnectionInfoFromServerInfo(const QString& serverInfo,
         computer->gfeVersion = snapshot->gfeVersion;
     }
 }
+void updateHostConnectionInfoFromRust(const QJsonObject& info,NvComputer* computer,HostConnectionInfoSnapshot* snapshot)
+{
+    if (!info["codec_support"].isNull()) snapshot->serverCodecModeSupport=info["codec_support"].toInt();
+    if (!info["app_version"].toString().isEmpty()) snapshot->appVersion=info["app_version"].toString();
+    if (!info["gfe_version"].toString().isEmpty()) snapshot->gfeVersion=info["gfe_version"].toString();
+    snapshot->currentGameId=info["current_app"].toInt();
+    QWriteLocker lock(&computer->lock);
+    computer->serverCodecModeSupport=snapshot->serverCodecModeSupport;
+    computer->currentGameId=snapshot->currentGameId;
+    if (!snapshot->appVersion.isEmpty()) computer->appVersion=snapshot->appVersion;
+    if (!snapshot->gfeVersion.isEmpty()) computer->gfeVersion=snapshot->gfeVersion;
+}
 
 void prepareServerInformation(const HostConnectionInfoSnapshot& snapshot,
                               const QString& rtspSessionUrl,
@@ -3624,7 +3627,8 @@ bool Session::startConnectionAsync()
                       remoteStreamConfig);
 
         try {
-            updateHostConnectionInfoFromServerInfo(http.getServerInfo(NvHTTP::NVLL_NONE, true),
+            if (NvHTTP::usesRustSessionApi()) updateHostConnectionInfoFromRust(http.sessionServerInfo(),m_Computer,&hostConnectionInfo);
+            else updateHostConnectionInfoFromServerInfo(http.getServerInfo(NvHTTP::NVLL_NONE, true),
                                                    m_Computer,
                                                    &hostConnectionInfo,
                                                    resumingSession);

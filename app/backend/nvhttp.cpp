@@ -1,5 +1,6 @@
 #include "nvcomputer.h"
 #include "pairedcertificate.h"
+#include "sessionapirpc.h"
 #include <Limelight.h>
 
 #include <QHostInfo>
@@ -22,6 +23,42 @@
 #include "qtnativehttptransport.h"
 #include "qtnativehttppolicy.h"
 #endif
+
+bool NvHTTP::usesRustSessionApi() { return SessionApiRpc::broker().enabled(); }
+QJsonObject NvHTTP::rustSessionCall(QJsonObject request,unsigned timeoutMs) {
+    auto clientName=NvComputer::getPairname(m_Uuid);
+    if (clientName.isEmpty()) clientName=QHostInfo::localHostName();
+    const QJsonObject context{{"base_url",m_BaseUrlHttps.toString()},
+        {"server_certificate",QString::fromLatin1(m_ServerCert.toPem())},
+        {"client_certificate",QString::fromLatin1(IdentityManager::get()->getCertificate())},
+        {"client_key",QString::fromLatin1(IdentityManager::get()->getPrivateKey())},
+        {"unique_id",m_UseTrueUid?IdentityManager::get()->getUniqueId():QStringLiteral("0123456789ABCDEF")},
+        {"client_name",clientName},{"nonce",QString()}};
+    std::string reply;
+    try { reply=SessionApiRpc::broker().call(QJsonDocument(QJsonObject{{"context",context},{"request",request}})
+        .toJson(QJsonDocument::Compact).toStdString(),timeoutMs+1000); }
+    catch (const SessionApiRpc::Timeout&) { throw QtNetworkReplyException(QNetworkReply::TimeoutError,tr("Host control request timed out.")); }
+    catch (const std::exception&) { throw QtNetworkReplyException(QNetworkReply::OperationCanceledError,tr("Host control request cancelled or disconnected.")); }
+    const auto result=QJsonDocument::fromJson(QByteArray::fromStdString(reply)).object();
+    if (result["ok"].toBool() && result["value"].isObject()) return result["value"].toObject();
+    const auto kind=result["kind"].toString();
+    const int code=result["code"].toInt();
+    auto message=result["message"].toString();
+    if (kind=="host") {
+        if (code==-1 && message=="Invalid") throw GfeHttpResponseException(418,tr("Missing audio capture device. Reinstalling GeForce Experience should resolve this error."));
+        throw GfeHttpResponseException(code,message);
+    }
+    if (kind=="http") throw GfeHttpResponseException(code,tr("Host control HTTP request failed."));
+    throw QtNetworkReplyException(kind=="timeout"?QNetworkReply::TimeoutError:QNetworkReply::UnknownNetworkError,
+        kind=="timeout"?tr("Host control request timed out."):tr("Host control request failed."));
+}
+QJsonObject NvHTTP::sessionServerInfo() {
+    return rustSessionCall({{"operation","info"},{"http_url",m_BaseUrlHttp.toString()}},6000);
+}
+void NvHTTP::setRuntimeBitrate(int bitrateKbps,const QString& clientName) {
+    if (usesRustSessionApi()) {rustSessionCall({{"operation","bitrate"},{"bitrate",bitrateKbps},{"client_name",clientName}},5000);return;}
+    openConnectionToString(m_BaseUrlHttps,"bitrate",QString("bitrate=%1&clientname=%2").arg(bitrateKbps).arg(clientName),5000);
+}
 
 #define FAST_FAIL_TIMEOUT_MS 2000
 #define REQUEST_TIMEOUT_MS 5000
@@ -239,6 +276,25 @@ NvHTTP::startApp(QString verb,
 
     memcpy(&riKeyId, streamConfig->remoteInputAesIv, sizeof(riKeyId));
     riKeyId = qFromBigEndian(riKeyId);
+    if (usesRustSessionApi()) {
+        QJsonArray inputKey;
+        for (unsigned char byte:streamConfig->remoteInputAesKey) inputKey.append(int(byte));
+        const QJsonObject params{{"resume",verb=="resume"},{"is_gfe",isGfe},{"app_id",appId},
+            {"width",streamConfig->width},{"height",streamConfig->height},{"fps",streamConfig->fps},
+            {"original_width",remoteStreamConfig.originalStreamWidth},{"original_height",remoteStreamConfig.originalStreamHeight},
+            {"remote_resolution",remoteStreamConfig.remoteResolution},{"remote_width",remoteStreamConfig.remoteResolutionWidth},
+            {"remote_height",remoteStreamConfig.remoteResolutionHeight},{"remote_fps",remoteStreamConfig.remoteFps},
+            {"remote_fps_rate",remoteStreamConfig.remoteFpsRate},{"sops",sops},{"input_key",inputKey},{"input_key_id",riKeyId},
+            {"ten_bit",bool(streamConfig->supportedVideoFormats&VIDEO_FORMAT_MASK_10BIT)},{"hdr_mode",streamConfig->hdrMode},
+            {"local_audio",localAudio},{"surround_audio",int(SURROUNDAUDIOINFO_FROM_AUDIO_CONFIGURATION(streamConfig->audioConfiguration))},
+            {"gamepad_mask",gamepadMask},{"persist_gamepads",persistGameControllersOnDisconnect},
+            {"screen_mode",screenCombinationMode},{"use_vdd",useVdd.has_value()?QJsonValue(*useVdd):QJsonValue(QJsonValue::Null)},
+            {"display",displayName},{"max_brightness",remoteStreamConfig.maxBrightness},{"min_brightness",remoteStreamConfig.minBrightness},
+            {"average_brightness",remoteStreamConfig.maxAverageBrightness},{"sdr_white",remoteStreamConfig.sdrWhiteBrightness},
+            {"core_query",QString::fromLatin1(LiGetLaunchUrlQueryParameters())}};
+        rtspSessionUrl=rustSessionCall({{"operation","launch"},{"params",params}},LAUNCH_TIMEOUT_MS)["session_url"].toString();
+        return;
+    }
     // Using an FPS value over 60 causes SOPS to default to 720p60,
     // so force it to 0 to ensure the correct resolution is set. We
     // used to use 60 here but that locked the frame rate to 60 FPS
@@ -328,6 +384,14 @@ NvHTTP::startApp(QString verb,
 void
 NvHTTP::quitApp()
 {
+    if (usesRustSessionApi()) {
+        try {rustSessionCall({{"operation","quit"},{"http_url",m_BaseUrlHttp.toString()}},45000);}
+        catch (const GfeHttpResponseException& error) {
+            if (error.getStatusCode()==599) throw GfeHttpResponseException(599,tr("The running game wasn't started by this PC. You must quit the game on the host PC manually or use the device that originally started the game."));
+            throw;
+        }
+        return;
+    }
     QString response =
             openConnectionToString(m_BaseUrlHttps,
                                    "cancel",
@@ -623,6 +687,11 @@ UsbForwarding::Capability NvHTTP::getUsbForwardingCapability()
 bool
 NvHTTP::getAbrCapabilities(int* hostMaxBitrateKbps)
 {
+    if (usesRustSessionApi()) {
+        const auto response=rustSessionCall({{"operation","abr_capabilities"}},2000);
+        if (hostMaxBitrateKbps) *hostMaxBitrateKbps=response["hostMaxBitrate"].toInt(0);
+        return response["supported"].toBool(false);
+    }
     QJsonObject response = openJsonConnectionToObject(m_BaseUrlHttps,
                                                       "api/abr/capabilities",
                                                       QJsonObject(),
@@ -643,6 +712,8 @@ NvHTTP::configureAbr(bool enabled,
                      QString mode,
                      int timeoutMs)
 {
+    if (usesRustSessionApi()) return rustSessionCall({{"operation","abr_configure"},{"enabled",enabled},
+        {"min_bitrate",minBitrateKbps},{"max_bitrate",maxBitrateKbps},{"mode",mode},{"timeout_ms",timeoutMs}},timeoutMs);
     QJsonObject body;
     body["enabled"] = enabled;
     if (enabled) {
@@ -667,6 +738,9 @@ NvHTTP::sendAbrFeedback(double packetLoss,
                         int currentBitrateKbps,
                         int timeoutMs)
 {
+    if (usesRustSessionApi()) return rustSessionCall({{"operation","abr_feedback"},{"packet_loss",packetLoss},
+        {"rtt_ms",rttMs},{"decode_fps",decodeFps},{"dropped_frames",droppedFrames},
+        {"current_bitrate",currentBitrateKbps},{"timeout_ms",timeoutMs}},timeoutMs);
     QJsonObject body;
     body["packetLoss"] = packetLoss;
     body["rttMs"] = rttMs;

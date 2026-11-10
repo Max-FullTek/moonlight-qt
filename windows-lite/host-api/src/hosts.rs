@@ -21,6 +21,7 @@ pub enum Error {
     Redirect,
     Xml(xml::Error),
     InvalidAppList,
+    InvalidJson,
     Rejected { code: i32, message: String },
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -198,7 +199,7 @@ pub fn parse_apps(body: &[u8]) -> Result<Vec<App>, Error> {
     // entry. Tightening that compatibility rule requires a separate decision.
     Ok(apps)
 }
-fn base(value: &str, scheme: &str) -> Result<reqwest::Url, Error> {
+pub(crate) fn base(value: &str, scheme: &str) -> Result<reqwest::Url, Error> {
     let url = reqwest::Url::parse(value).map_err(|_| Error::InvalidContext)?;
     if url.scheme() != scheme
         || url.host_str().is_none()
@@ -358,4 +359,21 @@ async fn pinned_server_response(
         return xml::parse_response(&body).map_err(Error::Xml);
     }
     Ok(response)
+}
+pub(crate) async fn session_info(
+    context: HostContext,
+    http_url: &str,
+    cancel: CancellationToken,
+) -> Result<serde_json::Value, Error> {
+    let http = base(http_url, "http")?;
+    let (doc, code, message) = pinned_server_response(&context, http, 2000, &cancel).await?;
+    if code != 200 {
+        return Err(Error::Rejected { code, message });
+    }
+    let field = |key: &str| doc.fields.get(key).map(String::as_str).unwrap_or("");
+    Ok(
+        serde_json::json!({"codec_support":if field("ServerCodecModeSupport").is_empty(){None}else{Some(integer(field("ServerCodecModeSupport")))},
+        "app_version":field("appversion"),"gfe_version":field("GfeVersion"),
+        "current_app":if field("state").ends_with("_SERVER_BUSY"){integer(field("currentgame"))}else{0}}),
+    )
 }

@@ -168,6 +168,12 @@ fn client(
 }
 
 pub async fn perform(request: &Request) -> Response {
+    perform_inner(request, false).await
+}
+pub(crate) async fn perform_json_get(request: &Request) -> Response {
+    perform_inner(request, true).await
+}
+async fn perform_inner(request: &Request, json_get: bool) -> Response {
     let mut response = Response {
         error: Error::None,
         status: 0,
@@ -193,6 +199,10 @@ pub async fn perform(request: &Request) -> Response {
                 .post(&request.url)
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
                 .body(body.clone())
+        } else if json_get {
+            client
+                .get(&request.url)
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
         } else {
             client.get(&request.url)
         };

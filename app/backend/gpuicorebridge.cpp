@@ -1,6 +1,7 @@
 #include "gpuicorebridge.h"
 #include "computermanager.h"
 #include "nvhttp.h"
+#include "sessionapirpc.h"
 #include "streaming/streamutils.h"
 #include "SDL_compat.h"
 #include <cmath>
@@ -23,6 +24,13 @@
 #include <thread>
 
 namespace {
+bool writeProtocol(QJsonObject event) {
+    static std::mutex outputMutex;
+    event.insert("protocol",1);
+    const auto line=QJsonDocument(event).toJson(QJsonDocument::Compact)+'\n';
+    std::lock_guard<std::mutex> lock(outputMutex);
+    return fwrite(line.constData(),1,size_t(line.size()),stdout)==size_t(line.size()) && fflush(stdout)==0;
+}
 constexpr int MaxControlLine = 64 * 1024;
 constexpr int MaxLine = 4 * 1024 * 1024; // Existing frontend event limit, also for typed host data.
 bool integer(const QJsonObject& object, const char* key, int low, int high) {
@@ -209,9 +217,8 @@ GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent) {
 }
 
 void GpuiCoreBridge::send(QJsonObject event) {
-    event.insert("protocol", 1);
-    const QByteArray line = QJsonDocument(event).toJson(QJsonDocument::Compact) + '\n';
-    if (fwrite(line.constData(), 1, size_t(line.size()), stdout) != size_t(line.size()) || fflush(stdout) != 0) {
+    if (!writeProtocol(event)) {
+        SessionApiRpc::broker().close();
         shutdown();
     }
 }
@@ -220,6 +227,11 @@ void GpuiCoreBridge::fail(const QString& code, const QString& message) {
     send({{"event", "error"}, {"code", code}, {"message", message}});
 }
 void GpuiCoreBridge::start() {
+    if (m_RustMonitor) SessionApiRpc::broker().install([](uint64_t id,const std::string& payload) {
+        const auto request=QJsonDocument::fromJson(QByteArray::fromStdString(payload)).object();
+        return writeProtocol({{"event","session_api"},{"request_id",double(id)},
+            {"context",request["context"]},{"request",request["request"]}});
+    });
     send({{"event", "ready"}, {"qml_loaded", false}});
     publishHosts();
     m_Manager->startPolling();
@@ -231,6 +243,14 @@ void GpuiCoreBridge::start() {
         int ch;
         while ((ch = fgetc(stdin)) != EOF) {
             if (ch == '\n') {
+                const auto object=oversized?QJsonObject():QJsonDocument::fromJson(line).object();
+                if (object["command"]=="session_api_result") {
+                    const double id=object["request_id"].toDouble();
+                    if (id>=1 && id<=9007199254740991.0 && std::floor(id)==id && object["result"].isObject())
+                        SessionApiRpc::broker().complete(uint64_t(id),QJsonDocument(object["result"].toObject()).toJson(QJsonDocument::Compact).toStdString());
+                    line.clear(); oversized=false; continue;
+                }
+                if (object["command"]=="shutdown") SessionApiRpc::broker().close();
                 const QByteArray request = oversized ? QByteArray() : line;
                 QMetaObject::invokeMethod(this, [this, request, oversized] {
                     if (oversized) fail("request_too_large", tr("Request exceeds 64 KiB."));
@@ -242,6 +262,7 @@ void GpuiCoreBridge::start() {
             } else if (line.size() < MaxLine) line.append(char(ch));
             else oversized = true;
         }
+        SessionApiRpc::broker().close();
         QMetaObject::invokeMethod(this, [this] { shutdown(); }, Qt::QueuedConnection);
         Session::wakeForCoreCommands();
     }).detach();

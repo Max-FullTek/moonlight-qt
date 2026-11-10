@@ -1,9 +1,9 @@
 //! Protocol 1 uses inherited anonymous pipes, never a listening network socket.
 //! The matching Moonlight.exe must be beside this frontend. Its core flag skips
 //! QML and uses an independent profile. Rust owns polling, application/display
-//! queries, pairing and control-page quit. Profile persistence, session launch/
-//! teardown/ABR and SDL remain in
-//! C++ during migration; private context never reaches the UI event consumer.
+//! queries, pairing and session control HTTP/TLS/parsing. Profile persistence,
+//! media/session scheduling and SDL remain in C++ during migration; private
+//! context never reaches the UI event consumer.
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
@@ -64,6 +64,10 @@ pub enum Event {
         context: moonlight_host_api::HostContext,
     },
     MonitorContexts { hosts: Vec<crate::monitor::Spec> },
+    SessionApi {
+        #[serde(flatten)]
+        request: crate::host_api::SessionRequest,
+    },
     QuitContext {
         host: String,
         request_id: u32,
@@ -204,6 +208,7 @@ impl Client {
                 }
                 match event {
                     Some(Event::MonitorContexts {hosts}) if ready => reader_api.monitors(hosts),
+                    Some(Event::SessionApi {request}) if ready => reader_api.session(request),
                     Some(Event::QuitContext {host, request_id, context, http_url}) if ready => {
                         reader_api.quit_context(host, request_id, context, http_url);
                     }

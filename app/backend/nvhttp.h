@@ -191,6 +191,9 @@ public:
 
     void
     quitApp();
+    static bool usesRustSessionApi();
+    QJsonObject sessionServerInfo();
+    void setRuntimeBitrate(int bitrateKbps, const QString& clientName);
 
     void
     startApp(QString verb,
@@ -223,6 +226,7 @@ public:
     QUrl m_BaseUrlHttp;
     QUrl m_BaseUrlHttps;
 private:
+    QJsonObject rustSessionCall(QJsonObject request, unsigned timeoutMs);
     struct HttpResponse {
         QByteArray body;
         int status;
