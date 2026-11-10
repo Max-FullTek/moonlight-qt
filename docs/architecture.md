@@ -109,6 +109,10 @@ GPUI 位元率操作结果只显示在控制页，不再触发游戏画面的 Qt
 
 传输在调用者选择的执行绪执行，使用 `curl_multi_poll` 的 socket／期限等待；跨执行绪取消以 `curl_multi_wakeup` 唤醒，不由模组增加执行绪或固定间隔轮询。取消 token 单调且同一时间只接受一个请求，注册／解除与唤醒同步，避免对已销毁的 multi handle 操作。回归另覆盖等待前取消、等待中取消、UTF-8 JSON、准确达到回應上限、无效 pin／不完整身分、连续请求切换 pin／移除客戶端身分，以及仅允许明确无身分的未配对 HTTP。应用级关闭仍由未来 owner 负责，不能把 token 测试视为现有 Session 已完成无 Qt 生命周期迁移。
 
+已有事件 dispatcher 的 owner 可改用 `perform(request, EventLoop&)`，共享相同的请求、TLS 与错误处理，不额外启动线程。此入口使用 libcurl 的 [socket action](https://curl.se/libcurl/c/curl_multi_socket_action.html) 与 [单次 timer callback](https://curl.se/libcurl/c/CURLMOPT_TIMERFUNCTION.html)，由 owner 等待 socket 就绪／期限，或回报关闭取消；不以固定间隔轮询，也不把阻塞的 `perform()` 放进 UI 线程。事件入口拒绝跨线程取消 token，取消必须透过 owner 的 dispatcher 唤醒并回报，避免只唤醒 curl 而漏掉外部事件等待。
+
+`qtnativehttptransport.*` 是仅供现有 NvHTTP owner 接入的过渡接点：以 `QSocketNotifier`／单次 `QTimer` 保留 `ExcludeUserInputEvents` 与应用关闭取消，不使用 Qt Network。退出条件是 worker 不再使用 Qt dispatcher；它不是通用 Qt 相容层，目前尚未接入产品 NvHTTP。测试脚本默认另跑无 Qt 的 socket owner；显式传 `-QtDirectory <SDK>` 才另外构建、运行此过渡接点。两种 owner 都验证部分回應取消／逾时后不交出 body、无限期限的 owner 取消、主机名称解析及 TLS／JSON／状态政策；Qt 测试分别在主线程及调用者拥有的工作线程确认等待期间其他计时事件可执行，实际 `QCoreApplication::quit()` 能退出请求。工作线程的 dispatcher 由原本的 `QEventLoop` 创建流程建立，接点不额外建立线程。此证据不取代正式 NvHTTP 的错误映射、配对／控制流程与封装验收。
+
 ## 历史
 
 - 2026-09 目录清理:移除空壳目录(src/、streaming/、include/、soundio/ 上游遗留)与误跟踪的 .DS_Store;filemapping-smoke 并入 file-mapping/smoke;DS5 探针脚本并入 scripts/。

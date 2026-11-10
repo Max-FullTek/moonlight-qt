@@ -12,6 +12,15 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <chrono>
+#include <algorithm>
+#ifdef NATIVE_HTTP_QT_OWNER
+#include "backend/qtnativehttptransport.h"
+#include <QCoreApplication>
+#include <QTimer>
+#include <QThread>
+#include <exception>
+#endif
 
 #if LIBCURL_VERSION_NUM != 0x081700
 #error This probe is pinned to curl 8.23.0
@@ -47,8 +56,94 @@ void renewFixture(const std::string& fixtures, const char* output)
         throw std::runtime_error("Cannot generate same-key renewed test certificate");
     }
 }
+class SocketOwnerLoop final : public NativeHttp::EventLoop {
+public:
+    bool cancelAfterDeadline = false;
+    unsigned waits = 0;
+    std::chrono::steady_clock::time_point cancelAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+    NativeHttp::ReadyEvent wait(const NativeHttp::WaitState& state) override
+    {
+        if (++waits > 100) throw std::runtime_error("Owner event loop is spinning");
+        long timeout = state.timeoutMs;
+        if (cancelAfterDeadline) {
+            const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(cancelAt - std::chrono::steady_clock::now()).count();
+            if (remaining <= 0) return {};
+            if (timeout < 0 || timeout > remaining) timeout = static_cast<long>(remaining);
+        }
+        std::vector<WSAPOLLFD> sockets;
+        for (const auto& socket : state.sockets) {
+            sockets.push_back({static_cast<SOCKET>(socket.socket), static_cast<SHORT>(
+                (socket.read ? POLLRDNORM : 0) | (socket.write ? POLLWRNORM : 0)), 0});
+        }
+        if (sockets.empty()) {
+            if (timeout < 0) throw std::runtime_error("No socket or deadline to wait for");
+            std::this_thread::sleep_for(std::chrono::milliseconds(timeout));
+        }
+        else {
+            const int result = WSAPoll(sockets.data(), static_cast<ULONG>(sockets.size()), timeout);
+            if (result == SOCKET_ERROR) throw std::runtime_error("Test socket wait failed");
+            for (const auto& socket : sockets) {
+                if (socket.revents) return {NativeHttp::ReadyEvent::Kind::Socket, static_cast<std::uintptr_t>(socket.fd),
+                    (socket.revents & (POLLRDNORM | POLLHUP)) != 0, (socket.revents & POLLWRNORM) != 0,
+                    (socket.revents & (POLLERR | POLLNVAL)) != 0};
+            }
+        }
+        return {NativeHttp::ReadyEvent::Kind::Timeout};
+    }
+};
+NativeHttp::Response performRequest(NativeHttp::Request request, const std::string& mode, bool eventLoop)
+{
+#ifdef NATIVE_HTTP_QT_OWNER
+    request.cancellation.reset();
+    NativeHttp::Response response;
+    std::exception_ptr failure;
+    std::unique_ptr<QThread> worker;
+    auto run = [&] {
+        bool dispatched = false;
+        QTimer progress;
+        progress.setSingleShot(true);
+        QObject::connect(&progress, &QTimer::timeout, [&] { dispatched = true; });
+        QTimer closing;
+        closing.setSingleShot(true);
+        QObject::connect(&closing, &QTimer::timeout, QCoreApplication::instance(), &QCoreApplication::quit);
+        progress.start(50);
+        if (mode == "owner-cancel") closing.start(200);
+        response = NativeHttp::performWithQtEvents(request);
+        if ((mode == "owner-cancel" || request.url.find("/slow") != std::string::npos ||
+             request.url.find("/partial") != std::string::npos) && !dispatched) {
+            throw std::runtime_error("HTTP wait blocked the existing event dispatcher");
+        }
+    };
+    QTimer::singleShot(0, QCoreApplication::instance(), [&] {
+        auto guarded = [&] {
+            try { run(); }
+            catch (...) { failure = std::current_exception(); }
+            QCoreApplication::quit();
+        };
+        if (qEnvironmentVariableIsSet("NATIVE_HTTP_QT_WORKER")) {
+            worker.reset(QThread::create(guarded));
+            worker->start(); // Test-owned caller, never created by the transport.
+        }
+        else guarded();
+    });
+    QCoreApplication::exec();
+    if (worker && !worker->wait(3000)) throw std::runtime_error("HTTP owner did not exit after application shutdown");
+    if (failure) std::rethrow_exception(failure);
+    (void)eventLoop;
+    return response;
+#else
+    if (!eventLoop) return NativeHttp::perform(request);
+    request.cancellation.reset();
+    SocketOwnerLoop loop;
+    loop.cancelAfterDeadline = mode == "owner-cancel";
+    return NativeHttp::perform(request, loop);
+#endif
+}
 int main(int argc, char** argv)
 {
+#ifdef NATIVE_HTTP_QT_OWNER
+    QCoreApplication application(argc, argv);
+#endif
     try {
         if (argc == 4 && std::string(argv[1]) == "--renew-fixture") {
             renewFixture(argv[2], argv[3]);
@@ -69,7 +164,9 @@ int main(int argc, char** argv)
             request.clientCertificatePem = readFile(std::string(argv[3]) + "/server.pem");
             request.clientPrivateKeyPem = readFile(std::string(argv[3]) + "/server-key.pem");
         }
-        const std::string mode = argc == 6 ? argv[5] : "";
+        std::string mode = argc == 6 ? argv[5] : "";
+        const bool eventLoop = mode.find("event-") == 0;
+        if (eventLoop) mode.erase(0, 6);
         if (mode == "no-pin") request.pinnedCertificateDer.clear();
         if (mode == "invalid-pin") request.pinnedCertificateDer = {0};
         if (mode == "partial-identity") request.clientPrivateKeyPem.clear();
@@ -85,24 +182,25 @@ int main(int argc, char** argv)
         }
         request.cancellation = std::make_shared<NativeHttp::Cancellation>();
         if (mode == "pre-cancel") request.cancellation->cancel();
+        if (mode == "owner-cancel") request.timeoutMs = 0;
         std::thread cancel;
         if (mode == "cancel") {
             request.timeoutMs = 0;
             cancel = std::thread([token = request.cancellation] { std::cin.get(); token->cancel(); });
         }
-        auto response = NativeHttp::perform(request);
+        auto response = performRequest(request, mode, eventLoop);
         if (cancel.joinable()) cancel.join();
         if (mode == "replace-pin") {
             auto other = certificate((std::string(argv[3]) + "/other.pem").c_str());
             if (response.error != NativeHttp::Error::None) throw std::runtime_error("First identity request failed");
             request.pinnedCertificateDer = der(other.get());
-            response = NativeHttp::perform(request);
+            response = performRequest(request, mode, eventLoop);
         }
         if (mode == "remove-identity") {
             if (response.error != NativeHttp::Error::None) throw std::runtime_error("First client identity request failed");
             request.clientCertificatePem.clear();
             request.clientPrivateKeyPem.clear();
-            response = NativeHttp::perform(request);
+            response = performRequest(request, mode, eventLoop);
         }
         std::printf("code=%d status=%ld verified=%d oversized=%d bytes=%zu error=%d cancelled=%d\n",
                     response.transportCode, response.httpStatus, response.certificateVerified,

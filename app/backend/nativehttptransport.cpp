@@ -3,6 +3,9 @@
 #include <openssl/pem.h>
 #include <openssl/ssl.h>
 #include <climits>
+#include <algorithm>
+#include <chrono>
+#include <map>
 #include <limits>
 #include <mutex>
 #include <stdexcept>
@@ -145,12 +148,56 @@ struct MultiEntry {
     CURL* easy;
     ~MultiEntry() { curl_multi_remove_handle(multi, easy); }
 };
+// curl owns the socket set and its one-shot timer. Snapshot only between curl
+// calls: callbacks must not dispatch events or recursively enter libcurl.
+struct Reactor {
+    std::map<curl_socket_t, int> sockets;
+    bool hasDeadline = false;
+    bool storageFailure = false;
+    std::chrono::steady_clock::time_point deadline;
+    static int socketChanged(CURL*, curl_socket_t socket, int interest, void* opaque, void*)
+    {
+        auto& self = *static_cast<Reactor*>(opaque);
+        try {
+            if (interest == CURL_POLL_REMOVE || interest == CURL_POLL_NONE) self.sockets.erase(socket);
+            else self.sockets[socket] = interest;
+            return 0;
+        }
+        catch (...) { self.storageFailure = true; return -1; }
+    }
+    static int timerChanged(CURLM*, long milliseconds, void* opaque)
+    {
+        auto& self = *static_cast<Reactor*>(opaque);
+        self.hasDeadline = milliseconds >= 0;
+        if (self.hasDeadline) self.deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
+        return 0;
+    }
+    WaitState state() const
+    {
+        WaitState state;
+        for (const auto& item : sockets) {
+            state.sockets.push_back({static_cast<std::uintptr_t>(item.first),
+                item.second == CURL_POLL_IN || item.second == CURL_POLL_INOUT,
+                item.second == CURL_POLL_OUT || item.second == CURL_POLL_INOUT});
+        }
+        if (hasDeadline) {
+            const auto remaining = deadline - std::chrono::steady_clock::now();
+            const auto milliseconds = std::chrono::ceil<std::chrono::milliseconds>(remaining).count();
+            state.timeoutMs = milliseconds <= 0 ? 0 : static_cast<long>((std::min<long long>)(milliseconds, LONG_MAX));
+        }
+        return state;
+    }
+};
 }
 
-Response perform(const Request& request)
+struct TransportDriver {
+    static Response perform(const Request& request, EventLoop* eventLoop);
+};
+Response TransportDriver::perform(const Request& request, EventLoop* eventLoop)
 {
     Response response;
     try {
+        if (eventLoop && request.cancellation) throw std::invalid_argument("Event-loop requests use owner cancellation");
         auto cancellation = request.cancellation;
         if (cancellation && cancellation->requested()) {
             response.error = Error::Cancelled;
@@ -168,6 +215,7 @@ Response perform(const Request& request)
             throw std::invalid_argument("Invalid HTTP request policy");
         }
         std::string caPem = https ? pemPin(request.pinnedCertificateDer) : std::string{};
+        Reactor reactor; // Must outlive multi cleanup, which may invoke callbacks.
         std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> easy(curl_easy_init(), curl_easy_cleanup);
         std::unique_ptr<CURLM, decltype(&curl_multi_cleanup)> multi(curl_multi_init(), curl_multi_cleanup);
         if (!easy || !multi) throw std::runtime_error("Cannot allocate HTTP request");
@@ -215,12 +263,20 @@ Response perform(const Request& request)
         }
         set(CURLOPT_WRITEFUNCTION, receive);
         set(CURLOPT_WRITEDATA, &transfer);
+        if (eventLoop &&
+            (curl_multi_setopt(multi.get(), CURLMOPT_SOCKETFUNCTION, Reactor::socketChanged) != CURLM_OK ||
+             curl_multi_setopt(multi.get(), CURLMOPT_SOCKETDATA, &reactor) != CURLM_OK ||
+             curl_multi_setopt(multi.get(), CURLMOPT_TIMERFUNCTION, Reactor::timerChanged) != CURLM_OK ||
+             curl_multi_setopt(multi.get(), CURLMOPT_TIMERDATA, &reactor) != CURLM_OK)) {
+            throw std::runtime_error("HTTP event-loop setup failed");
+        }
         if (curl_multi_add_handle(multi.get(), easy.get()) != CURLM_OK) throw std::runtime_error("Cannot start HTTP request");
         MultiEntry entry{multi.get(), easy.get()};
         std::unique_ptr<Cancellation::Impl::Registration> registration;
         if (cancellation) registration = std::make_unique<Cancellation::Impl::Registration>(*cancellation->m_Impl, multi.get());
         CURLcode result = CURLE_OK;
         bool cancelled = false;
+        ReadyEvent ready{ReadyEvent::Kind::Timeout}; // Start outside callbacks.
         for (;;) {
             if (cancellation && cancellation->requested()) {
                 cancelled = true;
@@ -228,14 +284,39 @@ Response perform(const Request& request)
                 break;
             }
             int running = 0;
-            if (curl_multi_perform(multi.get(), &running) != CURLM_OK) throw std::runtime_error("HTTP transfer failed");
+            CURLMcode step;
+            if (eventLoop) {
+                const int events = (ready.read ? CURL_CSELECT_IN : 0) | (ready.write ? CURL_CSELECT_OUT : 0) |
+                                   (ready.error ? CURL_CSELECT_ERR : 0);
+                step = curl_multi_socket_action(multi.get(), ready.kind == ReadyEvent::Kind::Timeout ?
+                                               CURL_SOCKET_TIMEOUT : static_cast<curl_socket_t>(ready.socket), events, &running);
+            }
+            else step = curl_multi_perform(multi.get(), &running);
+            if (reactor.storageFailure) throw std::bad_alloc();
+            if (step != CURLM_OK) throw std::runtime_error("HTTP transfer failed");
             int messages = 0;
             CURLMsg* message = curl_multi_info_read(multi.get(), &messages);
             if (message && message->msg == CURLMSG_DONE) { result = message->data.result; break; }
             if (!running) throw std::runtime_error("HTTP transfer ended without a result");
-            // Sleeps until socket activity, curl's own deadline or explicit
-            // cancellation. No fixed-interval cancellation polling.
-            if (curl_multi_poll(multi.get(), nullptr, 0, INT_MAX, nullptr) != CURLM_OK) {
+            if (eventLoop) {
+                const auto state = reactor.state();
+                ready = eventLoop->wait(state);
+                if (ready.kind == ReadyEvent::Kind::Cancel) {
+                    cancelled = true;
+                    result = CURLE_ABORTED_BY_CALLBACK;
+                    break;
+                }
+                if (ready.kind != ReadyEvent::Kind::Timeout && ready.kind != ReadyEvent::Kind::Socket) {
+                    throw std::invalid_argument("Invalid HTTP readiness event");
+                }
+                if (ready.kind == ReadyEvent::Kind::Socket &&
+                    reactor.sockets.find(static_cast<curl_socket_t>(ready.socket)) == reactor.sockets.end()) {
+                    throw std::invalid_argument("Unrequested HTTP socket event");
+                }
+            }
+            // Blocking owners sleep until socket activity, curl's own deadline
+            // or cancellation. Neither driver uses fixed-interval polling.
+            else if (curl_multi_poll(multi.get(), nullptr, 0, INT_MAX, nullptr) != CURLM_OK) {
                 throw std::runtime_error("HTTP event wait failed");
             }
         }
@@ -257,4 +338,6 @@ Response perform(const Request& request)
     catch (const std::exception& error) { response.error = Error::Setup; response.message = error.what(); response.body.clear(); }
     return response;
 }
+Response perform(const Request& request) { return TransportDriver::perform(request, nullptr); }
+Response perform(const Request& request, EventLoop& eventLoop) { return TransportDriver::perform(request, &eventLoop); }
 }

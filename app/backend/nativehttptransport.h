@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -24,6 +25,7 @@ private:
     struct Impl;
     std::unique_ptr<Impl> m_Impl;
     friend Response perform(const Request& request);
+    friend struct TransportDriver;
 };
 
 enum class Method { Get, Post };
@@ -53,8 +55,38 @@ struct Response {
     std::string message; // Generic error only; never a URL, key or response body.
 };
 
+struct SocketInterest {
+    std::uintptr_t socket;
+    bool read;
+    bool write;
+};
+struct WaitState {
+    std::vector<SocketInterest> sockets;
+    long timeoutMs = -1; // -1 removes the timer; zero schedules immediate work.
+};
+struct ReadyEvent {
+    enum class Kind { Socket, Timeout, Cancel };
+    Kind kind = Kind::Cancel;
+    std::uintptr_t socket = 0;
+    bool read = false;
+    bool write = false;
+    bool error = false;
+};
+// Owner-thread integration, not a thread or event dispatcher implementation.
+// Wait for one requested socket/deadline or owner shutdown. Never call back
+// into the transport from wait(). Cancellation is returned as Kind::Cancel;
+// the cross-thread Cancellation token belongs only to the blocking overload.
+class EventLoop {
+public:
+    virtual ~EventLoop() = default;
+    virtual ReadyEvent wait(const WaitState& state) = 0;
+};
+
 // Runs on the caller's chosen thread. No retries, redirects, proxy lookup,
 // credential files, connection reuse, UI dispatch or worker ownership here.
 // HTTP status (including 3xx/4xx/5xx) is returned for the owner's protocol policy.
 Response perform(const Request& request);
+// Same request/TLS/error policy, driven by the owner's existing event loop.
+// A non-null Request::cancellation is rejected; return Cancel from wait instead.
+Response perform(const Request& request, EventLoop& eventLoop);
 }
