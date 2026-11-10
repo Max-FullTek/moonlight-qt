@@ -134,3 +134,9 @@ Windows Lite 的 GPUI 串流入口改为附属于 SDL 串流视窗的有焦点�
 XML／JSON 去 Qt 的能力验证入口为 `scripts/test-native-parsers.ps1 -QtDirectory <SDK>`。经 SA 确认评估 Expat 2.10.0 与 nlohmann/json 3.12.0，维持 C++ worker／IPC 职责；源码由官方 release 固定 SHA256 准备至忽略的 `build/native-parsers-source`，每次复用逐档核对归档，保留两者授权。CMake 配置不下载或安装套件；Expat 静态链接、JSON 为 header-only。`native_parser_probe` 不链接 Qt，Qt 只用于独立 reference executable；正式 worker、封装与数据格式尚未切换。
 
 对照范围是既有 Qt 6.12 的 XML token／JSON object 语意及整数转换，覆盖繁中、配对字段、空标题、namespace、CDATA、实体、畸形输入与数值边界；不取代生产 NvHTTP 的提前返回、错误映射或完整协议验证。原生库与 Qt 对损坏 XML UTF-8、外部实体、实体展开上限、JSON 非法 escape／未配对 surrogate、超大整数表示及深度限制有差异。未限深的 JSON 原型在深层 Debug 资料树处理出现 stack overflow，能力原型已在解析期间限制 64 层；这是待 SA 确认的候选输入规则，不代表已授权改变正式产品。正式接入前需确认异常输入与 DTD 政策，并维持既有字段数值范围；不得将可构建或比较程序结束视为相容验收通过。
+
+后续已确认的职责任务方向改为 Rust 管理主机控制 API 与 XML／JSON 解析，C／C++ 保留串流、影音、输入及统计；上述 C++ 解析库仅保留比较证据，未接入生产。`tests/rust_host_api` 是独立 Cargo 能力原型，不是 GPUI 的依赖，也没有新增产品程序或更改现有 IPC。固定 reqwest 0.13.5、rustls 0.23.46（ring provider）、quick-xml 0.42.0、rustls-pemfile 2.2.0；serde_json、Tokio 与全部传递依赖由提交的 Cargo.lock 固定版本与 registry checksum，验证入口使用 `--locked`，停用 incremental，不安装系统工具。
+
+Rust 传输原型复用公开 loopback TLS fixture，验证完整配对 leaf DER 比对（同公钥换证仍拒绝）、记忆体客戶端身分、TLS 1.2／1.3 handshake 签章、禁止重新导向／代理／自动重试、HTTP status 与 body、回应上限、取消及涵盖 body 的总期限。自定义 verifier 沿用配对信任而非公共 CA／DNS／有效期判定，但 TLS 签章仍交由 rustls provider 验证；每次请求建立隔离 client，不复用旧 pin／身分。传输使用调用者 Tokio runtime，不自行建立轮询；DNS 调度由 reqwest／Tokio 负责，可能使用 runtime blocking pool。测试取消触发器的 stdin 执行绪仅属于测试。此证据不代表真实配对五阶段、Session 重连、C++ 请求／Rust 回覆的取消与世代契约或效能已验收，正式 worker 继续使用原有 NvHTTP。
+
+Rust 解析原型复用同一 39 案 Qt reference：繁中、namespace、CDATA、标准实体与数值字段一致；7 项差异为 XML 内部／外部 DTD 实体、损坏 XML UTF-8，以及 JSON 超大整数表示、非法 escape、未配对 surrogate 和深度 128 输入。原型拒绝 DTD、不解析外部资源；JSON 保留 serde_json 默认递归上限，不启用无限深度，不沿用 C++ 原型的 64 层设定。整数提取保持 i32 范围，UTF-8 JSON BOM 与 Qt 一致。比较成功仅证明已记录预期差异；正式异常输入／DTD 政策仍待确认，不代表已经切换产品。

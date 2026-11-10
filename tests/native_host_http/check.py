@@ -9,10 +9,10 @@ import threading
 import time
 
 
-def main(executable, fixtures, work):
+def main(executable, fixtures, work, fixture_generator=None):
     work.mkdir(parents=True, exist_ok=False)
     renewed = work / "renewed.pem"
-    subprocess.run([executable, "--renew-fixture", str(fixtures), str(renewed)], check=True)
+    subprocess.run([fixture_generator or executable, "--renew-fixture", str(fixtures), str(renewed)], check=True)
     seen = []
     posts = []
     arrived = threading.Event()
@@ -25,7 +25,8 @@ def main(executable, fixtures, work):
 
         def do_GET(self):
             seen.append((self.path, self.request_version))
-            arrived.set()
+            if self.path != "/partial":
+                arrived.set()
             if self.path == "/slow":
                 time.sleep(1.3)
             if self.path == "/partial":
@@ -35,6 +36,7 @@ def main(executable, fixtures, work):
                     self.end_headers()
                     self.wfile.write(b"ok")
                     self.wfile.flush()
+                    arrived.set()
                     time.sleep(1.3)
                     self.wfile.write(b"x" * 254)
                 except (OSError, ssl.SSLError):
@@ -55,8 +57,11 @@ def main(executable, fixtures, work):
             posts.append((self.rfile.read(int(self.headers["Content-Length"])), self.headers.get("Content-Type")))
             self.do_GET()
 
-    def run(pin, route="/ok", identity=False, mutual=False, server_cert=None, mode="", tls=True, host="127.0.0.1"):
+    def run(pin, route="/ok", identity=False, mutual=False, server_cert=None, mode="", tls=True, host="127.0.0.1", version=None):
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        if version:
+            context.minimum_version = version
+            context.maximum_version = version
         context.load_cert_chain(server_cert or fixtures / "server.pem", fixtures / "server-key.pem")
         if mutual:
             context.verify_mode = ssl.CERT_REQUIRED
@@ -158,10 +163,10 @@ def main(executable, fixtures, work):
     print("redirect is returned without requesting its target: passed")
 
     result, requests = run(original, "/slow")
-    assert result["code"] == 28 and len(requests) == 1, (result, requests)
+    assert result["error"] == 4 and len(requests) == 1, (result, requests)
     print("deadline cancels a stalled response: passed")
     result, requests = run(original, "/large")
-    assert result["code"] == 23 and result["oversized"] == 1 and result["bytes"] <= 64, result
+    assert result["error"] == 6 and result["oversized"] == 1 and result["bytes"] == 0, result
     print("response limit aborts excessive data: passed")
 
     result, requests = run(original, mode="exact-limit")
@@ -200,6 +205,18 @@ def main(executable, fixtures, work):
     result, requests = run(original, tls=False, mode="unpaired")
     assert result["error"] == 0 and result["verified"] == 0 and len(requests) == 1, (result, requests)
     print("unpaired HTTP requires explicit opt-in and carries no TLS identity: passed")
+
+    for version in (ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3):
+        result, requests = run(original, identity=True, mutual=True, version=version)
+        assert result["error"] == 0 and result["verified"] == 1 and len(requests) == 1, (version, result, requests)
+    print("pinned mutual TLS 1.2 and 1.3: passed")
+    for mode, error in (("", 4), ("cancel", 5)):
+        result, requests = run(original, route="/partial", mode=mode)
+        assert result["error"] == error and result["status"] == 200 and result["bytes"] == 0 and len(requests) == 1, (mode, result, requests)
+    print("timeout and cancellation discard partial body: passed")
+    result, requests = run(original, host="localhost")
+    assert result["error"] == 0 and result["verified"] == 1 and len(requests) == 1, (result, requests)
+    print("hostname resolution with pinned leaf: passed")
     print("All native host HTTP capability checks passed; no real host or user identity used.")
 
 
