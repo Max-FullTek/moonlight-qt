@@ -130,3 +130,7 @@ Windows Lite 的 GPUI 串流入口改为附属于 SDL 串流视窗的有焦点�
 - 2026-09 目录清理:移除空壳目录(src/、streaming/、include/、soundio/ 上游遗留)与误跟踪的 .DS_Store;filemapping-smoke 并入 file-mapping/smoke;DS5 探针脚本并入 scripts/。
 
 客戶端身分的 OpenSSL 运算由 `backend/nativeidentity.*` 负责，可经 `lite-native-identity` 脱离 Qt 构建。保留 RSA-2048、X509 v3、自签 SHA-256、serial 0、原 CN、20 年效期、未加密 PKCS8 PEM 与无前导零的 64-bit 小写十六进位识别码；Darwin 的既有 PKCS1 私钥接点也保留。每一步 OpenSSL 失败均明确返回失败／抛出例外，资源由 RAII 回收，私钥读取不等待密码输入。`IdentityManager` 保留 QSettings、QSslCertificate／QSslKey／QSslConfiguration 接点与原本重新产生规则；更换凭证时会一起清除旧的两项 SSL 快取，避免有效旧证书搭配新私钥。此阶段不改变信任模型、储存位置或格式，也不代表完整身分管理已无 Qt。
+
+XML／JSON 去 Qt 的能力验证入口为 `scripts/test-native-parsers.ps1 -QtDirectory <SDK>`。经 SA 确认评估 Expat 2.10.0 与 nlohmann/json 3.12.0，维持 C++ worker／IPC 职责；源码由官方 release 固定 SHA256 准备至忽略的 `build/native-parsers-source`，每次复用逐档核对归档，保留两者授权。CMake 配置不下载或安装套件；Expat 静态链接、JSON 为 header-only。`native_parser_probe` 不链接 Qt，Qt 只用于独立 reference executable；正式 worker、封装与数据格式尚未切换。
+
+对照范围是既有 Qt 6.12 的 XML token／JSON object 语意及整数转换，覆盖繁中、配对字段、空标题、namespace、CDATA、实体、畸形输入与数值边界；不取代生产 NvHTTP 的提前返回、错误映射或完整协议验证。原生库与 Qt 对损坏 XML UTF-8、外部实体、实体展开上限、JSON 非法 escape／未配对 surrogate、超大整数表示及深度限制有差异。未限深的 JSON 原型在深层 Debug 资料树处理出现 stack overflow，能力原型已在解析期间限制 64 层；这是待 SA 确认的候选输入规则，不代表已授权改变正式产品。正式接入前需确认异常输入与 DTD 政策，并维持既有字段数值范围；不得将可构建或比较程序结束视为相容验收通过。
