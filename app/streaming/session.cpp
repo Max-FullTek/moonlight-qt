@@ -5082,6 +5082,9 @@ void Session::exec()
                     switch (event.cbutton.button) {
                     case SDL_CONTROLLER_BUTTON_DPAD_UP: emit gpuiControlsNavigate(QStringLiteral("up")); break;
                     case SDL_CONTROLLER_BUTTON_DPAD_DOWN: emit gpuiControlsNavigate(QStringLiteral("down")); break;
+                    case SDL_CONTROLLER_BUTTON_DPAD_LEFT: emit gpuiControlsNavigate(QStringLiteral("left")); break;
+                    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: emit gpuiControlsNavigate(QStringLiteral("right")); break;
+                    case SDL_CONTROLLER_BUTTON_X: emit gpuiControlsNavigate(QStringLiteral("edit")); break;
                     case SDL_CONTROLLER_BUTTON_A: emit gpuiControlsNavigate(QStringLiteral("select")); break;
                     case SDL_CONTROLLER_BUTTON_B:
                     case SDL_CONTROLLER_BUTTON_START: emit gpuiControlsNavigate(QStringLiteral("back")); break;

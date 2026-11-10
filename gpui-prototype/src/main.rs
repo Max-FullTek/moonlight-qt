@@ -2,6 +2,8 @@
 mod advanced;
 mod core;
 mod controls;
+mod radial;
+mod stream_window;
 mod i18n;
 mod input;
 
@@ -134,7 +136,6 @@ enum Modal {
     Add,
     Pair(String),
     Stream,
-    Controls,
     Select(Field),
     AppOptions(i32),
     Advanced(&'static str),
@@ -160,7 +161,7 @@ struct Prototype {
     pending: bool,
     streaming: bool,
     controls: Controls,
-    controls_scroll: ScrollHandle,
+    control_menu: Option<WindowHandle<radial::Menu>>,
     stage: String,
     settings_tab: SettingsTab,
     show_hidden: bool,
@@ -193,7 +194,7 @@ impl Prototype {
             pending: false,
             streaming: false,
             controls: Controls::default(),
-            controls_scroll: ScrollHandle::new(),
+            control_menu: None,
             stage: String::new(),
             settings_tab: SettingsTab::Stream,
             show_hidden: false,
@@ -321,7 +322,7 @@ impl Prototype {
             Action::Stop => { self.request(serde_json::json!({"command":"stop"})); }
             Action::OpenControls => { self.request(serde_json::json!({"command":"controls","action":"open"})); }
             Action::Control(action) => {
-                self.controls.selected = ControlAction::ALL.iter().position(|&item| item == action).unwrap_or(0);
+                self.controls.selected = self.controls.order.iter().position(|&item| item == action).unwrap_or(0);
                 if !self.pending && self.controls.choose(action) {
                     let mut request = serde_json::json!({"command":"controls","action":action.command()});
                     if matches!(action, ControlAction::BitrateDown | ControlAction::BitrateUp) {
@@ -342,7 +343,7 @@ impl Prototype {
                 if !self.pending && !self.streaming {
                     if let Some(host) = self.selected.clone() {
                         if self.request(serde_json::json!({"command":"start","client_pid":std::process::id(),"host":host,"app":app,"settings":core::stream_settings(&self.saved),"client_center":{"x":f32::from(window.bounds().center().x)*window.scale_factor(),"y":f32::from(window.bounds().center().y)*window.scale_factor()}})) {
-                            self.controls = Controls { bitrate: self.saved.bitrate, ..Default::default() };
+                            self.controls = Controls { bitrate: self.saved.bitrate, order: self.saved.control_order, ..Default::default() };
                             self.pending = true;
                             self.stage = "正在啟動串流…".into();
                             self.modal = Some(Modal::Stream);
@@ -405,9 +406,9 @@ impl Prototype {
                 Err(err) => self.notice = format!("無法儲存：{err}"),
             },
         }
-        if self.modal.is_some() {
+        if self.control_menu.is_none() && self.modal.is_some() {
             window.focus(&self.modal_focus);
-        } else if had_modal {
+        } else if self.control_menu.is_none() && had_modal {
             window.focus(&self.root_focus);
         }
         cx.notify();
@@ -523,8 +524,9 @@ impl Prototype {
                 core::Event::StreamFinished => {
                     self.pending = false;
                     self.streaming = false;
+                    self.close_control_menu(cx);
                     self.controls = Controls::default();
-                    if matches!(self.modal, Some(Modal::Stream | Modal::Controls)) {
+                    if matches!(self.modal, Some(Modal::Stream)) {
                         self.modal = None;
                     }
                     self.notice = "串流已結束。".into();
@@ -535,17 +537,15 @@ impl Prototype {
                     self.controls.active = active;
                     self.controls.gamepad_mouse = gamepad_mouse;
                     self.controls.has_gamepad = has_gamepad;
-                    if active {
-                        self.modal = Some(Modal::Controls);
-                        if opening {
-                            self.controls.selected = 0;
-                            self.controls.confirm_end = false;
-                            window.activate_window();
-                            window.focus(&self.modal_focus);
-                        }
-                    } else {
+                    if opening {
+                        self.controls.selected = 0;
+                        self.controls.confirm_end = false;
+                        self.controls.editing = false;
+                        self.controls.moving = None;
+                        self.open_control_menu(cx);
+                    } else if !active {
+                        self.close_control_menu(cx);
                         self.modal = Some(Modal::Stream);
-                        window.minimize_window();
                     }
                 }
                 core::Event::BitrateResult { request_id, requested_kbps, success, message } => {
@@ -554,7 +554,8 @@ impl Prototype {
                     }
                 }
                 core::Event::ControlsNavigate { direction } => {
-                    if self.controls.active && window.is_window_active() && matches!(self.modal, Some(Modal::Controls)) {
+                    if self.controls.active && self.control_menu.is_some_and(|menu|
+                        menu.update(cx, |_, window, _| window.is_window_active()).unwrap_or(false)) {
                         self.navigate_controls(&direction, window, cx);
                     }
                 }
@@ -563,6 +564,7 @@ impl Prototype {
                     if matches!(code.as_str(), "core_exited" | "protocol" | "pipe_write") {
                         self.ready = false;
                         self.streaming = false;
+                        self.close_control_menu(cx);
                         self.controls = Controls::default();
                         self.core = None;
                         window.activate_window();
@@ -578,15 +580,68 @@ impl Prototype {
         }
         cx.notify();
     }
+    fn close_control_menu(&mut self, cx: &mut Context<Self>) {
+        if let Some(menu) = self.control_menu.take() {
+            let _ = menu.update(cx, |_, window, _| window.remove_window());
+        }
+    }
+    fn open_control_menu(&mut self, cx: &mut Context<Self>) {
+        let Some(pid) = self.core.as_ref().map(core::Client::process_id) else { return };
+        let owner = cx.entity();
+        let state = self.controls.clone();
+        let result = cx.open_window(WindowOptions {
+            kind: WindowKind::PopUp,
+            titlebar: None,
+            window_bounds: Some(WindowBounds::Windowed(Bounds::new(point(px(0.), px(0.)), size(px(680.), px(680.))))),
+            window_background: WindowBackgroundAppearance::Transparent,
+            is_movable: false, is_resizable: false, is_minimizable: false,
+            focus: false, show: true,
+            ..Default::default()
+        }, |window, cx| {
+            window.set_window_title("Moonlight 串流控制");
+            cx.new(|cx| radial::Menu::new(owner, state, window, cx))
+        });
+        let result = result.and_then(|menu| {
+            let attached = menu.update(cx, |_, window, _| stream_window::attach(window, pid))?;
+            if let Err(error) = attached {
+                let _ = menu.update(cx, |_, window, _| window.remove_window());
+                return Err(error);
+            }
+            menu.update(cx, |_, window, _| window.activate_window())?;
+            Ok(menu)
+        });
+        match result {
+            Ok(menu) => self.control_menu = Some(menu),
+            Err(error) => { self.notice = format!("無法開啟串流選單：{error}");
+                self.request(serde_json::json!({"command":"controls","action":"resume"})); }
+        }
+    }
     fn navigate_controls(&mut self, direction: &str, window: &mut Window, cx: &mut Context<Self>) {
         match direction {
-            "up" | "down" => {
-                self.controls.move_selection(direction == "down");
-                self.controls_scroll.scroll_to_item(self.controls.selected);
+            "up" | "down" | "left" | "right" => self.controls.navigate(direction),
+            "previous" | "next" => self.controls.move_selection(direction == "next"),
+            "edit" => {
+                self.controls.editing = !self.controls.editing;
+                self.controls.moving = None;
+                self.controls.confirm_end = false;
             }
-            "select" => self.act(Action::Control(ControlAction::ALL[self.controls.selected]), window, cx),
+            "select" if self.controls.editing => {
+                if let Some(source) = self.controls.moving.take() {
+                    self.controls.order.swap(source, self.controls.selected);
+                    let mut settings = self.saved.clone();
+                    settings.control_order = self.controls.order;
+                    match settings::save(&settings) {
+                        Ok(()) => { self.saved = settings; self.draft.control_order = self.controls.order; }
+                        Err(error) => { self.controls.order.swap(source, self.controls.selected);
+                            self.controls.bitrate_feedback.error = Some(format!("無法儲存圖示順序：{error}")); }
+                    }
+                } else { self.controls.moving = Some(self.controls.selected); }
+            }
+            "select" => self.act(Action::Control(self.controls.order[self.controls.selected]), window, cx),
             "back" => {
-                if self.controls.confirm_end { self.controls.confirm_end = false; }
+                if self.controls.moving.take().is_some() {}
+                else if self.controls.editing { self.controls.editing = false; }
+                else if self.controls.confirm_end { self.controls.confirm_end = false; }
                 else { self.act(Action::Control(ControlAction::Resume), window, cx); }
             }
             _ => {}
@@ -611,19 +666,6 @@ impl Render for Prototype {
             .tab_group()
             .tab_stop(false)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if matches!(this.modal, Some(Modal::Controls)) {
-                    let direction = match event.keystroke.key.as_str() {
-                        "up" => Some("up"), "down" | "tab" => Some(if event.keystroke.modifiers.shift { "up" } else { "down" }),
-                        "enter" | "space" => Some("select"), "escape" => Some("back"),
-                        "o" if event.keystroke.modifiers.control && event.keystroke.modifiers.alt && event.keystroke.modifiers.shift => Some("back"),
-                        _ => None,
-                    };
-                    if let Some(direction) = direction {
-                        this.navigate_controls(direction, window, cx);
-                        cx.stop_propagation();
-                        return;
-                    }
-                }
                 if matches!(
                     this.modal,
                     Some(Modal::Add | Modal::EditValue(_) | Modal::RenameHost(_))

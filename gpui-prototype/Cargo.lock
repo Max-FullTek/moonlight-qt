@@ -2688,6 +2688,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "gpui",
+ "raw-window-handle",
  "serde",
  "serde_json",
 ]

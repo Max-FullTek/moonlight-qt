@@ -931,43 +931,6 @@ impl Prototype {
                     cx,
                 ));
             }
-            Modal::Controls => {
-                title = "串流控制";
-                let feedback = &self.controls.bitrate_feedback;
-                if let Some(pending) = feedback.pending_kbps {
-                    content = content.child(format!("{} {} Mbps", self.tr("正在套用位元率："), pending / 1000));
-                }
-                if let Some(applied) = feedback.applied_kbps {
-                    content = content.child(format!("{} {} Mbps", self.tr("位元率請求完成："), applied / 1000));
-                }
-                if let Some(error) = &feedback.error {
-                    content = content.child(div().text_color(rgb(0xff9b85))
-                        .child(format!("{} {}", self.tr("位元率調整失敗："), error)));
-                }
-                content = content
-                    .child(self.tr("方向鍵／手把十字鍵選擇，Enter／A 確認，Esc／B 返回串流。"))
-                    .child(self.tr("暫時斷線會保留 Desktop 工作階段；結束工作階段會請主機清理並依設定還原顯示。"))
-                    .child(div().id("controls-list").overflow_y_scroll().max_h(px(340.))
-                        .track_scroll(&self.controls_scroll).flex().flex_col().gap_2()
-                        .children(ControlAction::ALL.iter().enumerate().map(|(index, &action)| {
-                            let label = match action {
-                                ControlAction::Resume => self.tr("返回串流"),
-                                ControlAction::GamepadMouse => self.tr(if !self.controls.has_gamepad { "手把滑鼠：未連接手把" }
-                                    else if self.controls.gamepad_mouse { "手把滑鼠：開啟（操作控制頁期間暫停）" } else { "手把滑鼠：關閉" }),
-                                ControlAction::Disconnect => self.tr("暫時斷線"),
-                                ControlAction::End => self.tr(if self.controls.confirm_end { "再次確認：結束工作階段" } else { "結束工作階段" }),
-                                ControlAction::Stats => self.tr("效能統計開關"),
-                                ControlAction::Fullscreen => self.tr("全螢幕開關"),
-                                ControlAction::MouseMode => self.tr("滑鼠模式切換"),
-                                ControlAction::Cursor => self.tr("游標顯示開關"),
-                                ControlAction::Paste => self.tr("貼上文字"),
-                                ControlAction::PointerLock => self.tr("游標範圍鎖定開關"),
-                                ControlAction::BitrateDown | ControlAction::BitrateUp => format!("{}  {} Mbps", self.tr(if action == ControlAction::BitrateDown { "降低位元率" } else { "提高位元率" }), self.controls.bitrate).into(),
-                            };
-                            self.button(("control", index), label, Action::Control(action), self.controls.selected == index, cx)
-                        })));
-                if self.pending { content = content.child(self.tr("正在結束連線…")); }
-            }
             Modal::AppOptions(id) => {
                 title = "程式選項";
                 if let Some(app) = self

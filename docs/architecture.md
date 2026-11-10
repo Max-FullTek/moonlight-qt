@@ -83,13 +83,13 @@ Vulkan／libplacebo renderer 与通用 FFmpeg hwaccel 分别由 `lite-vulkan-vid
 
 `vulkan_video_renderer --probe` 验证实际 Vulkan 影格上传、两次呈现、图层更新／清理及通用 D3D11 硬体 context；未读回最终像素。`ffmpeg_video_decoder <repo-root> --probe` 则使用生产内嵌 H.264／HEVC／AV1 探测影格，分别走软件与硬体解码、原 renderer 格式映射，再清理资源。两者均须显式执行，默认 CTest 不启动 GPU；所有原生测试在不含 Qt 的 PATH 运行。这些验证不代表完整 worker 已无 Qt，或真实串流、HDR、全萤幕、影音同步及延迟已验收；Session、网路、设定、输入与 helper 仍需迁移。
 
-Windows Lite 的 GPUI 串流入口使用现有前端视窗中的有焦点控制页，快捷键仍为 Ctrl+Alt+Shift+O；十字键／方向键选择、A／Enter 确认、B／Esc 返回。GPUI session 不建立 Qt 互动选单或浮动按钮；旧 Qt 前端路径保留。原选单位置设定仍保留在隔离 profile 中供旧路径使用，GPUI 设定页不再提供不适用的位置选项。
+Windows Lite 的 GPUI 串流入口改为附属于 SDL 串流视窗的有焦点放射选单，主控制页保持最小化，快捷键仍为 Ctrl+Alt+Shift+O；十字键／方向键选择、A／Enter 确认、B／Esc 返回。外圈与中央均为圆形，外圈只显示图示；滑鼠 hover 或键盘／手把选择时，中央显示名称、状态与说明。F2／手把 X 切换图示顺序编辑，依序选择来源与目的位置交换，编辑期间不执行串流操作；顺序写入独立 GPUI 设置。GPUI session 不建立 Qt 互动选单或浮动按钮；旧 Qt 前端路径保留。原选单位置设定仍保留在隔离 profile 中供旧路径使用，GPUI 设定页不再提供不适用的位置选项。
 
-控制页以既有匿名 pipe 增加 `controls` 命令与状态／导航事件，不传递影像，也不增加程序或定时轮询。worker 收到 pipe 命令时以 SDL user event 唤醒主线程，过渡期由该事件处理既有 Qt 主线程命令。开页时明确释放远端按键／按钮／接点与手把状态、暂停输入计时器；关页时清除控制页期间排队的输入，再恢复原擷取状态，本机仍按住的键鼠／手把按钮必须先放开才可重新送往 host。Windows 两个既有程序透过 `AllowSetForegroundWindow` 交接前景权限，不使用置顶、穿透或不启用焦点的视窗补丁。固定的 GPUI 0.2.2 `activate_window()` 内部会合成 Alt 按键，所以必须先完成 worker 输入交接，才启用 GPUI 视窗。
+控制页以既有匿名 pipe 增加 `controls` 命令与状态／导航事件，不传递影像，也不增加程序或定时轮询。worker 收到 pipe 命令时以 SDL user event 唤醒主线程，过渡期由该事件处理既有 Qt 主线程命令。开页时明确释放远端按键／按钮／接点与手把状态、暂停输入计时器；关页时清除控制页期间排队的输入，再恢复原擷取状态，本机仍按住的键鼠／手把按钮必须先放开才可重新送往 host。Windows 两个既有程序透过 `AllowSetForegroundWindow` 交接前景权限，放射选单使用 GPUI PopUp 加少量 Win32 owner／位置／边框设定，不使用全域置顶、穿透、GPUI 源码修改或新增程序。固定的 GPUI 0.2.2 `activate_window()` 内部会合成 Alt 按键，所以必须先完成 worker 输入交接，才启用 GPUI 视窗。
 
-「暂时断线」明确保留 host 工作阶段；「结束工作阶段」在断线后沿用 `NvHTTP::quitApp()` 的 `cancel` 请求，要求主机结束 Desktop／应用程式工作阶段。主机显示还原依 Sunshine／VDD 设定，client 不自行切换 host 萤幕；请求失败会回报错误。控制页另保留统计、全萤幕、滑鼠模式、游标、文字贴上、范围锁定与即时位元率操作。
+「暂时断线」明确保留 host 工作阶段；「结束工作阶段」在断线后沿用 `NvHTTP::quitApp()` 的 `cancel` 请求，要求主机结束 Desktop／应用程式工作阶段。主机显示还原依 Sunshine／VDD 设定，client 不自行切换 host 萤幕；请求失败会回报错误。快速选单保留返回串流、手把滑鼠、暂时断线、结束工作阶段、统计与全萤幕六项；其他既有 worker 控制命令不因此移除。
 
-GPUI 位元率操作结果只显示在控制页，不再触发游戏画面的 Qt toast。既有协议 1 的 `controls` 请求新增可选 `request_id`，核心在原 HTTP worker 完成后回报 `bitrate_result`（编号、请求 kbps、成功旗标及错误）；旧调用省略编号仍可使用。编号随原位元率槽位一起合并，前端不会以旧请求结果清除新请求的等待／错误状态，重复选择同一数值也适用；关闭控制页后结果只更新资料，不启用视窗或抢焦点。Session 结束即清理前端状态，bridge 不转发已结束 Session 的延迟结果。「请求完成」沿用既有 HTTP 完成判定，不是实测网络位元率，也未增加新的主机回复格式要求。旧 Qt 前端保留原 toast 行为。
+既有 GPUI 位元率命令回覆契约仍保留，但目前六项快速选单不提供位元率按钮，也不显示常驻位元率数字。回覆不再触发游戏画面的 Qt toast。既有协议 1 的 `controls` 请求新增可选 `request_id`，核心在原 HTTP worker 完成后回报 `bitrate_result`（编号、请求 kbps、成功旗标及错误）；旧调用省略编号仍可使用。编号随原位元率槽位一起合并，前端不会以旧请求结果清除新请求的等待／错误状态，重复选择同一数值也适用；关闭控制页后结果只更新资料，不启用视窗或抢焦点。Session 结束即清理前端状态，bridge 不转发已结束 Session 的延迟结果。「请求完成」沿用既有 HTTP 完成判定，不是实测网络位元率，也未增加新的主机回复格式要求。旧 Qt 前端保留原 toast 行为。
 
 此控制页尚需真实 Sunshine／Desktop 串流验证 Windows 焦点、全萤幕、手把输入交接及两种断线结果；模擬核心的介面检查不能代替此验收。GPUI 前端仍由其 Cargo 路径构建，串流 worker、被动 toast、字型资源查找与剪贴板 helper 仍需 Qt；现有 portable 封装仍走 qmake／windeployqt。不得把原生库或控制页编译通过视为 Windows Lite 已完成无 Qt 交付。
 

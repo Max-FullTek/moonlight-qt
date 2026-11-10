@@ -4,6 +4,8 @@ use std::path::PathBuf;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    #[serde(default = "default_control_order")]
+    pub control_order: [crate::controls::ControlAction; 6],
     pub resolution: usize,
     pub fps: usize,
     pub codec: usize,
@@ -46,12 +48,14 @@ pub const WINDOW_MODES: &[&str] = &["全螢幕", "無邊框全螢幕", "視窗"]
 pub const DECODERS: &[&str] = &["自動", "僅硬體解碼", "僅軟體解碼"];
 pub const LANGUAGES: &[&str] = &["繁體中文", "简体中文", "English"];
 pub const FEC: &[&str] = &["跟隨主機", "自動", "固定百分比"];
+fn default_control_order() -> [crate::controls::ControlAction; 6] { crate::controls::ControlAction::ALL }
 fn legacy_window_mode() -> usize {
     2
 }
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            control_order: default_control_order(),
             resolution: 1,
             fps: 1,
             codec: 0,
@@ -143,6 +147,7 @@ impl Settings {
             && self.resolution < RESOLUTIONS.len()
             && self.fps < FPS.len()
             && self.codec < CODECS.len()
+            && crate::controls::valid_order(&self.control_order)
             && self.fec < FEC.len()
             && self.window_mode < WINDOW_MODES.len()
             && self.decoder < DECODERS.len()

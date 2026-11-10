@@ -98,6 +98,7 @@ pub struct Client {
     events: mpsc::Receiver<Event>,
 }
 impl Client {
+    pub fn process_id(&self) -> u32 { self.child_pid }
     pub fn spawn() -> anyhow::Result<Self> {
         let exe = std::env::current_exe()?
             .parent()
