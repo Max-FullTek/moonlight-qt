@@ -74,3 +74,5 @@ Windows Lite 原生库另有无 Qt 入口 `scripts/build-lite-native.ps1`（CI�
 剪贴板 TLS 回归仅访问本机随机端口。`clipboard_payload_routing/fixtures/` 中的证书和私钥是公开测试素材，不能用于实际配对；证书有效期至 2036 年，届时需要更新。测试不会访问用户配对凭据，也不使用系统剪贴板。macOS 的原生复合写入路径仍需实机验证。
 
 `gpui_control_owner` 是手动可见视窗 fixture，不加入无人值守 CTest。以原生 CMake 构建此 target，将 exe 复制为隔离目录的 `Moonlight.exe`，与正式 GPUI 前端、SDL2.dll、SDL3.dll 放在一起；执行 fixture 会启动前端并把 LOCALAPPDATA 限定在该目录的 `isolated-profile`。它只模拟协议 1 的串流／控制事件，不连接网络或 host，也不发送远端输入。Ctrl+Alt+Shift+O 开启选单，F10／F11 分别切换 SDL 无边框／独占全萤幕。用于检查同一 SDL 视窗上的选单与焦点，不替代真实 worker 的输入隔离、手把、HDR、DPI 或 Sunshine 验收。圆形六项菜单的最终 UI 与全萤幕返回仍须人工验证。
+
+`native_identity` 经无 Qt CMake／CTest 验证生产身分生成：RSA 位数、私钥与证书配对、自签签章、CN／serial／效期、PKCS8／PKCS1 往返、不可读／加密私钥不等待输入，以及识别码格式。`check_nvhttp.py` 的隔离 QSettings 场景另经生产 IdentityManager 确认首次生成可由 Qt SSL 接点读取、重启不改写既有身分档案、不可读测试私钥触发原有重新产生流程时不沿用旧证书快取，并保留无关设定与识别码；这些场景不读取或修改用户 profile。

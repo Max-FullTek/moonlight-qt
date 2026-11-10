@@ -15,6 +15,19 @@ from urllib.parse import urlsplit, parse_qs
 
 def main(executable, fixtures, work):
     work.mkdir(parents=True, exist_ok=False)
+    identity_profile = work / "identity"
+    for mode in ("identity-new", "identity-existing", "identity-repair"):
+        result = subprocess.run([executable, "https://127.0.0.1:1", str(fixtures / "server.pem"),
+                                 str(fixtures), str(identity_profile), mode],
+                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10, check=True)
+        assert result.stdout.strip() == "identity=ok"
+        files = {p.relative_to(identity_profile): p.read_bytes() for p in identity_profile.rglob("*.ini")}
+        assert files
+        if mode == "identity-new":
+            initial_identity = files
+        elif mode == "identity-existing":
+            assert files == initial_identity, "Reload changed the identity settings file"
+        print(f"production IdentityManager {mode}: passed")
     seen = []
     scenario = ""
 

@@ -23,6 +23,35 @@ int main(int argc, char** argv)
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, argv[4]);
     QSettings settings;
+    const QString mode = QString::fromUtf8(argv[5]);
+    if (mode == "identity-new" || mode == "identity-existing" || mode == "identity-repair") {
+        const auto certificate = settings.value("certificate").toByteArray();
+        const auto key = settings.value("key").toByteArray();
+        const auto uid = settings.value("uniqueid").toString();
+        if (mode == "identity-new") {
+            if (!certificate.isEmpty() || !key.isEmpty() || !uid.isEmpty()) return 3;
+            settings.setValue("unrelated-setting", "preserve");
+        } else if (certificate.isEmpty() || key.isEmpty() || uid.isEmpty()) return 4;
+        if (mode == "identity-repair") {
+            settings.setValue("key", "invalid test key");
+            settings.sync();
+        }
+        auto* identity = IdentityManager::get();
+        const auto config = identity->getSslConfig();
+        settings.sync();
+        if (config.localCertificate().isNull() || config.privateKey().isNull() || identity->getUniqueId().isEmpty() ||
+            config.localCertificate().toPem() != QSslCertificate(identity->getCertificate()).toPem() ||
+            settings.value("certificate").toByteArray() != identity->getCertificate() ||
+            settings.value("key").toByteArray() != identity->getPrivateKey() ||
+            settings.value("uniqueid").toString() != identity->getUniqueId() ||
+            settings.value("unrelated-setting").toString() != "preserve") return 5;
+        if (mode == "identity-existing" && (certificate != identity->getCertificate() ||
+            key != identity->getPrivateKey() || uid != identity->getUniqueId())) return 6;
+        if (mode == "identity-repair" && (certificate == identity->getCertificate() ||
+            key == identity->getPrivateKey() || uid != identity->getUniqueId())) return 7;
+        std::puts("identity=ok");
+        return 0;
+    }
     settings.setValue("certificate", read(QString(argv[3]) + "/server.pem"));
     settings.setValue("key", read(QString(argv[3]) + "/server-key.pem"));
     settings.setValue("uniqueid", "fixture-client");
@@ -34,7 +63,6 @@ int main(int argc, char** argv)
     if (qEnvironmentVariableIsSet("NATIVE_HTTP_FIXTURE_HTTP_PORT")) {
         http.m_BaseUrlHttp.setPort(qEnvironmentVariableIntValue("NATIVE_HTTP_FIXTURE_HTTP_PORT"));
     }
-    const QString mode = QString::fromUtf8(argv[5]);
     int error = 0, status = 0;
     bool ok = false;
     QTimer::singleShot(0, &app, [&] {

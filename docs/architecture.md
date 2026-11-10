@@ -128,3 +128,5 @@ Windows Lite 的 GPUI 串流入口改为附属于 SDL 串流视窗的有焦点�
 ## 历史
 
 - 2026-09 目录清理:移除空壳目录(src/、streaming/、include/、soundio/ 上游遗留)与误跟踪的 .DS_Store;filemapping-smoke 并入 file-mapping/smoke;DS5 探针脚本并入 scripts/。
+
+客戶端身分的 OpenSSL 运算由 `backend/nativeidentity.*` 负责，可经 `lite-native-identity` 脱离 Qt 构建。保留 RSA-2048、X509 v3、自签 SHA-256、serial 0、原 CN、20 年效期、未加密 PKCS8 PEM 与无前导零的 64-bit 小写十六进位识别码；Darwin 的既有 PKCS1 私钥接点也保留。每一步 OpenSSL 失败均明确返回失败／抛出例外，资源由 RAII 回收，私钥读取不等待密码输入。`IdentityManager` 保留 QSettings、QSslCertificate／QSslKey／QSslConfiguration 接点与原本重新产生规则；更换凭证时会一起清除旧的两项 SSL 快取，避免有效旧证书搭配新私钥。此阶段不改变信任模型、储存位置或格式，也不代表完整身分管理已无 Qt。

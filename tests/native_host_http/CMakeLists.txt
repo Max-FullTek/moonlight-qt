@@ -51,6 +51,7 @@ if(VERIFY_QT_HTTP_OWNER)
         "${CMAKE_CURRENT_LIST_DIR}/../../app/settings/compatfetcher.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../../app/backend/nvaddress.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../../app/backend/identitymanager.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/../../app/backend/nativeidentity.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../../app/backend/qtnativehttptransport.cpp")
     set_target_properties(nvhttp_native PROPERTIES AUTOMOC ON)
     target_include_directories(nvhttp_native PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../moonlight-common-c/moonlight-common-c/src")

@@ -1,12 +1,8 @@
 #include "identitymanager.h"
-#include "utils.h"
+#include "nativeidentity.h"
 
 #include <QDebug>
 
-#include <openssl/pem.h>
-#include <openssl/rsa.h>
-#include <openssl/x509.h>
-#include <openssl/rand.h>
 
 #define SER_UNIQUEID "uniqueid"
 #define SER_CERT "certificate"
@@ -28,69 +24,13 @@ IdentityManager::get()
 
 void IdentityManager::createCredentials(QSettings& settings)
 {
-    X509* cert = X509_new();
-    THROW_BAD_ALLOC_IF_NULL(cert);
-
-#if OPENSSL_VERSION_NUMBER >= 0x30000000L
-    EVP_PKEY* pk = EVP_RSA_gen(2048);
-    THROW_BAD_ALLOC_IF_NULL(pk);
-#else
-    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
-    THROW_BAD_ALLOC_IF_NULL(ctx);
-
-    EVP_PKEY_keygen_init(ctx);
-    EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, 2048);
-
-    // pk must be initialized on input
-    EVP_PKEY* pk = NULL;
-    EVP_PKEY_keygen(ctx, &pk);
-
-    EVP_PKEY_CTX_free(ctx);
-    THROW_BAD_ALLOC_IF_NULL(pk);
-#endif
-
-    X509_set_version(cert, 2);
-    ASN1_INTEGER_set(X509_get_serialNumber(cert), 0);
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-    X509_gmtime_adj(X509_get_notBefore(cert), 0);
-    X509_gmtime_adj(X509_get_notAfter(cert), 60 * 60 * 24 * 365 * 20); // 20 yrs
-#else
-    X509_gmtime_adj(X509_getm_notBefore(cert), 0);
-    X509_gmtime_adj(X509_getm_notAfter(cert), 60 * 60 * 24 * 365 * 20); // 20 yrs
-#endif
-
-    X509_set_pubkey(cert, pk);
-
-    X509_NAME* name = X509_NAME_new();
-    THROW_BAD_ALLOC_IF_NULL(name);
-    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
-                               reinterpret_cast<unsigned char *>(const_cast<char*>("NVIDIA GameStream Client")),
-                               -1, -1, 0);
-    X509_set_subject_name(cert, name);
-    X509_set_issuer_name(cert, name);
-    X509_NAME_free(name);
-
-    X509_sign(cert, pk, EVP_sha256());
-
-    BIO* biokey = BIO_new(BIO_s_mem());
-    THROW_BAD_ALLOC_IF_NULL(biokey);
-    PEM_write_bio_PrivateKey(biokey, pk, NULL, NULL, 0, NULL, NULL);
-
-    BIO* biocert = BIO_new(BIO_s_mem());
-    THROW_BAD_ALLOC_IF_NULL(biocert);
-    PEM_write_bio_X509(biocert, cert);
-
-    BUF_MEM* mem;
-    BIO_get_mem_ptr(biokey, &mem);
-    m_CachedPrivateKey = QByteArray(mem->data, (int)mem->length);
-
-    BIO_get_mem_ptr(biocert, &mem);
-    m_CachedPemCert = QByteArray(mem->data, (int)mem->length);
-
-    X509_free(cert);
-    EVP_PKEY_free(pk);
-    BIO_free(biokey);
-    BIO_free(biocert);
+    const auto credentials = NativeIdentity::generateCredentials();
+    // A valid old certificate may already be cached when its key is rejected.
+    // Both wrappers must refer to the newly generated identity together.
+    m_CachedSslCert = QSslCertificate();
+    m_CachedSslKey = QSslKey();
+    m_CachedPemCert = QByteArray::fromStdString(credentials.certificatePem);
+    m_CachedPrivateKey = QByteArray::fromStdString(credentials.privateKeyPem);
 
     // Check that the new keypair is valid before persisting it
     if (getSslCertificate().isNull()) {
@@ -141,9 +81,7 @@ IdentityManager::IdentityManager()
     }
     else {
         // Generate a new unique ID in base 16
-        uint64_t uid;
-        RAND_bytes(reinterpret_cast<unsigned char*>(&uid), sizeof(uid));
-        m_CachedUniqueId = QString::number(uid, 16);
+        m_CachedUniqueId = QString::fromStdString(NativeIdentity::generateUniqueId());
 
         qInfo() << "Generated new unique ID:" << m_CachedUniqueId;
 
@@ -164,32 +102,14 @@ QSslKey
 IdentityManager::getSslKey()
 {
     if (m_CachedSslKey.isNull()) {
-        // This seemingly useless const_cast is required for old OpenSSL headers
-        // where BIO_new_mem_buf's parameter is not declared const like those on
-        // the Steam Link hardware.
-        BIO* bio = BIO_new_mem_buf(const_cast<char*>(m_CachedPrivateKey.constData()), -1);
-        THROW_BAD_ALLOC_IF_NULL(bio);
-
-        EVP_PKEY* pk = PEM_read_bio_PrivateKey(bio, nullptr, nullptr, nullptr);
-        BIO_free(bio);
-
-        bio = BIO_new(BIO_s_mem());
-        THROW_BAD_ALLOC_IF_NULL(bio);
-
-        // We must write out our PEM in the old PKCS1 format for SecureTransport
-        // on macOS/iOS to be able to read it.
+        // Keep the existing SecureTransport PKCS1 boundary on Darwin.
 #ifdef Q_OS_DARWIN
-        PEM_write_bio_PrivateKey_traditional(bio, pk, nullptr, nullptr, 0, nullptr, 0);
+        const bool traditional = true;
 #else
-        PEM_write_bio_PrivateKey(bio, pk, nullptr, nullptr, 0, nullptr, 0);
+        const bool traditional = false;
 #endif
-
-        BUF_MEM* mem;
-        BIO_get_mem_ptr(bio, &mem);
-        m_CachedSslKey = QSslKey(QByteArray(mem->data, (int)mem->length), QSsl::Rsa);
-
-        BIO_free(bio);
-        EVP_PKEY_free(pk);
+        const auto normalized = NativeIdentity::normalizePrivateKey(m_CachedPrivateKey.toStdString(), traditional);
+        m_CachedSslKey = QSslKey(QByteArray::fromStdString(normalized), QSsl::Rsa);
     }
     return m_CachedSslKey;
 }

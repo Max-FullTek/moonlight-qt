@@ -13,6 +13,8 @@ unix:!macx {
 include(../globaldefs.pri)
 SOURCES += backend/nativepairing.cpp
 HEADERS += backend/nativepairing.h
+SOURCES += backend/nativeidentity.cpp
+HEADERS += backend/nativeidentity.h
 
 # Transitional Windows Lite owner: native HTTP, existing Qt event dispatcher.
 # The build entry prepares verified static libraries; never fetch from qmake.
