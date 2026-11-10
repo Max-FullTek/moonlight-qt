@@ -46,6 +46,11 @@ add_compile_options(/utf-8 /Zi /guard:cf /guard:ehcont)
 add_link_options(/DEBUG /guard:cf /guard:ehcont /CETCOMPAT)
 
 add_subdirectory("${LITE_SOURCE_ROOT}/moonlight-common-c/moonlight-common-c" common-c)
+add_library(lite-native-pairing STATIC "${LITE_SOURCE_ROOT}/app/backend/nativepairing.cpp")
+target_compile_features(lite-native-pairing PUBLIC cxx_std_17)
+target_compile_options(lite-native-pairing PRIVATE /W3 /WX)
+target_include_directories(lite-native-pairing PUBLIC "${LITE_SOURCE_ROOT}/app" PRIVATE "${LITE_DEPS_ROOT}/include/x64")
+target_link_libraries(lite-native-pairing PUBLIC "${LITE_DEPS_LIB}/libcrypto.lib")
 # The embedded project selects debug macros using CMAKE_BUILD_TYPE. Visual
 # Studio is multi-config, so select these per configuration without patching it.
 get_target_property(common_definitions moonlight-common-c COMPILE_DEFINITIONS)
@@ -254,6 +259,12 @@ target_link_libraries(lite-ffmpeg-decoder PUBLIC lite-d3d11-video lite-dxva2-vid
     lite-vulkan-video lite-generic-hwaccel lite-sdl-video lite-video-buffer lite-video-pacer lite-overlay-text)
 
 if(BUILD_TESTING)
+    add_executable(native_pairing "${LITE_SOURCE_ROOT}/tests/native_pairing/main.cpp")
+    target_include_directories(native_pairing PRIVATE "${LITE_DEPS_ROOT}/include/x64")
+    target_compile_options(native_pairing PRIVATE /W3 /WX)
+    target_link_libraries(native_pairing PRIVATE lite-native-pairing)
+    add_test(NAME native_pairing COMMAND native_pairing "${LITE_SOURCE_ROOT}/tests/clipboard_payload_routing/fixtures")
+    set_tests_properties(native_pairing PROPERTIES TIMEOUT 15)
     # The pinned fork's decode fixture omits stopVideoDepacketizer() before
     # destroying a used queue. Patch a build-directory copy only: the fork is
     # read-only to this repository's maintainer, so its gitlink stays unchanged.

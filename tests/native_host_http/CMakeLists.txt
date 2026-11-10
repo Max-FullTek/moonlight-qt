@@ -4,6 +4,14 @@ if(NOT WIN32 OR NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "This probe requires Windows x64 MSVC")
 endif()
 add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../../windows-lite/host-http" host-http)
+add_library(native-pairing STATIC "${CMAKE_CURRENT_LIST_DIR}/../../app/backend/nativepairing.cpp")
+target_compile_features(native-pairing PUBLIC cxx_std_17)
+target_compile_options(native-pairing PRIVATE /utf-8 /W3 /WX /guard:cf /guard:ehcont)
+target_include_directories(native-pairing PUBLIC "${CMAKE_CURRENT_LIST_DIR}/../../app" "${CMAKE_CURRENT_LIST_DIR}/../../libs/windows/include/x64")
+target_link_libraries(native-pairing PUBLIC "${CMAKE_CURRENT_LIST_DIR}/../../libs/windows/lib/x64/libcrypto.lib")
+add_executable(native_pairing_peer "${CMAKE_CURRENT_LIST_DIR}/../native_pairing/main.cpp")
+target_compile_options(native_pairing_peer PRIVATE /utf-8 /W3 /WX)
+target_link_libraries(native_pairing_peer PRIVATE native-pairing)
 add_executable(native_host_http main.cpp)
 target_compile_features(native_host_http PRIVATE cxx_std_17)
 target_compile_definitions(native_host_http PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -39,6 +47,7 @@ if(VERIFY_QT_HTTP_OWNER)
         "${CMAKE_CURRENT_LIST_DIR}/../../app/backend/nvhttp.h"
         "${CMAKE_CURRENT_LIST_DIR}/../../app/backend/nvcomputer.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../../app/backend/nvapp.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/../../app/backend/nvpairingmanager.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../../app/settings/compatfetcher.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../../app/backend/nvaddress.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/../../app/backend/identitymanager.cpp"
@@ -48,7 +57,7 @@ if(VERIFY_QT_HTTP_OWNER)
     target_compile_features(nvhttp_native PRIVATE cxx_std_17)
     target_compile_definitions(nvhttp_native PRIVATE LITE_NATIVE_HTTP _CRT_SECURE_NO_WARNINGS)
     target_compile_options(nvhttp_native PRIVATE /utf-8 /W3)
-    target_link_libraries(nvhttp_native PRIVATE lite-native-host-http moonlight-common-c Qt6::Core Qt6::Network Qt6::Gui)
+    target_link_libraries(nvhttp_native PRIVATE native-pairing lite-native-host-http moonlight-common-c Qt6::Core Qt6::Network Qt6::Gui)
     get_target_property(nvhttp_sources nvhttp_native SOURCES)
     add_executable(nvhttp_legacy ${nvhttp_sources})
     set_target_properties(nvhttp_legacy PROPERTIES AUTOMOC ON)
@@ -56,5 +65,5 @@ if(VERIFY_QT_HTTP_OWNER)
     target_compile_features(nvhttp_legacy PRIVATE cxx_std_17)
     target_compile_definitions(nvhttp_legacy PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(nvhttp_legacy PRIVATE /utf-8 /W3)
-    target_link_libraries(nvhttp_legacy PRIVATE lite-native-host-http moonlight-common-c Qt6::Core Qt6::Network Qt6::Gui)
+    target_link_libraries(nvhttp_legacy PRIVATE native-pairing lite-native-host-http moonlight-common-c Qt6::Core Qt6::Network Qt6::Gui)
 endif()

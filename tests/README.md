@@ -52,6 +52,8 @@ Windows Lite 原生库另有无 Qt 入口 `scripts/build-lite-native.ps1`（CI�
 
 指定 QtDirectory 时也构建 `nvhttp_native`／`nvhttp_legacy`，共用生产 NvHTTP、IdentityManager、NvComputer 与 common-c；`check_nvhttp.py` 在唯一 INI 测试目录用公开 mTLS fixture 比较 serverinfo、JSON 位元率、结束工作阶段、launch／resume 查询与 RTSP 回應、box art、503／401、redirect、逾时／应用关闭、错误 JSON、pin 不符及仅远端 XML 401 允许的 HTTP recovery。正式封装脚本先执行这组测试，并把 curl 授权与来源／静态库杂凑纳入交付。无真实 host、旧 profile 或用户私钥参与；完整配对与真实游戏连线仍需后续验收。
 
+`native_pairing` 随原生核心 CTest 执行，无 Qt／host／profile 需求，只读取公开 PEM fixture；使用独立 peer 验证 Gen 6／7、二进位 key 含零向量、challenge／签章、错误 PIN、畸形资料、清理与例外契约。`test-native-host-http.ps1 -QtDirectory <SDK>` 另执行 `check_pairing.py`：把此 peer 接成 loopback HTTP／mTLS host，分别走生产 NvPairingManager＋新旧 NvHTTP，验证完整五阶段、繁中 pairname、失败不发布凭证及最终 TLS 阶段回覆拒绝后的 unpair。未连接真实 Sunshine，也不写旧 profile；真实主机互通仍待验收。
+
 `vulkan_video_renderer` 与 `ffmpeg_video_decoder`（仅 CMake）默认不启动 GPU，验证生产链接／owner 生命周期、格式与视窗状态契约，以及通用 hwaccel 能力覆盖。显式 `vulkan_video_renderer.exe --probe` 使用实际 Vulkan 上传、呈现与图层，并建立通用 D3D11 context；`ffmpeg_video_decoder.exe <repo-root> --probe` 复用生产探测影格，分别验证 H.264／HEVC／AV1 的软件及硬体解码和 renderer 映射。两者的 PATH 均需固定 `libs/windows/lib/x64`，无 Qt；未读回最终呈现像素，不验收持续串流、HDR、全萤幕或延迟。探测不纳入默认 CTest。
 
 `dxva2_video_renderer`（仅 CMake）默认验证生产链接、明确停用的两轮 fallback，以及 HDR 首轮回退，不启动 GPU。显式 `build/lite-native/Release/dxva2_video_renderer.exe --probe`（自订 build 目录时替换路径；PATH 包含固定 `libs/windows/lib/x64`）建立隐藏 SDL 视窗、DXVA2 装置／video processor、FFmpeg 硬体 context，并执行图层更新／快取／停用清理；错误日志导致失败。此探测不解码影片、不验证最终像素、全萤幕或真实串流，不纳入默认 CTest。

@@ -117,6 +117,14 @@ GPUI 位元率操作结果只显示在控制页，不再触发游戏画面的 Qt
 
 `tests/native_host_http/check_nvhttp.py` 分别链接生产新旧 NvHTTP、IdentityManager、NvComputer 与 common-c，在全新 INI 目录使用公开 fixture，验证 serverinfo、JSON 位元率、cancel 后 serverinfo、launch／resume 的查询与 RTSP 回應、图片、503／401、redirect、逾时／应用关闭、错误 JSON、配对 pin 拒绝，以及仅远端 XML 401 允许的 HTTP recovery。测试不改写用户旧设定，也不以 loopback 协定 fixture 代替真实 Sunshine 配对／连线验收。
 
+## 配对协定的原生边界
+
+`backend/nativepairing.*` 负责原有五阶段配对与 OpenSSL 运算，标准 C++ 型别可由 `lite-native-pairing` 独立构建，不需要 Qt、HTTP 实作、档案、计时器或线程。保留 Gen 6 的 SHA-1、Gen 7+ 的 SHA-256、AES-128-ECB 无 padding、SHA-256 签章与完整 leaf 配对目的；金钥取杂凑前 16 个二进位 bytes，不再经 C 字串截断。challenge 回應需包含完整 hash 与 16-byte server challenge，且密文必须是完整 AES block；畸形资料走既有 Failed／unpair 路径。加解密、随机数与签章的 OpenSSL 回传均检查，资源由 RAII 释放。
+
+现有 `NvPairingManager` 仅保留 NvHTTP／XML、QSslCertificate、pairname 储存及错误呈现接点；不再另存一份 Qt 配对算法。HTTP 错误与原有 stage 标记继续抛给 owner；原生密码运算失败在此回报既有 Failed 状态。第一阶段成功但没有凭证仍回报 AlreadyInProgress；一般阶段失败按既有规则 unpair 一次，HTTP 例外不自动增加请求。pairname 的写入时机不变，serverCert 只在最后的已 pin HTTPS／mTLS pairchallenge 成功后发布给 owner，失败保留原本输出凭证。IdentityManager、QSslCertificate、QSettings 与主机持久化尚未解除 Qt，未改变资料格式／位置，也未触碰旧版 profile。
+
+`native_pairing` 加入无 Qt 的 CTest，以公开 fixture 与独立 OpenSSL peer 验证两个世代、含零位元组的衍生金钥向量、五阶段顺序、双向 challenge／签章、错误 PIN、签章不符、短资料、占用状态、失败清理及 owner 例外。`check_pairing.py` 进一步经生产 NvPairingManager 与新旧 NvHTTP 路径跑 loopback HTTP＋已 pin mTLS，确认 XML 转换、繁中 pairname 及凭证发布时机；测试只写唯一 INI 测试目录。此证据不替代真实 Sunshine／GFE 配对、游戏连线与全部平台实机验收。
+
 ## 历史
 
 - 2026-09 目录清理:移除空壳目录(src/、streaming/、include/、soundio/ 上游遗留)与误跟踪的 .DS_Store;filemapping-smoke 并入 file-mapping/smoke;DS5 探针脚本并入 scripts/。

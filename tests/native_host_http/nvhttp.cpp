@@ -1,4 +1,5 @@
 #include "backend/nvhttp.h"
+#include "backend/nvpairingmanager.h"
 #include "backend/qtnativehttppolicy.h"
 #include <QCoreApplication>
 #include <QFile>
@@ -38,7 +39,23 @@ int main(int argc, char** argv)
     bool ok = false;
     QTimer::singleShot(0, &app, [&] {
         try {
-            if (mode == "serverinfo") {
+            if (mode.startsWith("pair-")) {
+                NvComputer computer;
+                computer.activeAddress = NvAddress(url.host(), static_cast<uint16_t>(qEnvironmentVariableIntValue("NATIVE_HTTP_FIXTURE_HTTP_PORT")));
+                computer.activeHttpsPort = static_cast<uint16_t>(url.port());
+                computer.uuid = "pairing-fixture";
+                const QSslCertificate previous(read(QString(argv[3]) + "/other.pem"));
+                QSslCertificate result = previous;
+                NvPairingManager pairing(&computer);
+                const auto state = pairing.pair(mode == "pair-6" ? "6.0.0.0" : "7.0.0.0",
+                                               qEnvironmentVariableIsSet("NATIVE_HTTP_WRONG_PIN") ? "0000" : "1234", result);
+                error = static_cast<int>(state);
+                ok = state == NvPairingManager::PAIRED ? result == pin : result == previous;
+                if (state == NvPairingManager::PAIRED) {
+                    ok = ok && NvComputer::getPairname(computer.uuid) == QStringLiteral("測試主機");
+                }
+            }
+            else if (mode == "serverinfo") {
                 ok = NvHTTP::getCurrentGame(http.getServerInfo(NvHTTP::NVLL_NONE)) == 0;
             }
             else if (mode == "json") {

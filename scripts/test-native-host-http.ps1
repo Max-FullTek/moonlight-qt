@@ -78,6 +78,9 @@ try {
             $work = Join-Path $BuildDirectory ('nvhttp-' + $transport + '-' + [guid]::NewGuid().ToString('N'))
             & $python (Join-Path $repoRoot 'tests/native_host_http/check_nvhttp.py') (Join-Path $BuildDirectory "$Configuration/nvhttp_$transport.exe") (Join-Path $repoRoot 'tests/clipboard_payload_routing/fixtures') $work
             if ($LASTEXITCODE -ne 0) { throw "Production NvHTTP $transport checks failed" }
+            $work = Join-Path $BuildDirectory ('pairing-' + $transport + '-' + [guid]::NewGuid().ToString('N'))
+            & $python (Join-Path $repoRoot 'tests/native_host_http/check_pairing.py') (Join-Path $BuildDirectory "$Configuration/nvhttp_$transport.exe") (Join-Path $BuildDirectory "$Configuration/native_pairing_peer.exe") (Join-Path $repoRoot 'tests/clipboard_payload_routing/fixtures') $work
+            if ($LASTEXITCODE -ne 0) { throw "Production pairing $transport checks failed" }
         }
     }
 } finally {
