@@ -303,6 +303,7 @@ HEADERS += \
     backend/gpuicorebridge.h \
     backend/sessionapirpc.h \
     versionutils.h \
+    nativeversion.h \
     backend/pairedcertificate.h \
     SDL_compat.h \
     backend/nvaddress.h \

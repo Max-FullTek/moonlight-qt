@@ -1,4 +1,5 @@
 #include "backend/pairedcertificate.h"
+#include "nativeversion.h"
 #include "settings/compatfetcher.h"
 #include "versionutils.h"
 
@@ -44,6 +45,26 @@ int main(int argc, char* argv[])
                       QStringLiteral("invalid numeric version must not be partially accepted: %1")
                           .arg(invalid),
                       err);
+    }
+    for (const QString& input : {QStringLiteral(" 1.02.0 "), QStringLiteral("1.2147483647"),
+                                QStringLiteral("1.2147483648"), QStringLiteral("1."),
+                                QStringLiteral("+1.2"), QStringLiteral("1.+2"),
+                                QStringLiteral("1. 2"), QStringLiteral("1.-0"),
+                                QStringLiteral("1.٢"), QStringLiteral("1.2garbage"),
+                                QStringLiteral("1..2"), QStringLiteral("0.0"),
+                                QStringLiteral(""), QStringLiteral(".")}) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 4, 0)
+        qsizetype suffixIndex = 0;
+#else
+        int suffixIndex = 0;
+#endif
+        const auto trimmed = input.trimmed();
+        const auto parsed = QVersionNumber::fromString(trimmed, &suffixIndex);
+        const auto reference = suffixIndex == trimmed.size() ? parsed : QVersionNumber();
+        const auto actual = NativeVersion::parseNumeric(input.trimmed().toStdString());
+        const auto segments = reference.segments();
+        ok &= require(actual == NativeVersion::Segments(segments.cbegin(), segments.cend()),
+                      QStringLiteral("native parsing differs for: %1").arg(input), err);
     }
 
     // Isolate the compatibility cache from the user's real settings.

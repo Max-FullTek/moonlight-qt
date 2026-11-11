@@ -1,20 +1,21 @@
 #pragma once
 
+#include "nativeversion.h"
+
 #include <QString>
 #include <QVersionNumber>
+#include <QVector>
 
 namespace VersionUtils {
 
 inline QVersionNumber parseNumeric(const QString& text)
 {
-    const QString version = text.trimmed();
-#if QT_VERSION >= QT_VERSION_CHECK(6, 4, 0)
-    qsizetype suffixIndex = 0;
-#else
-    int suffixIndex = 0;
-#endif
-    const QVersionNumber parsed = QVersionNumber::fromString(version, &suffixIndex);
-    return suffixIndex == version.size() ? parsed : QVersionNumber();
+    const auto segments = NativeVersion::parseNumeric(text.trimmed().toStdString());
+    QVector<int> qtSegments;
+    for (const int segment : segments) {
+        qtSegments.append(segment);
+    }
+    return QVersionNumber(qtSegments);
 }
 
 inline QVersionNumber parseRelease(QString version)

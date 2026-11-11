@@ -1,5 +1,5 @@
 #include "compatfetcher.h"
-#include "versionutils.h"
+#include "nativeversion.h"
 #include <QSettings>
 
 #define COMPAT_VERSION "v1"
@@ -22,15 +22,15 @@ bool CompatFetcher::isGfeVersionSupported(QString gfeVersion)
         return true;
     }
 
-    const QVersionNumber actual = VersionUtils::parseNumeric(gfeVersion);
-    const QVersionNumber latest = VersionUtils::parseNumeric(latestSupportedVersion);
-    if (actual.segmentCount() < 2 || latest.segmentCount() < 2) {
+    const auto actual = NativeVersion::parseNumeric(gfeVersion.trimmed().toStdString());
+    const auto latest = NativeVersion::parseNumeric(latestSupportedVersion.trimmed().toStdString());
+    if (actual.size() < 2 || latest.size() < 2) {
         // Keep compatibility checks permissive when the server data is invalid.
         qWarning() << "Failed to parse GFE compatibility versions:" << gfeVersion
                    << latestSupportedVersion;
         return true;
     }
-    if (VersionUtils::compare(actual, latest) > 0) {
+    if (NativeVersion::compare(actual, latest) > 0) {
         qWarning() << "GFE version" << gfeVersion
                    << "is not supported by this version of Moonlight";
         return false;
