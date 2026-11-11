@@ -59,7 +59,7 @@ public:
 #ifdef Q_OS_WIN32
     std::string readShader(const char* name) override
     {
-        return Path::readDataFile(QString::fromLatin1(name)).toStdString();
+        return Path::readStreamAsset(name);
     }
 #endif
     int getCurrentBandwidthKbps() override
@@ -1002,7 +1002,7 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences* prefere
       m_InputHandler(nullptr), m_MouseEmulationRefCount(0), m_FlushingWindowEventsRef(0),
       m_ShouldExit(false), m_ConnectionInterrupted(false), m_SuppressConnectionErrorDialog(false),
       m_HasReceivedVideo(false), m_LastTerminationErrorCode(0), m_AsyncConnectionSuccess(false),
-      m_LastClientSdrWhiteNits(0.0f), m_PortTestResults(0), m_DualSenseHapticsRenderer(nullptr), m_OverlayManager(Path::readDataFile("ModeSeven.ttf").toStdString()),
+      m_LastClientSdrWhiteNits(0.0f), m_PortTestResults(0), m_DualSenseHapticsRenderer(nullptr), m_OverlayManager(Path::readStreamAsset("ModeSeven.ttf")),
       m_MenuPanel(nullptr), m_DeferCaptureRestore(false),
       m_PendingMicToggle(false),
 #ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS

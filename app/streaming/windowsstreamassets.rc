@@ -1,0 +1,6 @@
+ModeSeven.ttf RCDATA "ModeSeven.ttf"
+d3d11_vertex.fxc RCDATA "shaders/d3d11_vertex.fxc"
+d3d11_overlay_pixel.fxc RCDATA "shaders/d3d11_overlay_pixel.fxc"
+d3d11_yuv420_pixel.fxc RCDATA "shaders/d3d11_yuv420_pixel.fxc"
+d3d11_ayuv_pixel.fxc RCDATA "shaders/d3d11_ayuv_pixel.fxc"
+d3d11_y410_pixel.fxc RCDATA "shaders/d3d11_y410_pixel.fxc"

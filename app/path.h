@@ -2,6 +2,7 @@
 
 #include <QString>
 #include <QFileInfo>
+#include <string>
 
 class Path
 {
@@ -13,6 +14,7 @@ public:
     static QString getPortableRootDir();
 
     static QByteArray readDataFile(QString fileName);
+    static std::string readStreamAsset(const char* name);
     static void writeCacheFile(QString fileName, QByteArray data);
     static void deleteCacheFile(QString fileName);
     static QFileInfo getCacheFileInfo(QString fileName);

@@ -1,5 +1,6 @@
 #include "streaming/video/ffmpeg-renderers/d3d11va.h"
 #include "streaming/environment.h"
+#include "streaming/windowsstreamassets.h"
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
@@ -24,8 +25,9 @@ struct FileHost final : ID3D11RendererHost {
     std::string readShader(const char* name) override
     {
         std::ifstream input(directory + "/" + name, std::ios::binary);
-        std::string bytes{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
-        require(!bytes.empty(), "load production shader bytes");
+        const std::string expected{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+        auto bytes = readWindowsStreamAsset(name, {}, {}, {}, {});
+        require(!bytes.empty() && bytes == expected, "embedded production shader matches source bytes");
         shaders.insert(name);
         return bytes;
     }

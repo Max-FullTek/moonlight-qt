@@ -5,6 +5,9 @@
 #include <QStandardPaths>
 #include <QSettings>
 #include <QCoreApplication>
+#ifdef Q_OS_WIN32
+#include "streaming/windowsstreamassets.h"
+#endif
 
 QString Path::s_CacheDir;
 QString Path::s_LogDir;
@@ -53,6 +56,20 @@ QByteArray Path::readDataFile(QString fileName)
         return {};
     }
     return dataFile.readAll();
+}
+
+std::string Path::readStreamAsset(const char* name)
+{
+#ifdef Q_OS_WIN32
+    std::vector<std::filesystem::path> appDataDirs;
+    for (const auto& directory : QStandardPaths::standardLocations(QStandardPaths::AppDataLocation)) {
+        appDataDirs.emplace_back(directory.toStdWString());
+    }
+    return readWindowsStreamAsset(name, s_CacheDir.toStdWString(), getPortableRootDir().toStdWString(),
+                                  appDataDirs, QCoreApplication::applicationDirPath().toStdWString());
+#else
+    return readDataFile(QString::fromLatin1(name)).toStdString();
+#endif
 }
 
 void Path::writeCacheFile(QString fileName, QByteArray data)

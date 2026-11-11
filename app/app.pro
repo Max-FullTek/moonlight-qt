@@ -766,6 +766,18 @@ unix:!macx: {
 }
 win32 {
     RC_ICONS = moonlight.ico
+    SOURCES += streaming/windowsstreamassets.cpp
+    HEADERS += streaming/windowsstreamassets.h
+
+    # Keep qmake's generated version/icon resource alongside the stream assets.
+    STREAM_ASSET_RC = $$PWD/streaming/windowsstreamassets.rc
+    stream_asset_rc.input = STREAM_ASSET_RC
+    CONFIG(release, debug|release): stream_asset_rc.output = windowsstreamassets-release.res
+    else: stream_asset_rc.output = windowsstreamassets-debug.res
+    stream_asset_rc.commands = rc /NOLOGO /I $$shell_quote($$shell_path($$PWD)) /fo ${QMAKE_FILE_OUT} ${QMAKE_FILE_IN}
+    stream_asset_rc.depends = $$PWD/ModeSeven.ttf $$files($$PWD/shaders/d3d11_*.fxc)
+    stream_asset_rc.variable_out = OBJECTS
+    QMAKE_EXTRA_COMPILERS += stream_asset_rc
     QMAKE_TARGET_COMPANY = Moonlight V+ Project
     QMAKE_TARGET_DESCRIPTION = Moonlight V+ for PC Game Streaming Client
     QMAKE_TARGET_PRODUCT = Moonlight V+ for PC

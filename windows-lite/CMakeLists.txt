@@ -6,6 +6,7 @@ if(NOT WIN32 OR NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8
    OR NOT CMAKE_GENERATOR_PLATFORM STREQUAL "x64")
     message(FATAL_ERROR "Windows Lite currently requires the MSVC Visual Studio x64 generator")
 endif()
+enable_language(RC)
 
 set(LITE_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 get_filename_component(LITE_SOURCE_ROOT "${LITE_SOURCE_ROOT}" ABSOLUTE)
@@ -132,6 +133,13 @@ target_include_directories(lite-stream-utils PUBLIC "${LITE_SOURCE_ROOT}/app")
 target_link_libraries(lite-stream-utils PUBLIC lite-sdl2 user32)
 # Match the Windows Lite Qt build's window-probing preference.
 target_compile_definitions(lite-stream-utils PRIVATE HAVE_LIBPLACEBO_VULKAN)
+
+add_library(lite-stream-assets STATIC "${LITE_SOURCE_ROOT}/app/streaming/windowsstreamassets.cpp")
+target_compile_features(lite-stream-assets PUBLIC cxx_std_17)
+target_compile_options(lite-stream-assets PRIVATE /W3 /WX)
+target_include_directories(lite-stream-assets PUBLIC "${LITE_SOURCE_ROOT}/app")
+# Attach the resource to the executable that consumes the static library.
+target_sources(lite-stream-assets INTERFACE "${LITE_SOURCE_ROOT}/app/streaming/windowsstreamassets.rc")
 
 add_library(lite-touch-input STATIC
     "${LITE_SOURCE_ROOT}/app/streaming/input/abstouch.cpp"
@@ -357,14 +365,14 @@ if(BUILD_TESTING)
     add_executable(overlay_text "${LITE_SOURCE_ROOT}/tests/overlay_text/main.cpp")
     target_compile_definitions(overlay_text PRIVATE SDL_MAIN_HANDLED)
     target_compile_options(overlay_text PRIVATE /W3 /WX)
-    target_link_libraries(overlay_text PRIVATE lite-overlay-text)
+    target_link_libraries(overlay_text PRIVATE lite-overlay-text lite-stream-assets)
     add_test(NAME overlay_text COMMAND overlay_text "${LITE_SOURCE_ROOT}/app/ModeSeven.ttf")
     set_tests_properties(overlay_text PROPERTIES TIMEOUT 15)
 
     add_executable(d3d11_video_renderer "${LITE_SOURCE_ROOT}/tests/d3d11_video_renderer/main.cpp")
     target_compile_definitions(d3d11_video_renderer PRIVATE SDL_MAIN_HANDLED)
     target_compile_options(d3d11_video_renderer PRIVATE /W3 /WX)
-    target_link_libraries(d3d11_video_renderer PRIVATE lite-d3d11-video)
+    target_link_libraries(d3d11_video_renderer PRIVATE lite-d3d11-video lite-stream-assets)
     add_test(NAME d3d11_video_renderer COMMAND d3d11_video_renderer)
     set_tests_properties(d3d11_video_renderer PROPERTIES TIMEOUT 15)
 

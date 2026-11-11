@@ -1,4 +1,5 @@
 #include "streaming/video/overlaymanager.h"
+#include "streaming/windowsstreamassets.h"
 
 #include <atomic>
 #include <cstdint>
@@ -152,8 +153,9 @@ int main(int argc, char** argv)
     try {
         require(argc == 2, "production font path required");
         std::ifstream file(argv[1], std::ios::binary);
-        const std::string font{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
-        require(!font.empty(), "load production font");
+        const std::string expected{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+        const auto font = readWindowsStreamAsset("ModeSeven.ttf", {}, {}, {}, {});
+        require(!font.empty() && font == expected, "embedded production font matches source bytes");
         SDL_SetMainReady();
         SDL_SetAssertionHandler(reportAssertion, nullptr);
         SDL_LogSetOutputFunction(reportLog, nullptr);
