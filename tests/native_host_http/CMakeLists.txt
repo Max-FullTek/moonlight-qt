@@ -22,6 +22,12 @@ target_compile_definitions(native_host_http PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_compile_options(native_host_http PRIVATE /utf-8 /W3 /WX)
 target_link_libraries(native_host_http PRIVATE lite-native-host-http)
 
+add_executable(native_host_http_windows_owner main.cpp)
+target_compile_features(native_host_http_windows_owner PRIVATE cxx_std_17)
+target_compile_definitions(native_host_http_windows_owner PRIVATE NATIVE_HTTP_WINDOWS_OWNER _CRT_SECURE_NO_WARNINGS)
+target_compile_options(native_host_http_windows_owner PRIVATE /utf-8 /W3 /WX)
+target_link_libraries(native_host_http_windows_owner PRIVATE lite-windows-http-transfer)
+
 # Optional legacy-owner verification; the native target above never requires Qt.
 option(VERIFY_QT_HTTP_OWNER "Verify the transitional Qt event-loop owner" OFF)
 if(VERIFY_QT_HTTP_OWNER)

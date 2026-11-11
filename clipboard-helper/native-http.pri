@@ -8,6 +8,7 @@ CURL_LIB = $$NATIVE_HTTP_BUILD/host-http/curl/lib/$$NATIVE_HTTP_CONFIG/libcurl.l
 OPENSSL_LIBS = $$PWD/../libs/windows/lib/x64
 DEFINES += LITE_NATIVE_CLIPBOARD_HTTP
 SOURCES += $$PWD/../app/streaming/qtclipboardtransfer.cpp
+SOURCES += $$PWD/../app/backend/windowshttptransfer.cpp
 SOURCES += $$PWD/../app/streaming/windowsclipboardlistener.cpp
 SOURCES += $$PWD/../app/streaming/windowsclipboardpng.cpp
 HEADERS += $$PWD/../app/streaming/qtclipboardtransfer.h

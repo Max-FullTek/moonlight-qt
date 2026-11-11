@@ -2,12 +2,12 @@
 
 #include "backend/nativehttptransport.h"
 #include <QObject>
-#include <QTimer>
 #include <functional>
 
-class QSocketNotifier;
+namespace NativeHttp { class WindowsTransfer; }
 
-// Transitional event adapter for the existing clipboard helper GUI thread.
+// Transitional lifetime adapter for the existing QObject clipboard owner.
+// Socket/timer dispatch is native and does not depend on the Qt event loop.
 class QtClipboardTransfer final : public QObject {
 public:
     using Completion = std::function<void(QtClipboardTransfer*, NativeHttp::Response)>;
@@ -16,10 +16,7 @@ public:
     void cancel();
 
 private:
-    void advance(NativeHttp::ReadyEvent event);
-    void clearWatchers();
-    std::unique_ptr<NativeHttp::AsyncRequest> m_Request;
+    void finish(NativeHttp::Response response);
     Completion m_Completed;
-    QTimer m_Timer;
-    std::vector<QSocketNotifier*> m_Watchers;
+    std::unique_ptr<NativeHttp::WindowsTransfer> m_Transfer;
 };

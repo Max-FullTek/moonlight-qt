@@ -14,6 +14,10 @@
 #include <vector>
 #include <chrono>
 #include <algorithm>
+#ifdef NATIVE_HTTP_WINDOWS_OWNER
+#include "backend/windowshttptransfer.h"
+#include <windows.h>
+#endif
 #ifdef NATIVE_HTTP_QT_OWNER
 #include "backend/qtnativehttptransport.h"
 #include <QCoreApplication>
@@ -93,7 +97,35 @@ public:
 };
 NativeHttp::Response performRequest(NativeHttp::Request request, const std::string& mode, bool eventLoop)
 {
-#ifdef NATIVE_HTTP_QT_OWNER
+#ifdef NATIVE_HTTP_WINDOWS_OWNER
+    request.cancellation.reset();
+    std::optional<NativeHttp::Response> response;
+    bool dispatched = false;
+    const auto progress = SetTimer(nullptr, 0, 50, nullptr);
+    const auto closing = mode == "owner-cancel" ? SetTimer(nullptr, 0, 200, nullptr) : 0;
+    const auto watchdog = SetTimer(nullptr, 0, 3000, nullptr);
+    if (!progress || !watchdog || (mode == "owner-cancel" && !closing))
+        throw std::runtime_error("Cannot create owner test timers");
+    NativeHttp::WindowsTransfer transfer(std::move(request), [&](NativeHttp::Response result) {
+        response = std::move(result);
+    });
+    if (!transfer.active()) throw std::runtime_error("Cannot initialize native HTTP message owner");
+    MSG message{};
+    while (!response) {
+        if (GetMessageW(&message, nullptr, 0, 0) <= 0) throw std::runtime_error("HTTP owner stopped unexpectedly");
+        if (!message.hwnd && message.message == WM_TIMER && message.wParam == progress) dispatched = true;
+        else if (!message.hwnd && message.message == WM_TIMER && message.wParam == closing) transfer.cancel();
+        else if (!message.hwnd && message.message == WM_TIMER && message.wParam == watchdog)
+            throw std::runtime_error("HTTP owner exceeded test deadline");
+        else DispatchMessageW(&message);
+    }
+    KillTimer(nullptr, progress);
+    KillTimer(nullptr, watchdog);
+    if (closing) KillTimer(nullptr, closing);
+    if (mode == "owner-cancel" && !dispatched) throw std::runtime_error("HTTP blocked the owner dispatcher");
+    (void)eventLoop;
+    return std::move(*response);
+#elif defined(NATIVE_HTTP_QT_OWNER)
     request.cancellation.reset();
     NativeHttp::Response response;
     std::exception_ptr failure;

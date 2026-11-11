@@ -35,3 +35,8 @@ target_compile_features(lite-native-host-http PUBLIC cxx_std_17)
 target_compile_options(lite-native-host-http PRIVATE /utf-8 /W3 /WX)
 target_include_directories(lite-native-host-http PUBLIC "${REPO_ROOT}/app")
 target_link_libraries(lite-native-host-http PUBLIC CURL::libcurl OpenSSL::SSL OpenSSL::Crypto)
+
+add_library(lite-windows-http-transfer STATIC "${REPO_ROOT}/app/backend/windowshttptransfer.cpp")
+target_compile_features(lite-windows-http-transfer PUBLIC cxx_std_17)
+target_compile_options(lite-windows-http-transfer PRIVATE /utf-8 /W3 /WX)
+target_link_libraries(lite-windows-http-transfer PUBLIC lite-native-host-http user32 ws2_32)

@@ -63,6 +63,9 @@ try {
     $work = Join-Path $BuildDirectory ('event-scenarios-' + [guid]::NewGuid().ToString('N'))
     & $python (Join-Path $repoRoot 'tests/native_host_http/check.py') (Join-Path $BuildDirectory "$Configuration/native_host_http.exe") (Join-Path $repoRoot 'tests/clipboard_payload_routing/fixtures') $work event-owner
     if ($LASTEXITCODE -ne 0) { throw 'Native HTTP socket-owner checks failed' }
+    $work = Join-Path $BuildDirectory ('windows-event-scenarios-' + [guid]::NewGuid().ToString('N'))
+    & $python (Join-Path $repoRoot 'tests/native_host_http/check.py') (Join-Path $BuildDirectory "$Configuration/native_host_http_windows_owner.exe") (Join-Path $repoRoot 'tests/clipboard_payload_routing/fixtures') $work event-owner
+    if ($LASTEXITCODE -ne 0) { throw 'Native HTTP Windows message-owner checks failed' }
     if ($QtDirectory) {
         $env:PATH = "$(Join-Path $QtDirectory 'bin');$env:PATH"
         foreach ($owner in @('main', 'worker')) {
