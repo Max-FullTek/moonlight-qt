@@ -141,7 +141,9 @@ target_include_directories(lite-stream-assets PUBLIC "${LITE_SOURCE_ROOT}/app")
 # Attach the resource to the executable that consumes the static library.
 target_sources(lite-stream-assets INTERFACE "${LITE_SOURCE_ROOT}/app/streaming/windowsstreamassets.rc")
 
-add_library(lite-clipboard-frame STATIC "${LITE_SOURCE_ROOT}/app/streaming/clipboardframe.cpp")
+add_library(lite-clipboard-frame STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/clipboardframe.cpp"
+    "${LITE_SOURCE_ROOT}/app/streaming/clipboardpipelines.cpp")
 target_compile_features(lite-clipboard-frame PUBLIC cxx_std_17)
 target_compile_options(lite-clipboard-frame PRIVATE /W3 /WX)
 target_include_directories(lite-clipboard-frame PUBLIC "${LITE_SOURCE_ROOT}/app")

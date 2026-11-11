@@ -15,6 +15,7 @@ SOURCES += \
     main.cpp \
     ../app/streaming/clipboardframe.cpp \
     ../app/streaming/clipboardipc.cpp \
+    ../app/streaming/clipboardpipelines.cpp \
     ../app/streaming/clipboardsync.cpp
 
 macx:SOURCES += macos.mm

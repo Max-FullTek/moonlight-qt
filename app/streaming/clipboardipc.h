@@ -1,4 +1,5 @@
 #pragma once
+#include "clipboardpipelines.h"
 
 #include <QByteArray>
 #include <QString>
@@ -6,7 +7,7 @@
 namespace ClipboardIpc {
 
 static constexpr int PROTOCOL_VERSION = 1;
-static constexpr int MAX_LINE_BYTES = 1024 * 1024;
+static constexpr int MAX_LINE_BYTES = ClipboardPipe::MaxLineBytes;
 
 enum class MessageType
 {

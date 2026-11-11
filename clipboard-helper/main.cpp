@@ -22,16 +22,17 @@ class StdinReaderThread : public QThread
 
 signals:
     void lineReceived(QByteArray line);
+    void oversizedLine();
 
 protected:
     void run() override
     {
         std::string line;
-        while (std::getline(std::cin, line)) {
-            if (!line.empty() && line.back() == '\r') {
-                line.pop_back();
-            }
-            emit lineReceived(QByteArray(line.data(), static_cast<int>(line.size())));
+        for (;;) {
+            const auto status = ClipboardPipe::readLine(std::cin, line);
+            if (status == ClipboardPipe::LineStatus::Incomplete) break;
+            if (status == ClipboardPipe::LineStatus::Oversized) emit oversizedLine();
+            else emit lineReceived(QByteArray(line.data(), static_cast<int>(line.size())));
         }
         emit lineReceived(ClipboardIpc::encodeStop(0));
     }
@@ -48,6 +49,12 @@ public:
     }
 
 public slots:
+    void handleOversizedLine()
+    {
+        writeProtocolLine(ClipboardIpc::encodeError(0, QStringLiteral("bad-message"),
+                                                    QStringLiteral("message line too large")));
+    }
+
     void handleLine(const QByteArray& line)
     {
         ClipboardIpc::Message message;
@@ -173,6 +180,8 @@ int main(int argc, char* argv[])
     // clipboard provider lets the worker enqueue an unbounded number of frames.
     QObject::connect(&stdinThread, &StdinReaderThread::lineReceived, &controller,
                      &ClipboardHelperController::handleLine, Qt::BlockingQueuedConnection);
+    QObject::connect(&stdinThread, &StdinReaderThread::oversizedLine, &controller,
+                     &ClipboardHelperController::handleOversizedLine, Qt::BlockingQueuedConnection);
 
     stdinThread.start();
     int rc = app.exec();

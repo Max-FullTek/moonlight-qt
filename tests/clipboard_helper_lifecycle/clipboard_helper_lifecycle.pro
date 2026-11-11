@@ -6,6 +6,7 @@ TARGET = clipboard_helper_lifecycle
 include(../../globaldefs.pri)
 INCLUDEPATH += ../../app ../../moonlight-common-c/moonlight-common-c/src
 SOURCES += main.cpp ../../app/streaming/clipboardhelperclient.cpp ../../app/streaming/clipboardipc.cpp
+SOURCES += ../../app/streaming/clipboardpipelines.cpp
 HEADERS += ../../app/streaming/clipboardhelperclient.h ../../app/streaming/clipboardipc.h
 win32 {
     INCLUDEPATH += ../../libs/windows/include/x64/SDL2

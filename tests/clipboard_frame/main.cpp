@@ -1,6 +1,8 @@
 #include "streaming/clipboardframe.h"
+#include "streaming/clipboardpipelines.h"
 
 #include <iostream>
+#include <sstream>
 #include <string>
 
 int main()
@@ -27,5 +29,20 @@ int main()
     if (decode(wrongVersion) || decode(std::string_view(frame).substr(0, HeaderSize - 1)) ||
             decode(std::string_view(frame).substr(0, frame.size() - 1)) || decode(frame + "x")) return 4;
 
-    std::cout << "Clipboard frame bytes, payload bounds and malformed headers passed\n";
+    using namespace ClipboardPipe;
+    const std::string atLimit(MaxLineBytes, 'x');
+    const auto found = findLine("one\npartial");
+    if (found.status != LineStatus::Complete || found.length != 3 ||
+        findLine("partial").status != LineStatus::Incomplete ||
+        findLine(atLimit + "x").status != LineStatus::Oversized) return 5;
+
+    std::istringstream pipe(atLimit + "\r\n" + atLimit + "xx\n\nlast");
+    std::string line;
+    if (readLine(pipe, line) != LineStatus::Complete || line != atLimit ||
+        readLine(pipe, line) != LineStatus::Oversized || !line.empty() ||
+        readLine(pipe, line) != LineStatus::Complete || !line.empty() ||
+        readLine(pipe, line) != LineStatus::Complete || line != "last" ||
+        readLine(pipe, line) != LineStatus::Incomplete) return 6;
+
+    std::cout << "Clipboard frame bytes, payload bounds and pipe framing passed\n";
 }

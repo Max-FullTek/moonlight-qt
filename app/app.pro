@@ -282,6 +282,7 @@ SOURCES += \
     streaming/session.cpp \
     streaming/clipboardhelperclient.cpp \
     streaming/clipboardipc.cpp \
+    streaming/clipboardpipelines.cpp \
     streaming/audio/audio.cpp \
     streaming/audio/audiopipeline.cpp \
     streaming/audio/audiostream.cpp \

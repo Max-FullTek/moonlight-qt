@@ -151,14 +151,15 @@ QByteArray encodePong(quint32 sequence)
 bool takeLine(QByteArray& buffer, QByteArray& line, QString& error)
 {
     error.clear();
-    const int end = buffer.indexOf('\n');
-    if ((end < 0 && buffer.size() > MAX_LINE_BYTES) || end > MAX_LINE_BYTES) {
+    const auto boundary = ClipboardPipe::findLine({buffer.constData(), static_cast<size_t>(buffer.size())});
+    if (boundary.status == ClipboardPipe::LineStatus::Oversized) {
         error = QStringLiteral("helper stdout line exceeded protocol limit");
         return false;
     }
-    if (end < 0) {
+    if (boundary.status == ClipboardPipe::LineStatus::Incomplete) {
         return false;
     }
+    const auto end = static_cast<int>(boundary.length);
     line = buffer.left(end);
     buffer.remove(0, end + 1);
     while (line.endsWith('\r')) {
