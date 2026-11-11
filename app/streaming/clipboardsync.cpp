@@ -2,6 +2,7 @@
 #include "clipboardlogging.h"
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
 #include "qtclipboardtransfer.h"
+#include "windowsclipboardlistener.h"
 #else
 #include "backend/pairedcertificate.h"
 #endif
@@ -196,6 +197,16 @@ void ClipboardSync::start()
     }
     m_PasteboardPollTimer->start(500);
 #else
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+    if (QGuiApplication::platformName() == QStringLiteral("windows")) {
+        m_ClipboardListener = std::make_unique<WindowsClipboardListener>([this] {
+            onLocalClipboardChanged();
+        });
+        if (!m_ClipboardListener->active()) m_ClipboardListener.reset();
+    }
+    // The offscreen fixture has a private Qt clipboard and no OS notifications.
+    if (!m_ClipboardListener)
+#endif
     connect(cb, &QClipboard::dataChanged,
             this, &ClipboardSync::onLocalClipboardChanged,
             Qt::UniqueConnection);
@@ -211,6 +222,9 @@ void ClipboardSync::stop()
         return;
     }
 
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+    m_ClipboardListener.reset();
+#endif
     QClipboard* cb = QGuiApplication::clipboard();
     if (cb != nullptr) {
 #ifdef Q_OS_MACOS

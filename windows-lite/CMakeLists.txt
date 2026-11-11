@@ -148,6 +148,12 @@ target_compile_features(lite-clipboard-frame PUBLIC cxx_std_17)
 target_compile_options(lite-clipboard-frame PRIVATE /W3 /WX)
 target_include_directories(lite-clipboard-frame PUBLIC "${LITE_SOURCE_ROOT}/app")
 
+add_library(lite-clipboard-listener STATIC "${LITE_SOURCE_ROOT}/app/streaming/windowsclipboardlistener.cpp")
+target_compile_features(lite-clipboard-listener PUBLIC cxx_std_17)
+target_compile_options(lite-clipboard-listener PRIVATE /W3 /WX)
+target_include_directories(lite-clipboard-listener PUBLIC "${LITE_SOURCE_ROOT}/app")
+target_link_libraries(lite-clipboard-listener PUBLIC user32)
+
 add_library(lite-touch-input STATIC
     "${LITE_SOURCE_ROOT}/app/streaming/input/abstouch.cpp"
     "${LITE_SOURCE_ROOT}/app/streaming/input/reltouch.cpp"

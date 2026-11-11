@@ -25,6 +25,7 @@ class QMimeData;
 class QNetworkAccessManager;
 class QNetworkReply;
 class QtClipboardTransfer;
+class WindowsClipboardListener;
 class QSslError;
 class QTimer;
 class QUrl;
@@ -251,6 +252,7 @@ private:
     QElapsedTimer m_Clock;
     QQueue<QPair<quint32, qint64>> m_RetiredTokens;
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
+    std::unique_ptr<WindowsClipboardListener> m_ClipboardListener;
     QSet<QtClipboardTransfer*> m_BlobReplies;
 #else
     QSet<QNetworkReply*> m_BlobReplies;

@@ -33,6 +33,7 @@ protected:
             if (status == ClipboardPipe::LineStatus::Incomplete) break;
             if (status == ClipboardPipe::LineStatus::Oversized) emit oversizedLine();
             else emit lineReceived(QByteArray(line.data(), static_cast<int>(line.size())));
+            if (isInterruptionRequested()) return;
         }
         emit lineReceived(ClipboardIpc::encodeStop(0));
     }
@@ -47,6 +48,9 @@ public:
         : QObject(parent)
     {
     }
+
+signals:
+    void stopRequested();
 
 public slots:
     void handleOversizedLine()
@@ -65,7 +69,7 @@ public slots:
         }
 
         if (message.type == ClipboardIpc::MessageType::Stop) {
-            QCoreApplication::quit();
+            emit stopRequested();
             return;
         }
         if (message.type == ClipboardIpc::MessageType::Ping) {
@@ -182,6 +186,12 @@ int main(int argc, char* argv[])
                      &ClipboardHelperController::handleLine, Qt::BlockingQueuedConnection);
     QObject::connect(&stdinThread, &StdinReaderThread::oversizedLine, &controller,
                      &ClipboardHelperController::handleOversizedLine, Qt::BlockingQueuedConnection);
+    QObject::connect(&controller, &ClipboardHelperController::stopRequested, &app, [&] {
+        // The reader is still waiting for this delivery. Let it return without
+        // posting another stop on EOF after the event loop has exited.
+        stdinThread.requestInterruption();
+        app.quit();
+    });
 
     stdinThread.start();
     int rc = app.exec();
