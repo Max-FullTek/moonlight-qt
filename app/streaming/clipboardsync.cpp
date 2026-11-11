@@ -1001,7 +1001,7 @@ void ClipboardSync::readBlobReply(
     auto* timeout = new QTimer(reply);
     timeout->setSingleShot(true);
     connect(timeout, &QTimer::timeout, reply, &QNetworkReply::abort);
-    timeout->start(30000);
+    timeout->start(ClipboardBlob::TimeoutMs);
     const auto drain = [reply, bytes, limit]() {
         if (!reply->isOpen() || reply->error() != QNetworkReply::NoError) {
             return;
@@ -1049,7 +1049,7 @@ void ClipboardSync::readBlobReply(
 void ClipboardSync::uploadAndSendRef(const QByteArray& payload, const QString& mime, quint32 token)
 {
     QUrl url;
-    if (!m_Active || payload.size() > MAX_BLOB_BYTES || m_BlobReplies.size() >= 4 ||
+    if (!m_Active || payload.size() > MAX_BLOB_BYTES || m_BlobReplies.size() >= ClipboardBlob::MaxPendingTransfers ||
         !buildBlobUrl(QStringLiteral("/blob"), url)) {
         m_HaveClipboardSnapshot = false;
         return;
@@ -1064,7 +1064,7 @@ void ClipboardSync::uploadAndSendRef(const QByteArray& payload, const QString& m
     sslConfig.setPrivateKey(m_HostContext.clientPrivateKey);
     req.setSslConfiguration(sslConfig);
 
-    readBlobReply(nam()->post(req, payload), 16 * 1024,
+    readBlobReply(nam()->post(req, payload), ClipboardBlob::MaxUploadReplyBytes,
                   [this, mime, token, payloadSize = payload.size()](const QByteArray& response,
                                                                     const QString&) {
                       const QJsonDocument doc = QJsonDocument::fromJson(response);
@@ -1108,7 +1108,7 @@ void ClipboardSync::fetchBlob(const QString& id,
                               const std::function<void(const QByteArray&, const QString&)>& onFetched)
 {
     QUrl url;
-    if (!m_Active || m_BlobReplies.size() >= 4 ||
+    if (!m_Active || m_BlobReplies.size() >= ClipboardBlob::MaxPendingTransfers ||
         !QRegularExpression(QStringLiteral("^[A-Za-z0-9_-]{1,128}$")).match(id).hasMatch() ||
         !buildBlobUrl(QStringLiteral("/blob/") + id, url)) {
         return;
@@ -1120,7 +1120,7 @@ void ClipboardSync::fetchBlob(const QString& id,
     sslConfig.setLocalCertificate(m_HostContext.clientCertificate);
     sslConfig.setPrivateKey(m_HostContext.clientPrivateKey);
     req.setSslConfiguration(sslConfig);
-    readBlobReply(nam()->get(req), advertisedSize > 0 ? advertisedSize : MAX_BLOB_BYTES,
+    readBlobReply(nam()->get(req), ClipboardBlob::downloadLimit(advertisedSize),
                   [advertisedSize, onFetched](const QByteArray& bytes, const QString& mime) {
                       if (advertisedSize > 0 && bytes.size() != advertisedSize) {
                           ClipboardLog::warn("ClipboardSync: blob size mismatch");

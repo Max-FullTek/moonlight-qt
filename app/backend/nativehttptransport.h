@@ -29,6 +29,7 @@ private:
 };
 
 enum class Method { Get, Post };
+enum class ClipboardMime { None, Text, Png };
 enum class Error {
     None, InvalidRequest, Setup, Transport, Timeout, Cancelled,
     ResponseTooLarge, CertificateMismatch, Storage
@@ -37,6 +38,7 @@ struct Request {
     std::string url;
     Method method = Method::Get;
     std::string contentType;
+    ClipboardMime clipboardMime = ClipboardMime::None;
     std::string body;
     std::vector<unsigned char> pinnedCertificateDer;
     std::string clientCertificatePem;

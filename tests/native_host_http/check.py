@@ -15,6 +15,7 @@ def main(executable, fixtures, work, fixture_generator=None):
     subprocess.run([fixture_generator or executable, "--renew-fixture", str(fixtures), str(renewed)], check=True)
     seen = []
     posts = []
+    clipboard_mimes = []
     arrived = threading.Event()
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -55,6 +56,7 @@ def main(executable, fixtures, work, fixture_generator=None):
 
         def do_POST(self):
             posts.append((self.rfile.read(int(self.headers["Content-Length"])), self.headers.get("Content-Type")))
+            clipboard_mimes.append(self.headers.get("X-Clipboard-Mime"))
             self.do_GET()
 
     def run(pin, route="/ok", identity=False, mutual=False, server_cert=None, mode="", tls=True, host="127.0.0.1", version=None):
@@ -72,6 +74,7 @@ def main(executable, fixtures, work, fixture_generator=None):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         seen.clear()
         posts.clear()
+        clipboard_mimes.clear()
         arrived.clear()
         thread.start()
         try:
@@ -112,6 +115,8 @@ def main(executable, fixtures, work, fixture_generator=None):
             ("/ok", "exact-limit", original, False, False, 0, 200, 1),
             ("/failure", "", original, False, False, 0, 503, 1),
             ("/ok", "post", original, False, False, 0, 200, 1),
+            ("/api/v1/clipboard/blob", "clipboard-png", original, True, True, 0, 200, 1),
+            ("/api/v1/clipboard/blob", "clipboard-png", fixtures / "other.pem", True, True, 7, 0, 0),
             ("/ok", "replace-pin", original, False, False, 7, 0, 1),
             ("/ok", "remove-identity", original, True, True, 3, 0, 1),
             ("/ok", "invalid-pin", original, False, False, 1, 0, 0),
@@ -127,6 +132,9 @@ def main(executable, fixtures, work, fixture_generator=None):
                 assert result["bytes"] == 0, result
             if mode == "post":
                 assert posts == [('{"message":"繁中"}'.encode("utf-8"), "application/json")], posts
+            if mode == "clipboard-png":
+                assert posts == ([(b"\x89PNG\r\n\x1a\n\x00", "application/octet-stream")] if count else [])
+                assert clipboard_mimes == (["image/png"] if count else [])
             if mode == "owner-cancel":
                 # Includes the server's bounded shutdown wait, not just the request.
                 assert time.monotonic() - start < 1.2, "owner shutdown did not cancel an unlimited request"
@@ -185,6 +193,18 @@ def main(executable, fixtures, work, fixture_generator=None):
     result, requests = run(original, mode="post")
     assert result["error"] == 0 and posts == [('{"message":"繁中"}'.encode("utf-8"), "application/json")], posts
     print("UTF-8 JSON POST reaches the server unchanged: passed")
+
+    for mode, mime, payload in [
+        ("clipboard-text", "text/plain", "剪貼簿".encode("utf-8")),
+        ("clipboard-png", "image/png", b"\x89PNG\r\n\x1a\n\x00"),
+    ]:
+        result, requests = run(original, "/api/v1/clipboard/blob", identity=True, mutual=True, mode=mode)
+        assert result["error"] == 0 and result["verified"] == 1 and len(requests) == 1, (result, requests)
+        assert posts == [(payload, "application/octet-stream")] and clipboard_mimes == [mime]
+    for mode, identity in [("clipboard-invalid", True), ("clipboard-text", False)]:
+        result, requests = run(original, identity=identity, mode=mode)
+        assert result["error"] == 1 and requests == [] and posts == [], (result, requests, posts)
+    print("Clipboard upload MIME and binary body over pinned mutual TLS: passed")
 
     result, requests = run(original, route="/slow", mode="cancel")
     assert result["cancelled"] == 1 and result["bytes"] == 0 and len(requests) == 1, (result, requests)

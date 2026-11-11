@@ -207,10 +207,20 @@ Response TransportDriver::perform(const Request& request, EventLoop* eventLoop)
         }
         static Runtime runtime;
         const bool https = httpsUrl(request);
+        const char* clipboardHeader = nullptr;
+        switch (request.clipboardMime) {
+        case ClipboardMime::None: break;
+        case ClipboardMime::Text: clipboardHeader = "X-Clipboard-Mime: text/plain"; break;
+        case ClipboardMime::Png: clipboardHeader = "X-Clipboard-Mime: image/png"; break;
+        default: throw std::invalid_argument("Invalid clipboard MIME");
+        }
         if (request.timeoutMs < 0 || request.contentType.find_first_of("\r\n") != std::string::npos ||
             request.contentType.find('\0') != std::string::npos ||
             (request.clientCertificatePem.empty() != request.clientPrivateKeyPem.empty()) ||
             (!https && (!request.pinnedCertificateDer.empty() || !request.clientCertificatePem.empty())) ||
+            (clipboardHeader && (!https || request.method != Method::Post ||
+                                 request.clientCertificatePem.empty() ||
+                                 request.contentType != "application/octet-stream")) ||
             (request.method != Method::Get && request.method != Method::Post)) {
             throw std::invalid_argument("Invalid HTTP request policy");
         }
@@ -249,11 +259,15 @@ Response TransportDriver::perform(const Request& request, EventLoop* eventLoop)
             }
         }
         std::unique_ptr<curl_slist, decltype(&curl_slist_free_all)> headers(nullptr, curl_slist_free_all);
-        if (!request.contentType.empty()) {
-            headers.reset(curl_slist_append(nullptr, ("Content-Type: " + request.contentType).c_str()));
-            if (!headers) throw std::bad_alloc();
-            set(CURLOPT_HTTPHEADER, headers.get());
-        }
+        auto appendHeader = [&](const char* value) {
+            auto* list = curl_slist_append(headers.get(), value);
+            if (!list) throw std::bad_alloc();
+            headers.release();
+            headers.reset(list);
+        };
+        if (!request.contentType.empty()) appendHeader(("Content-Type: " + request.contentType).c_str());
+        if (clipboardHeader) appendHeader(clipboardHeader);
+        if (headers) set(CURLOPT_HTTPHEADER, headers.get());
         if (request.method == Method::Post) {
             if (request.body.size() > static_cast<size_t>((std::numeric_limits<curl_off_t>::max)())) {
                 throw std::invalid_argument("Request body is too large");

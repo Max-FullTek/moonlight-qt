@@ -180,6 +180,12 @@ int main(int argc, char** argv)
             request.contentType = "application/json";
             request.body = "{\"message\":\"繁中\"}";
         }
+        if (mode == "clipboard-text" || mode == "clipboard-png" || mode == "clipboard-invalid") {
+            request.method = NativeHttp::Method::Post;
+            request.contentType = mode == "clipboard-invalid" ? "text/plain" : "application/octet-stream";
+            request.clipboardMime = mode == "clipboard-png" ? NativeHttp::ClipboardMime::Png : NativeHttp::ClipboardMime::Text;
+            request.body = mode == "clipboard-png" ? std::string("\x89PNG\r\n\x1a\n\0", 9) : "剪貼簿";
+        }
         request.cancellation = std::make_shared<NativeHttp::Cancellation>();
         if (mode == "pre-cancel") request.cancellation->cancel();
         if (mode == "owner-cancel") request.timeoutMs = 0;

@@ -1,5 +1,6 @@
 #pragma once
 #include "clipboardframe.h"
+#include "clipboardblobpolicy.h"
 
 #include <QObject>
 #include <QByteArray>
@@ -88,7 +89,7 @@ public:
     static constexpr int INLINE_THRESHOLD = ClipboardFrame::InlineThreshold;
     // Mirrors the cross-client cap (64 MiB) shared with the Android and
     // HarmonyOS clients. The service-side blob store accepts up to this much.
-    static constexpr qint64 MAX_BLOB_BYTES = 64LL * 1024 * 1024;
+    static constexpr qint64 MAX_BLOB_BYTES = ClipboardBlob::MaxBytes;
     // Mirror the Android client's cap (32 Mpx) so a stray full-screen capture
     // doesn't try to PNG-encode a 100 MB bitmap and stall the GUI thread.
     static constexpr qint64  MAX_IMAGE_PIXELS = 32LL * 1024 * 1024;

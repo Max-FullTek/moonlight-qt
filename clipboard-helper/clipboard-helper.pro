@@ -18,6 +18,7 @@ SOURCES += \
 macx:SOURCES += macos.mm
 
 HEADERS += \
+    ../app/streaming/clipboardblobpolicy.h \
     ../app/streaming/clipboardframe.h \
     ../app/streaming/clipboardipc.h \
     ../app/streaming/clipboardlogging.h \
