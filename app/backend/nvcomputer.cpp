@@ -398,6 +398,24 @@ bool NvComputer::wake() const
     return success;
 }
 
+static bool isOnLink(const QHostAddress& local, const QHostAddress& peer, int prefix)
+{
+    if (local.protocol() != peer.protocol()) {
+        return false;
+    }
+    if (local.protocol() == QAbstractSocket::IPv4Protocol) {
+        const auto localBytes = ReachabilityPolicy::ipv4Bytes(local.toIPv4Address());
+        const auto peerBytes = ReachabilityPolicy::ipv4Bytes(peer.toIPv4Address());
+        return ReachabilityPolicy::sameSubnet(localBytes.data(), peerBytes.data(), 4, prefix);
+    }
+    if (local.protocol() == QAbstractSocket::IPv6Protocol) {
+        const auto localBytes = local.toIPv6Address();
+        const auto peerBytes = peer.toIPv6Address();
+        return ReachabilityPolicy::sameSubnet(localBytes.c, peerBytes.c, 16, prefix);
+    }
+    return false;
+}
+
 NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
 {
     NvAddress copyOfActiveAddress;
@@ -464,7 +482,7 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
                         nic.name().toStdString(),
                         nic.hardwareAddress().toStdString(),
                         nic.humanReadableName().toStdString()
-                    }, prefix >= 0 && s.localAddress().isInSubnet(s.peerAddress(), prefix));
+                    }, isOnLink(s.localAddress(), s.peerAddress(), prefix));
 
                     if (route == ReachabilityPolicy::Route::Vpn) {
                         return cacheResult(ReachabilityType::RI_VPN);

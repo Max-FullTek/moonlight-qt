@@ -1,10 +1,39 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
 #include <string_view>
 
 namespace ReachabilityPolicy {
 
 enum class Route { Unknown, Lan, Vpn };
+
+inline std::array<std::uint8_t, 4> ipv4Bytes(std::uint32_t address)
+{
+    return {static_cast<std::uint8_t>(address >> 24),
+            static_cast<std::uint8_t>(address >> 16),
+            static_cast<std::uint8_t>(address >> 8),
+            static_cast<std::uint8_t>(address)};
+}
+
+// Both addresses use network byte order. Preserve the existing clamp when
+// an interface supplies a prefix longer than the address.
+inline bool sameSubnet(const std::uint8_t* local, const std::uint8_t* peer,
+                       int addressBytes, int prefix)
+{
+    if (prefix < 0) {
+        return false;
+    }
+    prefix = std::min(prefix, addressBytes * 8);
+    const int wholeBytes = prefix / 8;
+    const int remainingBits = prefix % 8;
+    if (!std::equal(local, local + wholeBytes, peer)) {
+        return false;
+    }
+    return remainingBits == 0 ||
+        ((local[wholeBytes] ^ peer[wholeBytes]) >> (8 - remainingBits)) == 0;
+}
 
 struct Interface {
     bool virtualOrPpp;

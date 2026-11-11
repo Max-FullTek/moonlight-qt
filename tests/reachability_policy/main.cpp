@@ -32,5 +32,21 @@ int main()
             return 1;
         }
     }
+    const auto local = ipv4Bytes(0xc0a80101);
+    const auto peer = ipv4Bytes(0xc0a80181);
+    auto ipv6Local = std::array<std::uint8_t, 16>{0x20, 0x01, 0x0d, 0xb8};
+    auto ipv6Peer = ipv6Local;
+    ipv6Peer[8] = 0x80;
+    if (!sameSubnet(local.data(), peer.data(), 4, 0) ||
+        !sameSubnet(local.data(), peer.data(), 4, 24) ||
+        sameSubnet(local.data(), peer.data(), 4, 25) ||
+        sameSubnet(local.data(), peer.data(), 4, -1) ||
+        sameSubnet(local.data(), peer.data(), 4, 33) ||
+        !sameSubnet(ipv6Local.data(), ipv6Peer.data(), 16, 64) ||
+        sameSubnet(ipv6Local.data(), ipv6Peer.data(), 16, 65) ||
+        !sameSubnet(ipv6Local.data(), ipv6Local.data(), 16, 129)) {
+        std::cerr << "Unexpected subnet match\n";
+        return 1;
+    }
     return 0;
 }

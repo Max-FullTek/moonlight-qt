@@ -5,6 +5,7 @@
 
 #include <QCoreApplication>
 #include <QFile>
+#include <QHostAddress>
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTextStream>
@@ -30,6 +31,20 @@ int main(int argc, char* argv[])
     QCoreApplication app(argc, argv);
     QTextStream err(stderr);
     bool ok = true;
+
+    const QHostAddress ipv4Local(QStringLiteral("192.168.1.1"));
+    const QHostAddress ipv4Peer(QStringLiteral("192.168.1.129"));
+    const QHostAddress ipv6Local(QStringLiteral("2001:db8::1"));
+    const QHostAddress ipv6Peer(QStringLiteral("2001:db8:0:0:8000::1"));
+    ok &= require(ipv4Local.isInSubnet(ipv4Peer, 0) &&
+                      ipv4Local.isInSubnet(ipv4Peer, 24) &&
+                      !ipv4Local.isInSubnet(ipv4Peer, 25) &&
+                      !ipv4Local.isInSubnet(ipv4Peer, 33) &&
+                      ipv6Local.isInSubnet(ipv6Peer, 64) &&
+                      !ipv6Local.isInSubnet(ipv6Peer, 65) &&
+                      ipv6Local.isInSubnet(ipv6Local, 129) &&
+                      !ipv4Local.isInSubnet(QHostAddress(QStringLiteral("::ffff:192.168.1.1")), 0),
+                  QStringLiteral("Qt subnet behavior matches the native reachability cases"), err);
 
     ok &= require(VersionUtils::parseRelease("v6.2.82+14.g13ca12da.dirty") ==
                       QVersionNumber(6, 2, 82),
