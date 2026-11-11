@@ -6,9 +6,14 @@
 #include <QCoreApplication>
 #include <QFile>
 #include <QHostAddress>
+#include <QNetworkInterface>
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QTextStream>
+
+#ifdef Q_OS_WIN
+#include "backend/windowsreachability.h"
+#endif
 
 namespace {
 bool require(bool condition, const QString& message, QTextStream& err)
@@ -45,6 +50,50 @@ int main(int argc, char* argv[])
                       ipv6Local.isInSubnet(ipv6Local, 129) &&
                       !ipv4Local.isInSubnet(QHostAddress(QStringLiteral("::ffff:192.168.1.1")), 0),
                   QStringLiteral("Qt subnet behavior matches the native reachability cases"), err);
+
+#ifdef Q_OS_WIN
+    const auto addresses = QNetworkInterface::allInterfaces();
+    QList<QHostAddress> checked;
+    for (const auto& nic : addresses) {
+        if (!(nic.flags() & QNetworkInterface::IsUp)) {
+            continue;
+        }
+        const auto entries = nic.addressEntries();
+        for (const auto& entry : entries) {
+            const auto ip = entry.ip();
+            if (checked.contains(ip)) {
+                continue;
+            }
+            WindowsReachability::Address local;
+            if (ip.protocol() == QAbstractSocket::IPv4Protocol) {
+                const auto bytes = ReachabilityPolicy::ipv4Bytes(ip.toIPv4Address());
+                std::copy(bytes.begin(), bytes.end(), local.bytes.begin());
+                local.size = 4;
+            } else if (ip.protocol() == QAbstractSocket::IPv6Protocol) {
+                const auto bytes = ip.toIPv6Address();
+                std::copy_n(bytes.c, 16, local.bytes.begin());
+                local.size = 16;
+            } else {
+                continue;
+            }
+            checked.append(ip);
+            using ReachabilityPolicy::Route;
+            const bool vpn = nic.type() == QNetworkInterface::Virtual ||
+                nic.type() == QNetworkInterface::Ppp ||
+                (nic.maximumTransmissionUnit() != 0 && nic.maximumTransmissionUnit() < 1500) ||
+                (nic.flags() & QNetworkInterface::IsPointToPoint) ||
+                nic.name().startsWith("iftype53_") || nic.name().startsWith("iftype131_") ||
+                nic.hardwareAddress().startsWith("00:FF", Qt::CaseInsensitive) ||
+                nic.humanReadableName().startsWith("ZeroTier") ||
+                nic.humanReadableName().contains("VPN");
+            const auto expected = vpn ? Route::Vpn : entry.prefixLength() >= 0 ? Route::Lan : Route::Unknown;
+            ok &= require(WindowsReachability::classify(local, local) == expected,
+                          QStringLiteral("Windows adapter classification differs for %1").arg(ip.toString()), err);
+        }
+    }
+    ok &= require(!checked.isEmpty(), QStringLiteral("at least one Windows adapter was compared"), err);
+    QTextStream(stdout) << "windows_adapter_addresses_compared=" << checked.size() << '\n';
+#endif
 
     ok &= require(VersionUtils::parseRelease("v6.2.82+14.g13ca12da.dirty") ==
                       QVersionNumber(6, 2, 82),

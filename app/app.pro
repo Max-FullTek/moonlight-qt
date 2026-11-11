@@ -87,7 +87,11 @@ win32 {
     }
 
     INCLUDEPATH += $$PWD/../libs/windows/include
-    LIBS += ws2_32.lib winmm.lib dxva2.lib ole32.lib uuid.lib gdi32.lib user32.lib d3d9.lib dwmapi.lib dbghelp.lib advapi32.lib
+    LIBS += ws2_32.lib iphlpapi.lib winmm.lib dxva2.lib ole32.lib uuid.lib gdi32.lib user32.lib d3d9.lib dwmapi.lib dbghelp.lib advapi32.lib
+}
+win32 {
+    SOURCES += backend/windowsreachability.cpp
+    HEADERS += backend/windowsreachability.h
 }
 macx:!disable-prebuilts {
     !exists($$PWD/../libs/mac) {

@@ -6,6 +6,9 @@
 #include <QUdpSocket>
 #include <QHostInfo>
 #include <QNetworkInterface>
+#ifdef Q_OS_WIN
+#include "windowsreachability.h"
+#endif
 #include <QNetworkProxy>
 #include <QJsonArray>
 #include <climits>
@@ -453,6 +456,30 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
     if (s.waitForConnected(3000)) {
         Q_ASSERT(!s.localAddress().isNull());
         Q_ASSERT(!s.peerAddress().isNull());
+
+#ifdef Q_OS_WIN
+        if (NvHTTP::usesRustSessionApi()) {
+            const auto bytes = [](const QHostAddress& host) {
+                WindowsReachability::Address result;
+                if (host.protocol() == QAbstractSocket::IPv4Protocol) {
+                    const auto ipv4 = ReachabilityPolicy::ipv4Bytes(host.toIPv4Address());
+                    std::copy(ipv4.begin(), ipv4.end(), result.bytes.begin());
+                    result.size = 4;
+                } else if (host.protocol() == QAbstractSocket::IPv6Protocol) {
+                    const auto ipv6 = host.toIPv6Address();
+                    std::copy_n(ipv6.c, 16, result.bytes.begin());
+                    result.size = 16;
+                }
+                return result;
+            };
+            const auto route = WindowsReachability::classify(bytes(s.localAddress()), bytes(s.peerAddress()));
+            switch (route) {
+            case ReachabilityPolicy::Route::Vpn: return cacheResult(ReachabilityType::RI_VPN);
+            case ReachabilityPolicy::Route::Lan: return cacheResult(ReachabilityType::RI_LAN);
+            default: return cacheResult(ReachabilityType::RI_UNKNOWN);
+            }
+        }
+#endif
 
         const auto allInterfaces = QNetworkInterface::allInterfaces();
         for (const QNetworkInterface& nic : allInterfaces) {
