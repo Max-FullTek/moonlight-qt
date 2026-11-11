@@ -1,6 +1,7 @@
 #include "gpuicorebridge.h"
 #include "computermanager.h"
 #include "nvhttp.h"
+#include "pairedcertificate.h"
 #include "sessionapirpc.h"
 #include "streaming/streamutils.h"
 #include "SDL_compat.h"
@@ -447,7 +448,7 @@ void GpuiCoreBridge::publishMonitorContexts() {
         QReadLocker lock(&host->lock);
         auto clientName=NvComputer::getPairname(host->uuid);
         if (clientName.isEmpty()) clientName=QHostInfo::localHostName();
-        const QJsonObject context{{"base_url",QString()},{"server_certificate",QString::fromLatin1(host->serverCert.toPem())},
+        const QJsonObject context{{"base_url",QString()},{"server_certificate",PairedCertificate::toOptionalPem(host->serverCert)},
             {"client_certificate",QString::fromLatin1(IdentityManager::get()->getCertificate())},
             {"client_key",QString::fromLatin1(IdentityManager::get()->getPrivateKey())},
             {"unique_id",host->isNvidiaServerSoftware?QStringLiteral("0123456789ABCDEF"):IdentityManager::get()->getUniqueId()},
@@ -674,7 +675,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
               {"http_url",http.toString()},
               {"request_id", request["request_id"]},
               {"context", QJsonObject{{"base_url", base.toString()},
-                  {"server_certificate", QString::fromLatin1(host->serverCert.toPem())},
+                  {"server_certificate", PairedCertificate::toOptionalPem(host->serverCert)},
                   {"client_certificate", QString::fromLatin1(IdentityManager::get()->getCertificate())},
                   {"client_key", QString::fromLatin1(IdentityManager::get()->getPrivateKey())},
                   {"unique_id", host->isNvidiaServerSoftware ? QStringLiteral("0123456789ABCDEF") : IdentityManager::get()->getUniqueId()},

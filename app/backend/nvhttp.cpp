@@ -28,8 +28,8 @@ bool NvHTTP::usesRustSessionApi() { return SessionApiRpc::broker().enabled(); }
 QJsonObject NvHTTP::rustSessionCall(QJsonObject request,unsigned timeoutMs) {
     auto clientName=NvComputer::getPairname(m_Uuid);
     if (clientName.isEmpty()) clientName=QHostInfo::localHostName();
-    const QJsonObject context{{"base_url",m_BaseUrlHttps.toString()},
-        {"server_certificate",QString::fromLatin1(m_ServerCert.toPem())},
+    const QJsonObject context{{"base_url",httpsPort() == 0 ? QString() : m_BaseUrlHttps.toString()},
+        {"server_certificate",PairedCertificate::toOptionalPem(m_ServerCert)},
         {"client_certificate",QString::fromLatin1(IdentityManager::get()->getCertificate())},
         {"client_key",QString::fromLatin1(IdentityManager::get()->getPrivateKey())},
         {"unique_id",m_UseTrueUid?IdentityManager::get()->getUniqueId():QStringLiteral("0123456789ABCDEF")},

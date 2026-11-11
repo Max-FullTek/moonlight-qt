@@ -9,6 +9,13 @@
 
 namespace PairedCertificate {
 
+inline QString toOptionalPem(const QSslCertificate& certificate)
+{
+    // The Qt backend can serialize a null certificate as an empty PEM block.
+    // The Rust host API expects an empty string when no pin exists.
+    return certificate.isNull() ? QString() : QString::fromLatin1(certificate.toPem());
+}
+
 inline bool matches(const QSslCertificate& pinned, const QSslCertificate& peer)
 {
     return !pinned.isNull() && !peer.isNull() && pinned == peer;
