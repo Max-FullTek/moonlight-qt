@@ -1237,12 +1237,12 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences* prefere
 
 Session::~Session()
 {
-    if (m_ConnectionStartThread.joinable()) {
-        m_ConnectionStartThread.join();
+    if (m_ConnectionThread.joinable()) {
+        m_ConnectionThread.join();
     }
 
     // NB: This may not get destroyed for a long time! Don't put any non-trivial cleanup here.
-    // Use Session::exec() or DeferredSessionCleanupTask instead.
+    // Use Session::exec() or finishConnectionCleanup() instead.
 
     if (m_ClipboardHelper != nullptr) {
         stopClipboardHelper();
@@ -1958,81 +1958,82 @@ bool Session::validateLaunch(SDL_Window* testWindow)
     return true;
 }
 
-class DeferredSessionCleanupTask : public QRunnable
+void Session::finishConnectionCleanup()
 {
-public:
-    DeferredSessionCleanupTask(Session* session) :
-        m_Session(session) {}
-
-private:
-    virtual ~DeferredSessionCleanupTask() override
-    {
-        // Allow another session to start now that we're cleaned up
-        {
-            std::lock_guard lock(Session::s_ActiveSessionMutex);
-            Session::s_ActiveSession = nullptr;
-        }
-        Session::s_ActiveSessionChanged.notify_one();
-
-        // Notify that the session is ready to be cleaned up
-        emit m_Session->readyForDeletion();
+    // Only quit the running app if our session terminated gracefully.
+    const bool shouldQuit = !m_UnexpectedTermination && m_Preferences->quitAppAfter;
+    if (shouldQuit) {
+        emit quitStarting();
+    }
+    else {
+        emit sessionFinished(m_PortTestResults);
     }
 
-    void run() override
+    // The decoder can only use the connection APIs before LiStopConnection().
+    SDL_assert(m_VideoDecoder == nullptr);
+
+    // GPUI stops capture on the owner thread before dispatching cleanup.
+    if (!usesGpuiControls()) {
+        QMetaObject::invokeMethod(this, &Session::stopMicrophone, Qt::BlockingQueuedConnection);
+    }
+    if (m_DualSenseHapticsRenderer != nullptr) {
+        m_DualSenseHapticsRenderer->setControllerTarget(-1);
+    }
+    LiStopConnection();
+    stopControllerRumbleAtConnectionBoundary(nullptr);
+    delete m_DualSenseHapticsRenderer;
+    m_DualSenseHapticsRenderer = nullptr;
+
+    if (shouldQuit) {
+        NvHTTP http(m_Computer);
+        try {
+            http.quitApp();
+        } catch (const GfeHttpResponseException& error) {
+            if (usesGpuiControls()) emit hostQuitFailed(error.toQString());
+        } catch (const QtNetworkReplyException& error) {
+            if (usesGpuiControls()) emit hostQuitFailed(error.toQString());
+        }
+        emit sessionFinished(m_PortTestResults);
+    }
+}
+
+void Session::releaseActiveSession()
+{
     {
-        // Only quit the running app if our session terminated gracefully
-        bool shouldQuit =
-                !m_Session->m_UnexpectedTermination &&
-                m_Session->m_Preferences->quitAppAfter;
+        std::lock_guard lock(s_ActiveSessionMutex);
+        s_ActiveSession = nullptr;
+    }
+    s_ActiveSessionChanged.notify_one();
+}
 
-        // Notify the UI
-        if (shouldQuit) {
-            emit m_Session->quitStarting();
-        }
-        else {
-            emit m_Session->sessionFinished(m_Session->m_PortTestResults);
-        }
-
-        // The video decoder must already be destroyed, since it could
-        // try to interact with APIs that can only be called between
-        // LiStartConnection() and LiStopConnection().
-        SDL_assert(m_Session->m_VideoDecoder == nullptr);
-
-        // Finish cleanup of the connection state
-        QMetaObject::invokeMethod(m_Session, &Session::stopMicrophone, Qt::BlockingQueuedConnection);
-        if (m_Session->m_DualSenseHapticsRenderer != nullptr) {
-            m_Session->m_DualSenseHapticsRenderer->setControllerTarget(-1);
-        }
-        LiStopConnection();
-        stopControllerRumbleAtConnectionBoundary(nullptr);
-        delete m_Session->m_DualSenseHapticsRenderer;
-        m_Session->m_DualSenseHapticsRenderer = nullptr;
-
-        // Perform a best-effort app quit
-        if (shouldQuit) {
-            NvHTTP http(m_Session->m_Computer);
-
-            // Logging is already done inside NvHTTP
-            try {
-                http.quitApp();
-            } catch (const GfeHttpResponseException& error) {
-                if (m_Session->usesGpuiControls()) emit m_Session->hostQuitFailed(error.toQString());
-            } catch (const QtNetworkReplyException& error) {
-                if (m_Session->usesGpuiControls()) emit m_Session->hostQuitFailed(error.toQString());
+void Session::dispatchConnectionCleanup()
+{
+    if (!usesGpuiControls()) {
+        QThreadPool::globalInstance()->start(QRunnable::create([this] {
+            finishConnectionCleanup();
+            if (m_ShouldExit) {
+                QCoreApplication::instance()->quit();
             }
-
-            // Session is finished now
-            emit m_Session->sessionFinished(m_Session->m_PortTestResults);
-        }
-
-        // Exit the entire program if requested
-        if (m_Session->m_ShouldExit) {
-            QCoreApplication::instance()->quit();
-        }
+            releaseActiveSession();
+            emit readyForDeletion();
+        }));
+        return;
     }
 
-    Session* m_Session;
-};
+    stopMicrophone();
+    m_ConnectionThread = std::thread([this] {
+        finishConnectionCleanup();
+        releaseActiveSession();
+        QMetaObject::invokeMethod(this, [this] {
+            m_ConnectionThread.join();
+            const bool shouldExit = m_ShouldExit;
+            emit readyForDeletion();
+            if (shouldExit) {
+                QCoreApplication::quit();
+            }
+        }, Qt::QueuedConnection);
+    });
+}
 
 void Session::getWindowDimensions(int& x, int& y,
                                   int& width, int& height)
@@ -3811,7 +3812,7 @@ void Session::start()
     updateDualSenseHapticsControllerTarget();
 
     // Kick off the async connection thread then return to the caller to pump the event loop
-    m_ConnectionStartThread = std::thread([this] {
+    m_ConnectionThread = std::thread([this] {
         m_AsyncConnectionSuccess = startConnectionAsync();
         QMetaObject::invokeMethod(this, &Session::exec, Qt::QueuedConnection);
     });
@@ -4022,7 +4023,7 @@ static const Uint32 k_FullScreenEntryTimeoutMs = 1200;
 
 void Session::exec()
 {
-    m_ConnectionStartThread.join();
+    m_ConnectionThread.join();
 
     // If the connection failed, clean up and abort the connection.
     if (!m_AsyncConnectionSuccess) {
@@ -4036,7 +4037,7 @@ void Session::exec()
         delete m_InputHandler;
         m_InputHandler = nullptr;
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        QThreadPool::globalInstance()->start(new DeferredSessionCleanupTask(this));
+        dispatchConnectionCleanup();
 
         return;
     }
@@ -4183,7 +4184,7 @@ void Session::exec()
         delete m_InputHandler;
         m_InputHandler = nullptr;
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        QThreadPool::globalInstance()->start(new DeferredSessionCleanupTask(this));
+        dispatchConnectionCleanup();
         return;
     }
 
@@ -5332,7 +5333,7 @@ DispatchDeferredCleanup:
 
     // Cleanup can take a while, so dispatch it to a worker thread.
     // Once cleanup finishes, another session can start.
-    QThreadPool::globalInstance()->start(new DeferredSessionCleanupTask(this));
+    dispatchConnectionCleanup();
 
     // 停止带宽计算
     BandwidthCalculator::instance()->stop();

@@ -40,7 +40,6 @@ class Session : public QObject
     Q_OBJECT
 
     friend class SdlInputHandler;
-    friend class DeferredSessionCleanupTask;
 
 public:
     explicit Session(NvComputer* computer,
@@ -126,6 +125,9 @@ private:
     };
 
     void exec();
+    void dispatchConnectionCleanup();
+    void finishConnectionCleanup();
+    static void releaseActiveSession();
 
     bool startConnectionAsync();
 
@@ -323,7 +325,7 @@ private:
     int m_LastTerminationErrorCode;      // stored to show final error if reconnect gives up
 
     bool m_AsyncConnectionSuccess;
-    std::thread m_ConnectionStartThread;
+    std::thread m_ConnectionThread;
     float m_LastClientSdrWhiteNits;
     int m_PortTestResults;
 

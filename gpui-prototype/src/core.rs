@@ -408,7 +408,13 @@ mod tests {
         settings["codec"] = json!(1);
         settings["display"]["decoder"] = json!(2);
         for _ in 0..2 {
-            client.send(json!({"command":"start","host":"rust-display-host","app":1,"settings":settings}))?;
+            client.send(json!({
+                "command": "start",
+                "client_pid": std::process::id(),
+                "host": "rust-display-host",
+                "app": 1,
+                "settings": settings,
+            }))?;
             let mut launching = false;
             let mut rejected = false;
             wait(Box::new(move |event| {
