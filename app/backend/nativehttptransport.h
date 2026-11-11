@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace NativeHttp {
@@ -58,6 +59,17 @@ struct Response {
     std::string body;
     std::string message; // Generic error only; never a URL, key or response body.
 };
+
+struct ClipboardCredentials {
+    std::vector<unsigned char> serverDer;
+    std::string clientCertificatePem;
+    std::string clientPrivateKeyPem;
+};
+// Parse the first certificate in each PEM, as the legacy helper does. Private
+// key parsing never prompts, and accepts only RSA keys.
+std::optional<ClipboardCredentials> parseClipboardCredentials(std::string_view serverPem,
+                                                               std::string_view clientPem,
+                                                               std::string_view keyPem);
 
 struct SocketInterest {
     std::uintptr_t socket;

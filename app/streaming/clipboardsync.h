@@ -9,8 +9,12 @@
 #include <QPair>
 #include <QSet>
 #include <QQueue>
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+#include "backend/nativehttptransport.h"
+#else
 #include <QSslCertificate>
 #include <QSslKey>
+#endif
 #include <QString>
 #include <QStringList>
 #include <cstdint>
@@ -29,9 +33,13 @@ struct ClipboardSyncHostContext
 {
     QString address;
     quint16 httpsPort = 0;
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+    NativeHttp::ClipboardCredentials credentials;
+#else
     QSslCertificate serverCertificate;
     QSslCertificate clientCertificate;
     QSslKey clientPrivateKey;
+#endif
 };
 
 // ClipboardSync owns the local clipboard state inside the clipboard helper

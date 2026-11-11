@@ -1,4 +1,5 @@
-QT += core gui network
+QT += core gui
+!lite-native-http: QT += network
 CONFIG += c++17
 CONFIG -= app_bundle
 

@@ -2,6 +2,7 @@
 #include <curl/curl.h>
 #include <openssl/pem.h>
 #include <openssl/ssl.h>
+#include <openssl/err.h>
 #include <climits>
 #include <algorithm>
 #include <chrono>
@@ -351,6 +352,44 @@ Response failureFromException()
     return response;
 }
 
+}
+
+std::optional<ClipboardCredentials> parseClipboardCredentials(std::string_view serverPem,
+                                                               std::string_view clientPem,
+                                                               std::string_view keyPem)
+{
+    auto bio = [](std::string_view bytes) {
+        return std::unique_ptr<BIO, decltype(&BIO_free)>(
+            bytes.empty() || bytes.size() > INT_MAX ? nullptr :
+                BIO_new_mem_buf(bytes.data(), static_cast<int>(bytes.size())), BIO_free);
+    };
+    auto readCertificate = [&](std::string_view pem) {
+        auto input = bio(pem);
+        return std::unique_ptr<X509, decltype(&X509_free)>(
+            input ? PEM_read_bio_X509(input.get(), nullptr, nullptr, nullptr) : nullptr, X509_free);
+    };
+    const auto server = readCertificate(serverPem);
+    const auto client = readCertificate(clientPem);
+    const auto input = bio(keyPem);
+    const auto noPassword = +[](char*, int, int, void*) -> int { return -1; };
+    const std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key(
+        input ? PEM_read_bio_PrivateKey(input.get(), nullptr, noPassword, nullptr) : nullptr,
+        EVP_PKEY_free);
+    if (!server || !client || !key || EVP_PKEY_base_id(key.get()) != EVP_PKEY_RSA) {
+        ERR_clear_error();
+        return std::nullopt;
+    }
+    const auto output = std::unique_ptr<BIO, decltype(&BIO_free)>(BIO_new(BIO_s_mem()), BIO_free);
+    auto serverDer = der(server.get());
+    if (serverDer.empty() || !output || !PEM_write_bio_X509(output.get(), client.get())) {
+        ERR_clear_error();
+        return std::nullopt;
+    }
+    char* bytes = nullptr;
+    const long size = BIO_get_mem_data(output.get(), &bytes);
+    if (size <= 0) return std::nullopt;
+    return ClipboardCredentials{std::move(serverDer), std::string(bytes, static_cast<size_t>(size)),
+                                std::string(keyPem)};
 }
 
 struct AsyncRequest::Impl {

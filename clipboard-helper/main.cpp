@@ -5,13 +5,12 @@
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QObject>
-#include <QSslCertificate>
-#include <QSslKey>
 #include <QThread>
 
 #include <cstdio>
 #include <iostream>
 #include <string>
+#include <utility>
 
 #ifdef Q_OS_MACOS
 extern "C" void ClipboardHelperSetBackgroundActivationPolicy();
@@ -104,12 +103,22 @@ private:
         ClipboardSyncHostContext context;
         context.address = config.address;
         context.httpsPort = config.httpsPort;
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+        const auto view = [](const QByteArray& bytes) {
+            return std::string_view(bytes.constData(), static_cast<size_t>(bytes.size()));
+        };
+        auto credentials = NativeHttp::parseClipboardCredentials(
+            view(config.serverCertPem), view(config.clientCertPem), view(config.clientKeyPem));
+        const bool valid = credentials.has_value();
+        if (valid) context.credentials = std::move(*credentials);
+#else
         context.serverCertificate = QSslCertificate(config.serverCertPem);
         context.clientCertificate = QSslCertificate(config.clientCertPem);
         context.clientPrivateKey = QSslKey(config.clientKeyPem, QSsl::Rsa);
-        if (context.serverCertificate.isNull() ||
-                context.clientCertificate.isNull() ||
-                context.clientPrivateKey.isNull()) {
+        const bool valid = !context.serverCertificate.isNull() &&
+                           !context.clientCertificate.isNull() && !context.clientPrivateKey.isNull();
+#endif
+        if (!valid) {
             writeProtocolLine(ClipboardIpc::encodeError(sequence,
                                                         QStringLiteral("bad-config"),
                                                         QStringLiteral("certificate or private key data is unreadable")));

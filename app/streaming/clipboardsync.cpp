@@ -22,8 +22,10 @@
 #endif
 #include <QRegularExpression>
 #include <QRandomGenerator>
+#ifndef LITE_NATIVE_CLIPBOARD_HTTP
 #include <QSslConfiguration>
 #include <QSslError>
+#endif
 #include <QTimer>
 #include <QUrl>
 
@@ -155,6 +157,7 @@ void ClipboardSync::setHostContext(const ClipboardSyncHostContext& hostContext)
     beginClipboardChange();
     m_RetiredTokens.clear();
     m_HaveClipboardSnapshot = false;
+#ifndef LITE_NATIVE_CLIPBOARD_HTTP
     if (m_HostContext.address == hostContext.address &&
         m_HostContext.httpsPort == hostContext.httpsPort &&
         m_HostContext.serverCertificate == hostContext.serverCertificate &&
@@ -162,7 +165,6 @@ void ClipboardSync::setHostContext(const ClipboardSyncHostContext& hostContext)
         m_HostContext.clientPrivateKey == hostContext.clientPrivateKey) {
         return;
     }
-#ifndef LITE_NATIVE_CLIPBOARD_HTTP
     // Pooled TLS connections must not survive a change of paired identity.
     delete m_Nam;
     m_Nam = nullptr;
@@ -989,11 +991,12 @@ QNetworkAccessManager* ClipboardSync::nam()
 
 bool ClipboardSync::buildBlobUrl(const QString& tail, QUrl& outUrl) const
 {
-    if (m_HostContext.address.isEmpty() ||
-            m_HostContext.httpsPort == 0 ||
-            m_HostContext.serverCertificate.isNull()) {
-        return false;
-    }
+    if (m_HostContext.address.isEmpty() || m_HostContext.httpsPort == 0) return false;
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+    if (m_HostContext.credentials.serverDer.empty()) return false;
+#else
+    if (m_HostContext.serverCertificate.isNull()) return false;
+#endif
     outUrl = QUrl();
     outUrl.setScheme(QStringLiteral("https"));
     outUrl.setHost(m_HostContext.address);
@@ -1068,10 +1071,9 @@ void ClipboardSync::requestBlob(const QUrl& url, const QByteArray& payload, cons
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
     NativeHttp::Request request;
     request.url = url.toEncoded().toStdString();
-    const auto pin = m_HostContext.serverCertificate.toDer();
-    request.pinnedCertificateDer.assign(pin.begin(), pin.end());
-    request.clientCertificatePem = m_HostContext.clientCertificate.toPem().toStdString();
-    request.clientPrivateKeyPem = m_HostContext.clientPrivateKey.toPem().toStdString();
+    request.pinnedCertificateDer = m_HostContext.credentials.serverDer;
+    request.clientCertificatePem = m_HostContext.credentials.clientCertificatePem;
+    request.clientPrivateKeyPem = m_HostContext.credentials.clientPrivateKeyPem;
     request.timeoutMs = ClipboardBlob::TimeoutMs;
     request.maxResponseBytes = static_cast<size_t>(limit);
     request.limitDeclaredLength = true;

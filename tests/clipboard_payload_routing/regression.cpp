@@ -13,6 +13,7 @@
 #include <QNetworkAccessManager>
 #include <QPointer>
 #include <QSslConfiguration>
+#include <QSslKey>
 #include <QSslSocket>
 #include <QTcpServer>
 #include <QTemporaryDir>
@@ -287,9 +288,17 @@ public:
         ClipboardSyncHostContext host;
         host.address = "127.0.0.1";
         host.httpsPort = server.serverPort();
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+        auto credentials = NativeHttp::parseClipboardCredentials(
+            fixture("server.pem").toStdString(), fixture("server.pem").toStdString(),
+            fixture("server-key.pem").toStdString());
+        if (!check(credentials.has_value(), "parse native clipboard identity", err)) return false;
+        host.credentials = std::move(*credentials);
+#else
         host.serverCertificate = server.certificate;
         host.clientCertificate = server.certificate;
         host.clientPrivateKey = QSslKey(fixture("server-key.pem"), QSsl::Rsa);
+#endif
         {
             cb->setText("network baseline");
             ClipboardSync sync(host);
@@ -390,7 +399,15 @@ public:
             trusted.setCaCertificates({ server.certificate });
             QSslConfiguration::setDefaultConfiguration(trusted);
             auto wrongHost = host;
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+            auto other = NativeHttp::parseClipboardCredentials(
+                fixture("other.pem").toStdString(), fixture("server.pem").toStdString(),
+                fixture("server-key.pem").toStdString());
+            if (!check(other.has_value(), "parse alternate native clipboard pin", err)) return false;
+            wrongHost.credentials = std::move(*other);
+#else
             wrongHost.serverCertificate = QSslCertificate(fixture("other.pem"));
+#endif
             ClipboardSync sync(wrongHost);
             sync.start();
 #ifndef LITE_NATIVE_CLIPBOARD_HTTP
