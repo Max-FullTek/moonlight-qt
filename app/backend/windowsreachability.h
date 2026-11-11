@@ -1,6 +1,7 @@
 #pragma once
 
 #include "reachabilitypolicy.h"
+#include <optional>
 
 namespace WindowsReachability {
 
@@ -10,5 +11,9 @@ struct Address {
 };
 
 ReachabilityPolicy::Route classify(const Address& local, const Address& peer);
+
+// Empty means Winsock could not interpret the address as a numeric endpoint.
+// The caller can then use its existing hostname resolver.
+std::optional<ReachabilityPolicy::Route> probeNumeric(const wchar_t* host, std::uint16_t port);
 
 } // namespace WindowsReachability

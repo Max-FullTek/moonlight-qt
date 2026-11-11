@@ -8,6 +8,7 @@
 #include <QHostAddress>
 #include <QNetworkInterface>
 #include <QSettings>
+#include <QTcpServer>
 #include <QTemporaryDir>
 #include <QTextStream>
 
@@ -93,6 +94,24 @@ int main(int argc, char* argv[])
     }
     ok &= require(!checked.isEmpty(), QStringLiteral("at least one Windows adapter was compared"), err);
     QTextStream(stdout) << "windows_adapter_addresses_compared=" << checked.size() << '\n';
+    for (const auto& ip : {QHostAddress(QHostAddress::LocalHost), QHostAddress(QHostAddress::LocalHostIPv6)}) {
+        QTcpServer listener;
+        ok &= require(listener.listen(ip), QStringLiteral("loopback listener starts for %1").arg(ip.toString()), err);
+        if (!listener.isListening()) {
+            continue;
+        }
+        const auto host = ip.toString().toStdWString();
+        const auto port = listener.serverPort();
+        const auto connected = WindowsReachability::probeNumeric(host.c_str(), port);
+        ok &= require(connected && *connected != ReachabilityPolicy::Route::Unknown &&
+                          listener.waitForNewConnection(1000),
+                      QStringLiteral("Winsock probes the actual loopback listener at %1").arg(ip.toString()), err);
+        listener.close();
+        ok &= require(WindowsReachability::probeNumeric(host.c_str(), port) == ReachabilityPolicy::Route::Unknown,
+                      QStringLiteral("closed loopback port falls back to unknown route"), err);
+    }
+    ok &= require(!WindowsReachability::probeNumeric(L"localhost", 1),
+                  QStringLiteral("numeric probe leaves hostnames to the existing resolver"), err);
 #endif
 
     ok &= require(VersionUtils::parseRelease("v6.2.82+14.g13ca12da.dirty") ==

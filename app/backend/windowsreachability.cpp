@@ -4,6 +4,7 @@
 #include <ws2ipdef.h>
 #include <windows.h>
 #include <iphlpapi.h>
+#include <ws2tcpip.h>
 
 #include "windowsreachability.h"
 
@@ -14,6 +15,41 @@
 #include <string>
 
 namespace {
+
+struct Winsock {
+    WSADATA data{};
+    const bool ready = WSAStartup(MAKEWORD(2, 2), &data) == 0;
+    ~Winsock() { if (ready) WSACleanup(); }
+};
+
+struct ProbeSocket {
+    SOCKET handle;
+    ~ProbeSocket() { if (handle != INVALID_SOCKET) closesocket(handle); }
+};
+
+bool connectWithinThreeSeconds(SOCKET socket, const ADDRINFOW& endpoint)
+{
+    u_long nonblocking = 1;
+    if (ioctlsocket(socket, FIONBIO, &nonblocking) != 0) {
+        return false;
+    }
+    if (connect(socket, endpoint.ai_addr, static_cast<int>(endpoint.ai_addrlen)) == 0) {
+        return true;
+    }
+    if (WSAGetLastError() != WSAEWOULDBLOCK) {
+        return false;
+    }
+
+    fd_set writable;
+    fd_set failed;
+    FD_ZERO(&writable);
+    FD_ZERO(&failed);
+    FD_SET(socket, &writable);
+    FD_SET(socket, &failed);
+    const timeval timeout{3, 0};
+    return select(0, nullptr, &writable, &failed, &timeout) > 0 &&
+        FD_ISSET(socket, &writable) && !FD_ISSET(socket, &failed);
+}
 
 WindowsReachability::Address readAddress(const SOCKET_ADDRESS& address)
 {
@@ -53,6 +89,41 @@ std::string utf8(const wchar_t* text)
 }
 
 } // namespace
+
+std::optional<ReachabilityPolicy::Route> WindowsReachability::probeNumeric(
+    const wchar_t* host, std::uint16_t port)
+{
+    using ReachabilityPolicy::Route;
+    const Winsock winsock;
+    if (!winsock.ready) {
+        return Route::Unknown;
+    }
+    ADDRINFOW hints{};
+    hints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    const auto service = std::to_wstring(port);
+    ADDRINFOW* endpoint = nullptr;
+    if (GetAddrInfoW(host, service.c_str(), &hints, &endpoint) != 0 || !endpoint) {
+        return std::nullopt;
+    }
+    const std::unique_ptr<ADDRINFOW, decltype(&FreeAddrInfoW)> address(endpoint, FreeAddrInfoW);
+    const ProbeSocket socket{::socket(address->ai_family, address->ai_socktype, address->ai_protocol)};
+    if (socket.handle == INVALID_SOCKET || !connectWithinThreeSeconds(socket.handle, *address)) {
+        return Route::Unknown;
+    }
+    sockaddr_storage local{};
+    sockaddr_storage peer{};
+    int localSize = sizeof(local);
+    int peerSize = sizeof(peer);
+    auto* localAddress = reinterpret_cast<sockaddr*>(&local);
+    auto* peerAddress = reinterpret_cast<sockaddr*>(&peer);
+    if (getsockname(socket.handle, localAddress, &localSize) != 0 ||
+        getpeername(socket.handle, peerAddress, &peerSize) != 0) {
+        return Route::Unknown;
+    }
+    return classify(readAddress({localAddress, localSize}), readAddress({peerAddress, peerSize}));
+}
 
 ReachabilityPolicy::Route WindowsReachability::classify(const Address& local, const Address& peer)
 {

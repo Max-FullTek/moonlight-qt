@@ -450,6 +450,27 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
         return result;
     };
 
+#ifdef Q_OS_WIN
+    const bool useNativeReachability = NvHTTP::usesRustSessionApi();
+    const auto cacheNativeRoute = [&cacheResult](ReachabilityPolicy::Route route) {
+        switch (route) {
+        case ReachabilityPolicy::Route::Vpn: return cacheResult(ReachabilityType::RI_VPN);
+        case ReachabilityPolicy::Route::Lan: return cacheResult(ReachabilityType::RI_LAN);
+        default: return cacheResult(ReachabilityType::RI_UNKNOWN);
+        }
+    };
+    if (useNativeReachability) {
+        const QHostAddress literal(copyOfActiveAddress.address());
+        if (!literal.isNull()) {
+            // Use the same canonical address Qt would connect to.
+            const auto host = literal.toString().toStdWString();
+            if (const auto route = WindowsReachability::probeNumeric(host.c_str(), copyOfActiveAddress.port())) {
+                return cacheNativeRoute(*route);
+            }
+        }
+    }
+#endif
+
     QTcpSocket s;
     s.setProxy(QNetworkProxy::NoProxy);
     s.connectToHost(copyOfActiveAddress.address(), copyOfActiveAddress.port());
@@ -458,7 +479,7 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
         Q_ASSERT(!s.peerAddress().isNull());
 
 #ifdef Q_OS_WIN
-        if (NvHTTP::usesRustSessionApi()) {
+        if (useNativeReachability) {
             const auto bytes = [](const QHostAddress& host) {
                 WindowsReachability::Address result;
                 if (host.protocol() == QAbstractSocket::IPv4Protocol) {
@@ -473,11 +494,7 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
                 return result;
             };
             const auto route = WindowsReachability::classify(bytes(s.localAddress()), bytes(s.peerAddress()));
-            switch (route) {
-            case ReachabilityPolicy::Route::Vpn: return cacheResult(ReachabilityType::RI_VPN);
-            case ReachabilityPolicy::Route::Lan: return cacheResult(ReachabilityType::RI_LAN);
-            default: return cacheResult(ReachabilityType::RI_UNKNOWN);
-            }
+            return cacheNativeRoute(route);
         }
 #endif
 

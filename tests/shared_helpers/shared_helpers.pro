@@ -12,5 +12,5 @@ HEADERS += ../../app/backend/pairedcertificate.h ../../app/versionutils.h ../../
 RESOURCES += ../clipboard_payload_routing/fixtures.qrc
 win32 {
     SOURCES += ../../app/backend/windowsreachability.cpp
-    LIBS += iphlpapi.lib
+    LIBS += iphlpapi.lib ws2_32.lib
 }
