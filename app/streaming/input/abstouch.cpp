@@ -80,7 +80,7 @@ void SdlInputHandler::disableTouchFeedback()
     SDL_VERSION(&info.version);
     SDL_GetWindowWMInfo(m_Window, &info);
 
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
     if (info.subsystem == SDL_SYSWM_WINDOWS) {
         constexpr FEEDBACK_TYPE feedbackTypes[] = {
             FEEDBACK_TOUCH_CONTACTVISUALIZATION,
@@ -121,8 +121,10 @@ void SdlInputHandler::handleAbsoluteFingerEvent(SDL_TouchFingerEvent* event)
 
     // Scale window-relative events to be video-relative and clamp to video region
     StreamUtils::scaleSourceToDestinationSurface(&src, &dst);
-    float vidrelx = std::clamp(static_cast<int>(event->x * windowWidth), dst.x, dst.x + dst.w) - dst.x;
-    float vidrely = std::clamp(static_cast<int>(event->y * windowHeight), dst.y, dst.y + dst.h) - dst.y;
+    float vidrelx = static_cast<float>(
+        std::clamp(static_cast<int>(event->x * windowWidth), dst.x, dst.x + dst.w) - dst.x);
+    float vidrely = static_cast<float>(
+        std::clamp(static_cast<int>(event->y * windowHeight), dst.y, dst.y + dst.h) - dst.y);
 
     uint8_t eventType;
     switch (event->type) {

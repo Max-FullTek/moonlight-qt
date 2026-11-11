@@ -163,10 +163,10 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
 
         // Toggle the system key capture mode
         if (isSystemKeyCaptureActive()) {
-            m_CaptureSystemKeysMode = StreamingPreferences::CSK_OFF;
+            m_CaptureSystemKeysMode = InputOptions::CSK_OFF;
         }
         else {
-            m_CaptureSystemKeysMode = StreamingPreferences::CSK_ALWAYS;
+            m_CaptureSystemKeysMode = InputOptions::CSK_ALWAYS;
         }
 
         updateKeyboardGrabState();

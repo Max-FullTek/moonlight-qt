@@ -132,6 +132,17 @@ target_link_libraries(lite-stream-utils PUBLIC lite-sdl2)
 # Match the Windows Lite Qt build's window-probing preference.
 target_compile_definitions(lite-stream-utils PRIVATE HAVE_LIBPLACEBO_VULKAN)
 
+add_library(lite-touch-input STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/input/abstouch.cpp"
+    "${LITE_SOURCE_ROOT}/app/streaming/input/reltouch.cpp"
+    "${LITE_SOURCE_ROOT}/app/streaming/input/winpen.cpp"
+    "${LITE_SOURCE_ROOT}/app/streaming/input/wintouchpad.cpp")
+target_compile_features(lite-touch-input PUBLIC cxx_std_17)
+target_compile_options(lite-touch-input PRIVATE /W3 /WX)
+target_compile_definitions(lite-touch-input PUBLIC HAVE_WINDOWS_PEN_INPUT HAVE_WINDOWS_RAW_TOUCHPAD
+    PRIVATE NOMINMAX)
+target_link_libraries(lite-touch-input PUBLIC lite-stream-utils moonlight-common-c comctl32 hid)
+
 foreach(required IN ITEMS include/x64/libavutil/frame.h lib/x64/avutil.lib lib/x64/avutil-61.dll
                           include/x64/libavcodec/avcodec.h lib/x64/avcodec.lib lib/x64/avcodec-63.dll)
     if(NOT EXISTS "${LITE_DEPS_ROOT}/${required}")

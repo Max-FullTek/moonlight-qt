@@ -328,7 +328,7 @@ static void pushEventOrWarn(SDL_Event& event)
 // 退出组合键的 glyph 文案,按键名按手柄 UI 风格显示
 // (与 StreamSegue.qml 的 quitComboHintText 保持同一映射)
 static QString gamepadQuitComboGlyphText(GamepadUiStyle style,
-                                         StreamingPreferences::GamepadQuitCombo combo,
+                                         InputOptions::GamepadQuitCombo combo,
                                          bool swapFaceButtons)
 {
     QString lb = gamepadLeftShoulderName(style);
@@ -340,17 +340,17 @@ static QString gamepadQuitComboGlyphText(GamepadUiStyle style,
     };
 
     switch (combo) {
-    case StreamingPreferences::GQC_SELECT_L1_R1_Y:
+    case InputOptions::GQC_SELECT_L1_R1_Y:
         return gamepadSelectButtonName(style) + "+" + lb + "+" + rb + "+" + face(3);
-    case StreamingPreferences::GQC_START_L1_R1_A:
+    case InputOptions::GQC_START_L1_R1_A:
         return gamepadStartButtonName(style) + "+" + lb + "+" + rb + "+" + face(0);
-    case StreamingPreferences::GQC_START_L1_R1_B:
+    case InputOptions::GQC_START_L1_R1_B:
         return gamepadStartButtonName(style) + "+" + lb + "+" + rb + "+" + face(1);
-    case StreamingPreferences::GQC_L1_R1_X_Y:
+    case InputOptions::GQC_L1_R1_X_Y:
         return lb + "+" + rb + "+" + face(2) + "+" + face(3);
-    case StreamingPreferences::GQC_L1_R1_A_B:
+    case InputOptions::GQC_L1_R1_A_B:
         return lb + "+" + rb + "+" + face(0) + "+" + face(1);
-    case StreamingPreferences::GQC_DEFAULT:
+    case InputOptions::GQC_DEFAULT:
     default:
         return gamepadStartButtonName(style) + "+" + gamepadSelectButtonName(style) + "+" + lb +
                "+" + rb;
@@ -709,9 +709,8 @@ void Session::clCursorUpdate(const LI_CURSOR_UPDATE* update)
     pending->hotspotX = update->hotspotX;
     pending->hotspotY = update->hotspotY;
     if (pending->hasShape && update->pixels != nullptr && update->pixelDataLength != 0) {
-        pending->bgra = QByteArray(
-            reinterpret_cast<const char*>(update->pixels),
-            static_cast<int>(update->pixelDataLength));
+        const auto* pixels = reinterpret_cast<const char*>(update->pixels);
+        pending->bgra.assign(pixels, pixels + update->pixelDataLength);
     }
 
     bool queueCursorEvent = false;
@@ -1840,7 +1839,7 @@ bool Session::validateLaunch(SDL_Window* testWindow)
     }
 
     // Check for unmapped gamepads
-    if (!SdlInputHandler::getUnmappedGamepads().isEmpty()) {
+    if (!SdlInputHandler::getUnmappedGamepads().empty()) {
         emitLaunchWarning(tr("An attached gamepad has no mapping and won't be usable. Visit the Moonlight help to resolve this."));
     }
 
@@ -3805,7 +3804,22 @@ void Session::start()
 
     // Initialize the gamepad code with the effective (post-preflight) capability.
     // NB: m_InputHandler must be initialized before starting the connection.
-    m_InputHandler = new SdlInputHandler(*m_Preferences, m_StreamConfig.width,
+    const InputOptions inputOptions{
+        m_Preferences->multiController,
+        m_Preferences->gamepadMouse,
+        m_Preferences->swapMouseButtons,
+        m_Preferences->swapWinAltKeys,
+        m_Preferences->reverseScrollDirection,
+        m_Preferences->swapFaceButtons,
+        static_cast<InputOptions::GamepadQuitCombo>(m_Preferences->gamepadQuitCombo),
+        m_Preferences->gamepadDeadzone,
+        static_cast<InputOptions::CaptureSysKeysMode>(m_Preferences->captureSysKeysMode),
+        m_Preferences->showLocalCursor,
+        m_Preferences->absoluteMouseMode,
+        m_Preferences->absoluteTouchMode,
+        m_Preferences->backgroundGamepad,
+    };
+    m_InputHandler = new SdlInputHandler(inputOptions, m_StreamConfig.width,
                                          m_StreamConfig.height, enablePhysicalDualSenseHaptics);
     updateDualSenseHapticsControllerTarget();
 

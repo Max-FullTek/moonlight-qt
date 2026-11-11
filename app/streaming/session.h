@@ -17,6 +17,7 @@
 #include <Limelight.h>
 #include <opus_multistream.h>
 #include "settings/streamingpreferences.h"
+#include "backend/nvcomputer.h"
 #include "supportedvideoformats.h"
 #include "input/input.h"
 #include "video/decoder.h"

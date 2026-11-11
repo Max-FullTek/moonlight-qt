@@ -9,9 +9,10 @@
 #include "wintouchpad.h"
 #endif
 
+#include <algorithm>
+#include <sstream>
+#include <string_view>
 #include <QtGlobal>
-#include <QDir>
-#include <QGuiApplication>
 #ifdef Q_OS_MACOS
 #include <QImage>
 #endif
@@ -32,7 +33,8 @@ namespace {
 bool nativeCursorSubstitutionEnabled()
 {
     static const bool enabled =
-        qEnvironmentVariable("MOONLIGHT_NATIVE_CURSOR") != QStringLiteral("0");
+        SDL_getenv("MOONLIGHT_NATIVE_CURSOR") == nullptr ||
+        std::string_view(SDL_getenv("MOONLIGHT_NATIVE_CURSOR")) != "0";
     return enabled;
 }
 
@@ -87,15 +89,16 @@ bool toSdlSystemCursor(NativeCursorShape shape, SDL_SystemCursor& systemCursor)
 
 } // namespace
 
-SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, int streamHeight,
+SdlInputHandler::SdlInputHandler(const InputOptions& prefs, int streamWidth, int streamHeight,
                                  bool enablePhysicalDualSenseHaptics)
     : m_MultiController(prefs.multiController), m_GamepadMouse(prefs.gamepadMouse),
       m_EnableDualSenseHaptics(enablePhysicalDualSenseHaptics),
       m_SwapMouseButtons(prefs.swapMouseButtons), m_SwapWinAltKeys(prefs.swapWinAltKeys),
       m_ReverseScrollDirection(prefs.reverseScrollDirection),
       m_SwapFaceButtons(prefs.swapFaceButtons), m_GamepadQuitCombo(prefs.gamepadQuitCombo),
-      m_GamepadQuitEnabled(qgetenv("NO_GAMEPAD_QUIT") != "1"),
-      m_GamepadDeadzone(qBound(0, prefs.gamepadDeadzone, 30)), m_MouseWasInVideoRegion(false),
+      m_GamepadQuitEnabled(SDL_getenv("NO_GAMEPAD_QUIT") == nullptr ||
+                          std::string_view(SDL_getenv("NO_GAMEPAD_QUIT")) != "1"),
+      m_GamepadDeadzone(std::clamp(prefs.gamepadDeadzone, 0, 30)), m_MouseWasInVideoRegion(false),
       m_PendingMouseButtonsAllUpOnVideoRegionLeave(false), m_PointerRegionLockActive(false),
       m_PointerRegionLockToggledByUser(false), m_FakeMouseCaptureActive(false),
       m_KeyboardCaptureActive(false), m_CaptureSystemKeysMode(prefs.captureSysKeysMode),
@@ -139,7 +142,7 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
 {
     // System keys are always captured when running without a DE
     if (!WMUtils::isRunningDesktopEnvironment()) {
-        m_CaptureSystemKeysMode = StreamingPreferences::CSK_ALWAYS;
+        m_CaptureSystemKeysMode = InputOptions::CSK_ALWAYS;
     }
 
     // SDL3 breaks our auto-capture-on-leave logic because the mouse focus has already
@@ -162,7 +165,7 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
 #if !SDL_VERSION_ATLEAST(2, 0, 15)
     // For older versions of SDL (2.0.14 and earlier), use SDL_HINT_GRAB_KEYBOARD
     SDL_SetHintWithPriority(SDL_HINT_GRAB_KEYBOARD,
-                            m_CaptureSystemKeysMode != StreamingPreferences::CSK_OFF ? "1" : "0",
+                            m_CaptureSystemKeysMode != InputOptions::CSK_OFF ? "1" : "0",
                             SDL_HINT_OVERRIDE);
 #endif
 
@@ -244,13 +247,16 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].scanCode = SDL_SCANCODE_K;
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].enabled = WMUtils::isRunningDesktopEnvironment();
 
-    m_OldIgnoreDevices = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES);
-    m_OldIgnoreDevicesExcept = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT);
+    m_OldIgnoreDevices = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES) ?
+        SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES) : "";
+    m_OldIgnoreDevicesExcept = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT) ?
+        SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT) : "";
 
-    QString streamIgnoreDevices = qgetenv("STREAM_GAMECONTROLLER_IGNORE_DEVICES");
-    QString streamIgnoreDevicesExcept = qgetenv("STREAM_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT");
+    std::string streamIgnoreDevices = SDL_getenv("STREAM_GAMECONTROLLER_IGNORE_DEVICES") ?
+        SDL_getenv("STREAM_GAMECONTROLLER_IGNORE_DEVICES") : "";
+    const char* streamIgnoreDevicesExcept = SDL_getenv("STREAM_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT");
 
-    if (!streamIgnoreDevices.isEmpty() && !streamIgnoreDevices.endsWith(',')) {
+    if (!streamIgnoreDevices.empty() && streamIgnoreDevices.back() != ',') {
         streamIgnoreDevices += ',';
     }
     streamIgnoreDevices += m_OldIgnoreDevices;
@@ -262,18 +268,19 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
     //
     //     <GUID>,<GUID>,<GUID>,...
     //
-    QString streamIgnoreDeviceGuids = qgetenv("STREAM_IGNORE_DEVICE_GUIDS");
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-    m_IgnoreDeviceGuids = streamIgnoreDeviceGuids.split(',', Qt::SkipEmptyParts);
-#else
-    m_IgnoreDeviceGuids = streamIgnoreDeviceGuids.split(',', QString::SkipEmptyParts);
-#endif
+    const char* streamIgnoreDeviceGuids = SDL_getenv("STREAM_IGNORE_DEVICE_GUIDS");
+    std::istringstream guidList(streamIgnoreDeviceGuids ? streamIgnoreDeviceGuids : "");
+    for (std::string guid; std::getline(guidList, guid, ',');) {
+        if (!guid.empty()) {
+            m_IgnoreDeviceGuids.push_back(std::move(guid));
+        }
+    }
 
     // For SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES, we use the union of SDL_GAMECONTROLLER_IGNORE_DEVICES
     // and STREAM_GAMECONTROLLER_IGNORE_DEVICES while streaming. STREAM_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT
     // overrides SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT while streaming.
-    SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES, streamIgnoreDevices.toUtf8());
-    SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT, streamIgnoreDevicesExcept.toUtf8());
+    SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES, streamIgnoreDevices.c_str());
+    SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT, streamIgnoreDevicesExcept ? streamIgnoreDevicesExcept : "");
 
     // We must initialize joystick explicitly before gamecontroller in order
     // to ensure we receive gamecontroller attach events for gamepads where
@@ -380,8 +387,8 @@ SdlInputHandler::~SdlInputHandler()
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "0");
 
     // Restore the ignored devices
-    SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES, m_OldIgnoreDevices.toUtf8());
-    SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT, m_OldIgnoreDevicesExcept.toUtf8());
+    SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES, m_OldIgnoreDevices.c_str());
+    SDL_SetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT, m_OldIgnoreDevicesExcept.c_str());
 
 #ifdef STEAM_LINK
     // Hide SDL's cursor on Steam Link after quitting the stream.
@@ -565,7 +572,7 @@ bool SdlInputHandler::tryUseNativeRemoteCursor(const RemoteCursorUpdate& update)
         nativeCursorSubstitutionEnabled()
             ? measureCursorShape(update.width, update.height,
                                  update.hotspotX, update.hotspotY,
-                                 update.bgra.constData(),
+                                 update.bgra.data(),
                                  static_cast<std::size_t>(update.bgra.size()))
             : CursorShapeMetrics();
     const NativeCursorShape shape = classifyCursorShape(metrics);
@@ -649,7 +656,7 @@ void SdlInputHandler::synchronizeLocalCursorMode()
     }
 }
 
-qreal SdlInputHandler::getRemoteCursorScale() const
+double SdlInputHandler::getRemoteCursorScale() const
 {
 #ifdef Q_OS_MACOS
     // SDL 的 Cocoa 后端把 surface 的像素宽高当成 NSImage 的逻辑 point 尺寸，所以
@@ -687,7 +694,7 @@ void SdlInputHandler::refreshRemoteCursorScale()
         return;
     }
 
-    const qreal scale = getRemoteCursorScale();
+    const double scale = getRemoteCursorScale();
     if (qFuzzyCompare(scale, m_RemoteCursorScale)) {
         return;
     }
@@ -704,8 +711,8 @@ void SdlInputHandler::updateRemoteCursor(const RemoteCursorUpdate& update)
     updateRemoteCursorVisibility(update.visible);
 
     if (update.hasShape) {
-        const qint64 expectedSize =
-            static_cast<qint64>(update.width) * update.height * 4;
+        const uint64_t expectedSize =
+            static_cast<uint64_t>(update.width) * update.height * 4;
         if (update.width == 0 || update.height == 0 ||
             update.hotspotX < 0 || update.hotspotX >= update.width ||
             update.hotspotY < 0 || update.hotspotY >= update.height ||
@@ -720,11 +727,11 @@ void SdlInputHandler::updateRemoteCursor(const RemoteCursorUpdate& update)
             int hotspotX = update.hotspotX;
             int hotspotY = update.hotspotY;
             int cursorPitch = update.width * 4;
-            const char* cursorPixels = update.bgra.constData();
+            const char* cursorPixels = update.bgra.data();
 
 #ifdef Q_OS_MACOS
             QImage scaledCursor;
-            const qreal scale = getRemoteCursorScale();
+            const double scale = getRemoteCursorScale();
             if (scale > 1.0) {
                 cursorWidth = qMax(1, qRound(update.width / scale));
                 cursorHeight = qMax(1, qRound(update.height / scale));
@@ -733,7 +740,7 @@ void SdlInputHandler::updateRemoteCursor(const RemoteCursorUpdate& update)
 
                 if (cursorWidth != update.width || cursorHeight != update.height) {
                     const QImage source(
-                        reinterpret_cast<const uchar*>(update.bgra.constData()),
+                        reinterpret_cast<const uchar*>(update.bgra.data()),
                         update.width,
                         update.height,
                         update.width * 4,
@@ -844,9 +851,9 @@ bool SdlInputHandler::isCaptureActive()
 
 void SdlInputHandler::updateKeyboardGrabState()
 {
-    bool shouldGrab = m_CaptureSystemKeysMode != StreamingPreferences::CSK_OFF && isCaptureActive();
+    bool shouldGrab = m_CaptureSystemKeysMode != InputOptions::CSK_OFF && isCaptureActive();
     if (shouldGrab) {
-        if (m_CaptureSystemKeysMode == StreamingPreferences::CSK_FULLSCREEN &&
+        if (m_CaptureSystemKeysMode == InputOptions::CSK_FULLSCREEN &&
             !isStreamWindowFullscreen(m_Window)) {
             // Ungrab if it's fullscreen only and we left fullscreen
             shouldGrab = false;
@@ -864,7 +871,7 @@ void SdlInputHandler::updateKeyboardGrabState()
 
 bool SdlInputHandler::isSystemKeyCaptureActive()
 {
-    if (m_CaptureSystemKeysMode == StreamingPreferences::CSK_OFF) {
+    if (m_CaptureSystemKeysMode == InputOptions::CSK_OFF) {
         return false;
     }
 
@@ -881,7 +888,7 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
         return false;
     }
 
-    if (m_CaptureSystemKeysMode == StreamingPreferences::CSK_FULLSCREEN &&
+    if (m_CaptureSystemKeysMode == InputOptions::CSK_FULLSCREEN &&
         !isStreamWindowFullscreen(m_Window)) {
         return false;
     }

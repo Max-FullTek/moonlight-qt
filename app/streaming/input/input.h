@@ -1,22 +1,20 @@
 #pragma once
 
-#include "settings/streamingpreferences.h"
-#include "streaming/input/gamepadglyphs.h"
+#include "inputoptions.h"
 #include "streaming/input/gamepadsensorrate.h"
 #include "streaming/input/keyboardstate.h"
 #include "streaming/input/touchpadcontacts.h"
 #ifdef HAS_QT_SDL_WAYLAND_BRIDGE
 #include "streaming/waylandwindowmetrics.h"
 #endif
-#include "backend/computermanager.h"
 #include "cursorshapeclassifier.h"
 
 #include "SDL_compat.h"
 
-#include <QByteArray>
-
 #include <atomic>
 #include <mutex>
+#include <string>
+#include <vector>
 #include <unordered_map>
 #include <unordered_set>
 #ifdef HAS_QT_SDL_WAYLAND_BRIDGE
@@ -151,13 +149,13 @@ struct RemoteCursorUpdate {
     uint16_t height;
     int16_t hotspotX;
     int16_t hotspotY;
-    QByteArray bgra;
+    std::vector<char> bgra;
 };
 
 class SdlInputHandler
 {
 public:
-    explicit SdlInputHandler(StreamingPreferences& prefs, int streamWidth, int streamHeight,
+    explicit SdlInputHandler(const InputOptions& prefs, int streamWidth, int streamHeight,
                              bool enablePhysicalDualSenseHaptics);
 
     ~SdlInputHandler();
@@ -196,8 +194,6 @@ public:
 
     void handleJoystickArrivalEvent(SDL_JoyDeviceEvent* event);
 
-    void sendText(QString& string);
-
     void rumble(uint16_t controllerNumber, uint16_t lowFreqMotor, uint16_t highFreqMotor);
 
     void rumbleTriggers(uint16_t controllerNumber, uint16_t leftTrigger, uint16_t rightTrigger);
@@ -215,7 +211,7 @@ public:
     // 提示文案用的手柄 UI 风格：取第一只已连接手柄，未连接回落 Xbox 布局
     GamepadUiStyle getGamepadUiStyle() const;
 
-    StreamingPreferences::GamepadQuitCombo getGamepadQuitCombo() const
+    InputOptions::GamepadQuitCombo getGamepadQuitCombo() const
     {
         return m_GamepadQuitCombo;
     }
@@ -267,7 +263,7 @@ public:
     int getLocalCursorMode() const;
 
     static
-    QString getUnmappedGamepads();
+    std::string getUnmappedGamepads();
 
     // KeyCombo 枚举（公开以便 OverlayMenu 等外部组件调用）
     enum KeyCombo {
@@ -320,7 +316,7 @@ private:
     bool m_BackgroundGamepad = false;
     void getWindowCoordinateSize(int* width, int* height) const;
 
-    qreal getRemoteCursorScale() const;
+    double getRemoteCursorScale() const;
 
     GamepadState*
     findStateForGamepad(SDL_JoystickID id);
@@ -447,7 +443,7 @@ private:
     bool m_SwapWinAltKeys;
     bool m_ReverseScrollDirection;
     bool m_SwapFaceButtons;
-    StreamingPreferences::GamepadQuitCombo m_GamepadQuitCombo;
+    InputOptions::GamepadQuitCombo m_GamepadQuitCombo;
     // Cached at construction: the opt-out env var doesn't change mid-session
     bool m_GamepadQuitEnabled;
     int m_GamepadDeadzone;
@@ -463,10 +459,11 @@ private:
     KeyboardState::PressedKeys m_KeysDown;
     bool m_FakeMouseCaptureActive;
     bool m_KeyboardCaptureActive;
-    QString m_OldIgnoreDevices;
-    QString m_OldIgnoreDevicesExcept;
-    QStringList m_IgnoreDeviceGuids;
-    StreamingPreferences::CaptureSysKeysMode m_CaptureSystemKeysMode;
+    std::string m_OldIgnoreDevices;
+    std::string m_OldIgnoreDevicesExcept;
+    std::vector<std::string> m_IgnoreDeviceGuids;
+    bool isGamepadIgnored(const char* guid) const;
+    InputOptions::CaptureSysKeysMode m_CaptureSystemKeysMode;
     int m_MouseCursorCapturedVisibilityState;
     std::atomic<int> m_LocalCursorMode;
     bool m_RemoteCursorVisible;
@@ -478,7 +475,7 @@ private:
     // 清掉 m_HasLastCursorShape —— 系统光标不受 backing 比例影响，不需要重建。
     RemoteCursorUpdate m_LastCursorShape;
     bool m_HasLastCursorShape;
-    qreal m_RemoteCursorScale;
+    double m_RemoteCursorScale;
     // 隐藏的去抖定时器。见 updateRemoteCursorVisibility()。
     SDL_TimerID m_RemoteCursorHideTimer;
 

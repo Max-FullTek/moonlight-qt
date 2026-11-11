@@ -5,6 +5,7 @@
 #include <QQmlEngine>
 #include <QString>
 #include "streaming/video/videodecoderoptions.h"
+#include "streaming/input/inputoptions.h"
 
 class StreamingPreferences : public QObject
 {
@@ -126,9 +127,9 @@ public:
 
     enum CaptureSysKeysMode
     {
-        CSK_OFF,
-        CSK_FULLSCREEN,
-        CSK_ALWAYS,
+        CSK_OFF = InputOptions::CSK_OFF,
+        CSK_FULLSCREEN = InputOptions::CSK_FULLSCREEN,
+        CSK_ALWAYS = InputOptions::CSK_ALWAYS,
     };
     Q_ENUM(CaptureSysKeysMode);
 
@@ -180,14 +181,14 @@ public:
 
     enum GamepadQuitCombo
     {
-        GQC_DEFAULT = 0,        // Start + Select + L1 + R1 (original)
-        GQC_SELECT_L1_R1_X = 1, // Deprecated: same combo as the stats overlay toggle; migrated to
+        GQC_DEFAULT = InputOptions::GQC_DEFAULT,        // Start + Select + L1 + R1 (original)
+        GQC_SELECT_L1_R1_X = InputOptions::GQC_SELECT_L1_R1_X, // Deprecated: same combo as the stats overlay toggle; migrated to
                                 // GQC_SELECT_L1_R1_Y on load
-        GQC_SELECT_L1_R1_Y = 2, // Select + L1 + R1 + Y
-        GQC_START_L1_R1_A = 3,  // Start + L1 + R1 + A (avoids Select conflict)
-        GQC_START_L1_R1_B = 4,  // Start + L1 + R1 + B (avoids Select conflict)
-        GQC_L1_R1_X_Y = 5,      // L1 + R1 + X + Y (no Select/Start at all)
-        GQC_L1_R1_A_B = 6,      // L1 + R1 + A + B (no Select/Start at all)
+        GQC_SELECT_L1_R1_Y = InputOptions::GQC_SELECT_L1_R1_Y, // Select + L1 + R1 + Y
+        GQC_START_L1_R1_A = InputOptions::GQC_START_L1_R1_A,  // Start + L1 + R1 + A (avoids Select conflict)
+        GQC_START_L1_R1_B = InputOptions::GQC_START_L1_R1_B,  // Start + L1 + R1 + B (avoids Select conflict)
+        GQC_L1_R1_X_Y = InputOptions::GQC_L1_R1_X_Y,      // L1 + R1 + X + Y (no Select/Start at all)
+        GQC_L1_R1_A_B = InputOptions::GQC_L1_R1_A_B,      // L1 + R1 + A + B (no Select/Start at all)
     };
     Q_ENUM(GamepadQuitCombo);
 

@@ -535,22 +535,22 @@ void SdlInputHandler::handleControllerButtonEvent(SDL_ControllerButtonEvent* eve
     if (m_GamepadQuitEnabled) {
         int quitComboMask;
         switch (m_GamepadQuitCombo) {
-        case StreamingPreferences::GQC_SELECT_L1_R1_Y:
+        case InputOptions::GQC_SELECT_L1_R1_Y:
             quitComboMask = BACK_FLAG | LB_FLAG | RB_FLAG | Y_FLAG;
             break;
-        case StreamingPreferences::GQC_START_L1_R1_A:
+        case InputOptions::GQC_START_L1_R1_A:
             quitComboMask = PLAY_FLAG | LB_FLAG | RB_FLAG | A_FLAG;
             break;
-        case StreamingPreferences::GQC_START_L1_R1_B:
+        case InputOptions::GQC_START_L1_R1_B:
             quitComboMask = PLAY_FLAG | LB_FLAG | RB_FLAG | B_FLAG;
             break;
-        case StreamingPreferences::GQC_L1_R1_X_Y:
+        case InputOptions::GQC_L1_R1_X_Y:
             quitComboMask = LB_FLAG | RB_FLAG | X_FLAG | Y_FLAG;
             break;
-        case StreamingPreferences::GQC_L1_R1_A_B:
+        case InputOptions::GQC_L1_R1_A_B:
             quitComboMask = LB_FLAG | RB_FLAG | A_FLAG | B_FLAG;
             break;
-        case StreamingPreferences::GQC_DEFAULT:
+        case InputOptions::GQC_DEFAULT:
         default:
             quitComboMask = PLAY_FLAG | BACK_FLAG | LB_FLAG | RB_FLAG;
             break;
@@ -747,7 +747,7 @@ void SdlInputHandler::handleControllerDeviceEvent(SDL_ControllerDeviceEvent* eve
 
         SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(SDL_GameControllerGetJoystick(controller)),
                                   guidStr, sizeof(guidStr));
-        if (m_IgnoreDeviceGuids.contains(guidStr, Qt::CaseInsensitive))
+        if (isGamepadIgnored(guidStr))
         {
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "Skipping ignored device with GUID: %s",
@@ -1218,9 +1218,17 @@ void SdlInputHandler::setAdaptiveTriggers(uint16_t controllerNumber, DualSenseOu
     SDL_free(report);
 }
 
-QString SdlInputHandler::getUnmappedGamepads()
+bool SdlInputHandler::isGamepadIgnored(const char* guid) const
 {
-    QString ret;
+    return std::any_of(m_IgnoreDeviceGuids.begin(), m_IgnoreDeviceGuids.end(),
+            [guid](const std::string& ignored) {
+        return SDL_strcasecmp(ignored.c_str(), guid) == 0;
+    });
+}
+
+std::string SdlInputHandler::getUnmappedGamepads()
+{
+    std::string ret;
 
     if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -1255,11 +1263,11 @@ QString SdlInputHandler::getUnmappedGamepads()
                 if ((numAxes >= 4 && numAxes <= 8) && numButtons >= 8 && numHats <= 1) {
                     SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                                 "Joystick likely to be an unmapped game controller");
-                    if (!ret.isEmpty()) {
+                    if (!ret.empty()) {
                         ret += ", ";
                     }
 
-                    ret += name;
+                    ret += name ? name : "";
                 }
 
                 SDL_JoystickClose(joy);
@@ -1299,7 +1307,7 @@ int SdlInputHandler::getAttachedGamepadMask()
             SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(i),
                                       guidStr, sizeof(guidStr));
 
-            if (!m_IgnoreDeviceGuids.contains(guidStr, Qt::CaseInsensitive))
+            if (!isGamepadIgnored(guidStr))
             {
                 mask |= (1 << count++);
             }

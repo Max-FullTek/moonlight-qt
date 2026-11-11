@@ -190,7 +190,7 @@ void SystemProperties::startAsyncLoad()
     // This isn't actually asynchronous (due to the need to synchronize with
     // SdlGamepadKeyNavigation), but we don't query it in the constructor
     // because it's expensive.
-    unmappedGamepads = SdlInputHandler::getUnmappedGamepads();
+    unmappedGamepads = QString::fromStdString(SdlInputHandler::getUnmappedGamepads());
     if (!unmappedGamepads.isEmpty()) {
         emit unmappedGamepadsChanged();
     }
