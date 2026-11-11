@@ -125,7 +125,9 @@ foreach ($test in @('keyboard_state', 'cursor_shape_classification', 'shared_hel
     New-Item -ItemType Directory -Path $testBuild | Out-Null
     Push-Location -LiteralPath $testBuild
     try {
-        Invoke-Checked $qmake @((Join-Path $SourceRoot "tests/$test/$test.pro"))
+        $testQmakeArgs = @((Join-Path $SourceRoot "tests/$test/$test.pro"))
+        if ($test -eq 'clipboard_payload_routing') { $testQmakeArgs += 'CONFIG+=lite-native-http' }
+        Invoke-Checked $qmake $testQmakeArgs
         Invoke-Checked 'nmake.exe' @('/NOLOGO', 'release')
         Invoke-Checked (Join-Path $testBuild "release/$test.exe") @()
         $testResults += @{ name = $test; result = 'passed' }

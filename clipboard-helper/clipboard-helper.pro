@@ -8,6 +8,7 @@ TEMPLATE = app
 include(../globaldefs.pri)
 
 INCLUDEPATH += $$PWD/../app
+lite-native-http: include(native-http.pri)
 
 SOURCES += \
     main.cpp \

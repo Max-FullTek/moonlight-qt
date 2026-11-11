@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -45,6 +46,7 @@ struct Request {
     std::string clientPrivateKeyPem;
     long timeoutMs = 5000; // Zero preserves an explicitly unlimited deadline.
     size_t maxResponseBytes = 0; // Zero leaves response policy to the owner.
+    bool limitDeclaredLength = false; // Also reject an oversized Content-Length before the body arrives.
     bool allowUnpairedHttp = false;
     std::shared_ptr<Cancellation> cancellation;
 };
@@ -73,6 +75,22 @@ struct ReadyEvent {
     bool read = false;
     bool write = false;
     bool error = false;
+};
+
+// A single transfer driven by socket and timer events on its owning thread.
+// Begin with a Timeout event. Destroying the request cancels it immediately.
+class AsyncRequest {
+public:
+    explicit AsyncRequest(Request request);
+    ~AsyncRequest();
+    AsyncRequest(const AsyncRequest&) = delete;
+    AsyncRequest& operator=(const AsyncRequest&) = delete;
+    WaitState waitState() const;
+    // A returned response is terminal. Never drive a terminal request again.
+    std::optional<Response> advance(ReadyEvent event);
+private:
+    struct Impl;
+    std::unique_ptr<Impl> m_Impl;
 };
 // Owner-thread integration, not a thread or event dispatcher implementation.
 // Wait for one requested socket/deadline or owner shutdown. Never call back

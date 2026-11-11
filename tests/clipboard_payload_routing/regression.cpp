@@ -288,6 +288,8 @@ public:
         host.address = "127.0.0.1";
         host.httpsPort = server.serverPort();
         host.serverCertificate = server.certificate;
+        host.clientCertificate = server.certificate;
+        host.clientPrivateKey = QSslKey(fixture("server-key.pem"), QSsl::Rsa);
         {
             cb->setText("network baseline");
             ClipboardSync sync(host);
@@ -364,6 +366,25 @@ public:
                         "reconfigure same host cancels prior generation", err);
         }
         {
+            ClipboardSync sync(host);
+            sync.start();
+            const int index = server.requests.size();
+            QList<QByteArray> completed;
+            for (int i = 0; i <= ClipboardBlob::MaxPendingTransfers; ++i) {
+                sync.fetchBlob(QStringLiteral("concurrent-%1").arg(i), 1,
+                               [&](const QByteArray& bytes) { completed.append(bytes); });
+            }
+            ok &= check(waitFor([&] { return server.requests.size() == index + ClipboardBlob::MaxPendingTransfers; }),
+                        "four clipboard GETs reach the server before any completes", err);
+            for (int i = ClipboardBlob::MaxPendingTransfers - 1; i >= 0; --i) {
+                server.answer(index + i, "x");
+            }
+            ok &= check(waitFor([&] { return sync.m_BlobReplies.isEmpty(); }) &&
+                        completed.size() == ClipboardBlob::MaxPendingTransfers &&
+                        server.requests.size() == index + ClipboardBlob::MaxPendingTransfers,
+                        "concurrent clipboard completions respect the four-request cap", err);
+        }
+        {
             const QSslConfiguration previous = QSslConfiguration::defaultConfiguration();
             auto trusted = previous;
             trusted.setCaCertificates({ server.certificate });
@@ -372,14 +393,20 @@ public:
             wrongHost.serverCertificate = QSslCertificate(fixture("other.pem"));
             ClipboardSync sync(wrongHost);
             sync.start();
+#ifndef LITE_NATIVE_CLIPBOARD_HTTP
             int sslErrors = 0, encrypted = 0;
             QObject::connect(sync.nam(), &QNetworkAccessManager::sslErrors, [&] { ++sslErrors; });
             QObject::connect(sync.nam(), &QNetworkAccessManager::encrypted, [&] { ++encrypted; });
+#endif
             const int count = server.requests.size();
             cb->setText(QString(60000, 'z'));
             ok &= check(waitFor([&] { return sync.m_BlobReplies.isEmpty(); }),
                         "wrong paired certificate rejected", err);
-            ok &= check(sslErrors == 0 && encrypted == 1 && server.requests.size() == count,
+#ifndef LITE_NATIVE_CLIPBOARD_HTTP
+            ok &= check(sslErrors == 0 && encrypted == 1,
+                        "Qt transport reaches the normally trusted TLS callback", err);
+#endif
+            ok &= check(server.requests.size() == count,
                         "trusted but unpaired certificate receives no HTTP clipboard body", err);
             QSslConfiguration::setDefaultConfiguration(previous);
         }

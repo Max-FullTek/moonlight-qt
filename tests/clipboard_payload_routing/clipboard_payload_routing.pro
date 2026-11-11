@@ -24,3 +24,4 @@ HEADERS += \
 SOURCES += regression.cpp ../../app/streaming/clipboardipc.cpp
 HEADERS += ../../app/streaming/clipboardipc.h
 RESOURCES += fixtures.qrc
+lite-native-http: include(../../clipboard-helper/native-http.pri)

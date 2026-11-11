@@ -20,8 +20,10 @@ class QImage;
 class QMimeData;
 class QNetworkAccessManager;
 class QNetworkReply;
+class QtClipboardTransfer;
 class QSslError;
 class QTimer;
+class QUrl;
 
 struct ClipboardSyncHostContext
 {
@@ -181,8 +183,13 @@ private:
     static bool decodeImage(const QByteArray& bytes, QImage& image, const char* format = nullptr);
     void rememberClipboard(const QByteArray& text, const QImage& image);
     void beginClipboardChange(quint32 token = 0);
-    void readBlobReply(QNetworkReply* reply, qint64 limit,
-                       const std::function<void(const QByteArray&, const QString&)>& onFetched);
+    using BlobCallback = std::function<void(const QByteArray&)>;
+    void requestBlob(const QUrl& url, const QByteArray& payload, const QString& mime,
+                     qint64 limit, BlobCallback onFetched);
+#ifndef LITE_NATIVE_CLIPBOARD_HTTP
+    void readBlobReply(QNetworkReply* reply, qint64 limit, BlobCallback onFetched);
+    QNetworkAccessManager* nam();
+#endif
 
     bool encodeImageAsPng(const QImage& image,
                           QByteArray& outPng,
@@ -203,15 +210,13 @@ private:
                                  QByteArray& outPng,
                                  QString* outSourceDescription) const;
 
-    // Out-of-band blob helpers. Both run on the GUI thread; the
-    // QNetworkAccessManager event-loop callbacks land back on the GUI thread.
+    // Out-of-band blob callbacks run on the helper's GUI thread.
     bool buildBlobUrl(const QString& tail, QUrl& outUrl) const;
-    QNetworkAccessManager* nam();
     void uploadAndSendRef(const QByteArray& payload, const QString& mime, quint32 token = 0);
     void fetchRefAndApply(const QString& id, const QString& mime, qint64 advertisedSize);
     void fetchBlob(const QString& id,
                    qint64 advertisedSize,
-                   const std::function<void(const QByteArray&, const QString&)>& onFetched);
+                   BlobCallback onFetched);
     void applyInboundText(const QByteArray& payload);
     void applyInboundPng(const QByteArray& payload);
 
@@ -223,7 +228,9 @@ private:
     void applyCompound(const QByteArray& text, const QByteArray& png);
 
     ClipboardSyncHostContext m_HostContext;
+#ifndef LITE_NATIVE_CLIPBOARD_HTTP
     QNetworkAccessManager* m_Nam = nullptr;
+#endif
 
     bool m_Active = false;
     bool m_HaveClipboardSnapshot = false;
@@ -235,7 +242,11 @@ private:
     QByteArray m_LastOutboundRef;
     QElapsedTimer m_Clock;
     QQueue<QPair<quint32, qint64>> m_RetiredTokens;
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+    QSet<QtClipboardTransfer*> m_BlobReplies;
+#else
     QSet<QNetworkReply*> m_BlobReplies;
+#endif
     QHash<quint32, BurstState> m_PendingBursts;
     quint32 m_NextToken = 1;
 

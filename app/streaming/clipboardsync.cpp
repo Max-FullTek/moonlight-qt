@@ -1,6 +1,10 @@
 #include "clipboardsync.h"
 #include "clipboardlogging.h"
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+#include "qtclipboardtransfer.h"
+#else
 #include "backend/pairedcertificate.h"
+#endif
 
 #include <QBuffer>
 #include <QClipboard>
@@ -11,9 +15,11 @@
 #include <QJsonObject>
 #include <QMetaObject>
 #include <QMimeData>
+#ifndef LITE_NATIVE_CLIPBOARD_HTTP
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#endif
 #include <QRegularExpression>
 #include <QRandomGenerator>
 #include <QSslConfiguration>
@@ -156,9 +162,11 @@ void ClipboardSync::setHostContext(const ClipboardSyncHostContext& hostContext)
         m_HostContext.clientPrivateKey == hostContext.clientPrivateKey) {
         return;
     }
+#ifndef LITE_NATIVE_CLIPBOARD_HTTP
     // Pooled TLS connections must not survive a change of paired identity.
     delete m_Nam;
     m_Nam = nullptr;
+#endif
     m_HostContext = hostContext;
 }
 
@@ -379,8 +387,7 @@ void ClipboardSync::onIncomingFrame(QByteArray frame)
         // Unsupported MIME types were rejected before starting this change.
         const uint8_t flavorKind = (mime == QStringLiteral("image/png")) ? KIND_PNG : KIND_TEXT;
         fetchBlob(id, size,
-                  [this, token, flavorKind](const QByteArray& bytes, const QString& fetchedMime) {
-                      Q_UNUSED(fetchedMime);
+                  [this, token, flavorKind](const QByteArray& bytes) {
                       burstFlavorResolved(token, flavorKind, bytes);
                   });
         return;
@@ -946,15 +953,19 @@ void ClipboardSync::beginClipboardChange(quint32 token)
     m_OutgoingToken = 0;
     m_LastOutboundRef.clear();
     const auto replies = m_BlobReplies.values();
-    for (QNetworkReply* reply : replies) {
-        reply->abort();
-    }
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+    m_BlobReplies.clear();
+    for (auto* reply : replies) reply->cancel();
+#else
+    for (auto* reply : replies) reply->abort();
+#endif
     const auto tokens = m_PendingBursts.keys();
     for (quint32 oldToken : tokens) {
         removeBurst(oldToken);
     }
 }
 
+#ifndef LITE_NATIVE_CLIPBOARD_HTTP
 QNetworkAccessManager* ClipboardSync::nam()
 {
     if (m_Nam == nullptr) {
@@ -974,6 +985,8 @@ QNetworkAccessManager* ClipboardSync::nam()
     return m_Nam;
 }
 
+#endif
+
 bool ClipboardSync::buildBlobUrl(const QString& tail, QUrl& outUrl) const
 {
     if (m_HostContext.address.isEmpty() ||
@@ -989,9 +1002,9 @@ bool ClipboardSync::buildBlobUrl(const QString& tail, QUrl& outUrl) const
     return outUrl.isValid();
 }
 
+#ifndef LITE_NATIVE_CLIPBOARD_HTTP
 void ClipboardSync::readBlobReply(
-    QNetworkReply* reply, qint64 limit,
-    const std::function<void(const QByteArray&, const QString&)>& onFetched)
+    QNetworkReply* reply, qint64 limit, BlobCallback onFetched)
 {
     m_BlobReplies.insert(reply);
     const quint64 revision = m_Revision;
@@ -1042,8 +1055,60 @@ void ClipboardSync::readBlobReply(
                 }
                 return;
             }
-            onFetched(*bytes, reply->header(QNetworkRequest::ContentTypeHeader).toString());
+            onFetched(*bytes);
         });
+}
+
+#endif
+
+void ClipboardSync::requestBlob(const QUrl& url, const QByteArray& payload, const QString& mime,
+                                qint64 limit, BlobCallback onFetched)
+{
+    const bool upload = !mime.isEmpty();
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+    NativeHttp::Request request;
+    request.url = url.toEncoded().toStdString();
+    const auto pin = m_HostContext.serverCertificate.toDer();
+    request.pinnedCertificateDer.assign(pin.begin(), pin.end());
+    request.clientCertificatePem = m_HostContext.clientCertificate.toPem().toStdString();
+    request.clientPrivateKeyPem = m_HostContext.clientPrivateKey.toPem().toStdString();
+    request.timeoutMs = ClipboardBlob::TimeoutMs;
+    request.maxResponseBytes = static_cast<size_t>(limit);
+    request.limitDeclaredLength = true;
+    if (upload) {
+        request.method = NativeHttp::Method::Post;
+        request.contentType = "application/octet-stream";
+        request.clipboardMime = mime == QStringLiteral("image/png") ? NativeHttp::ClipboardMime::Png :
+                                                                       NativeHttp::ClipboardMime::Text;
+        request.body = payload.toStdString();
+    }
+    const quint64 revision = m_Revision;
+    auto* transfer = new QtClipboardTransfer(std::move(request),
+        [this, revision, upload, onFetched = std::move(onFetched)](QtClipboardTransfer* completed, NativeHttp::Response response) {
+            m_BlobReplies.remove(completed);
+            if (!m_Active || revision != m_Revision) return;
+            if (response.error != NativeHttp::Error::None || !response.certificateVerified ||
+                response.httpStatus < 200 || response.httpStatus >= 300) {
+                ClipboardLog::warn("ClipboardSync: blob transfer failed or exceeded its limits");
+                if (upload) m_HaveClipboardSnapshot = false;
+                return;
+            }
+            onFetched(QByteArray::fromStdString(response.body));
+        }, this);
+    m_BlobReplies.insert(transfer);
+#else
+    QNetworkRequest req(url);
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    QSslConfiguration sslConfig(QSslConfiguration::defaultConfiguration());
+    sslConfig.setLocalCertificate(m_HostContext.clientCertificate);
+    sslConfig.setPrivateKey(m_HostContext.clientPrivateKey);
+    req.setSslConfiguration(sslConfig);
+    if (upload) {
+        req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/octet-stream"));
+        req.setRawHeader("X-Clipboard-Mime", mime.toUtf8());
+    }
+    readBlobReply(upload ? nam()->post(req, payload) : nam()->get(req), limit, std::move(onFetched));
+#endif
 }
 
 void ClipboardSync::uploadAndSendRef(const QByteArray& payload, const QString& mime, quint32 token)
@@ -1054,19 +1119,8 @@ void ClipboardSync::uploadAndSendRef(const QByteArray& payload, const QString& m
         m_HaveClipboardSnapshot = false;
         return;
     }
-    QNetworkRequest req(url);
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                     QNetworkRequest::ManualRedirectPolicy);
-    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/octet-stream"));
-    req.setRawHeader("X-Clipboard-Mime", mime.toUtf8());
-    QSslConfiguration sslConfig(QSslConfiguration::defaultConfiguration());
-    sslConfig.setLocalCertificate(m_HostContext.clientCertificate);
-    sslConfig.setPrivateKey(m_HostContext.clientPrivateKey);
-    req.setSslConfiguration(sslConfig);
-
-    readBlobReply(nam()->post(req, payload), ClipboardBlob::MaxUploadReplyBytes,
-                  [this, mime, token, payloadSize = payload.size()](const QByteArray& response,
-                                                                    const QString&) {
+    requestBlob(url, payload, mime, ClipboardBlob::MaxUploadReplyBytes,
+                [this, mime, token, payloadSize = payload.size()](const QByteArray& response) {
                       const QJsonDocument doc = QJsonDocument::fromJson(response);
                       const QString id = doc.object().value(QStringLiteral("id")).toString();
                       if (!QRegularExpression(QStringLiteral("^[A-Za-z0-9_-]{1,128}$"))
@@ -1089,8 +1143,7 @@ void ClipboardSync::uploadAndSendRef(const QByteArray& payload, const QString& m
 
 void ClipboardSync::fetchRefAndApply(const QString& id, const QString& mime, qint64 advertisedSize)
 {
-    fetchBlob(id, advertisedSize, [this, mime](const QByteArray& bytes, const QString& fetchedMime) {
-        Q_UNUSED(fetchedMime);
+    fetchBlob(id, advertisedSize, [this, mime](const QByteArray& bytes) {
         // Trust the REF descriptor's mime over Content-Type.
         if (mime == QStringLiteral("image/png")) {
             applyInboundPng(bytes);
@@ -1105,7 +1158,7 @@ void ClipboardSync::fetchRefAndApply(const QString& id, const QString& mime, qin
 
 void ClipboardSync::fetchBlob(const QString& id,
                               qint64 advertisedSize,
-                              const std::function<void(const QByteArray&, const QString&)>& onFetched)
+                              BlobCallback onFetched)
 {
     QUrl url;
     if (!m_Active || m_BlobReplies.size() >= ClipboardBlob::MaxPendingTransfers ||
@@ -1113,20 +1166,13 @@ void ClipboardSync::fetchBlob(const QString& id,
         !buildBlobUrl(QStringLiteral("/blob/") + id, url)) {
         return;
     }
-    QNetworkRequest req(url);
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                     QNetworkRequest::ManualRedirectPolicy);
-    QSslConfiguration sslConfig(QSslConfiguration::defaultConfiguration());
-    sslConfig.setLocalCertificate(m_HostContext.clientCertificate);
-    sslConfig.setPrivateKey(m_HostContext.clientPrivateKey);
-    req.setSslConfiguration(sslConfig);
-    readBlobReply(nam()->get(req), ClipboardBlob::downloadLimit(advertisedSize),
-                  [advertisedSize, onFetched](const QByteArray& bytes, const QString& mime) {
+    requestBlob(url, {}, {}, ClipboardBlob::downloadLimit(advertisedSize),
+                [advertisedSize, onFetched = std::move(onFetched)](const QByteArray& bytes) {
                       if (advertisedSize > 0 && bytes.size() != advertisedSize) {
                           ClipboardLog::warn("ClipboardSync: blob size mismatch");
                           return;
                       }
-                      onFetched(bytes, mime);
+                      onFetched(bytes);
                   });
 }
 
