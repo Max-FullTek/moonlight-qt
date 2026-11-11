@@ -307,7 +307,7 @@ private:
     NvComputer* m_Computer;
     NvApp m_App;
     QString m_LaunchDisplayName;
-    QString m_ClientDisplayName;
+    std::wstring m_ClientDisplayName;
     std::optional<bool> m_LaunchUseVdd;
     SDL_Window* m_Window;
     IVideoDecoder* m_VideoDecoder;

@@ -19,6 +19,25 @@ std::string utf8(const std::wstring& text)
 }
 }
 
+std::wstring WindowsDisplayBrightness::displayDeviceName(int sdlDisplayIndex)
+{
+    SDL_Rect bounds{};
+    if (sdlDisplayIndex < 0 || SDL_GetDisplayBounds(sdlDisplayIndex, &bounds) != 0) {
+        return {};
+    }
+
+    // SDL's friendly name isn't the GDI device identifier used by DisplayConfig.
+    // Require matching bounds to avoid publishing brightness for a different monitor.
+    const RECT rect{bounds.x, bounds.y, bounds.x + bounds.w, bounds.y + bounds.h};
+    const HMONITOR monitor = MonitorFromRect(&rect, MONITOR_DEFAULTTONULL);
+    MONITORINFOEXW info{};
+    info.cbSize = sizeof(info);
+    if (!monitor || !GetMonitorInfoW(monitor, &info) || !EqualRect(&rect, &info.rcMonitor)) {
+        return {};
+    }
+    return info.szDevice;
+}
+
 float WindowsDisplayBrightness::querySdrWhiteNits(const std::wstring& displayName, bool logFailures)
 {
     if (displayName.empty()) {

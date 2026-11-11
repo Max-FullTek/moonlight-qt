@@ -1050,7 +1050,7 @@ bool Session::initialize(QQuickWindow* qtWindow)
     // Capture this on the Qt thread. The launch request is assembled later on
     // a worker thread, where reading QWindow/QScreen state would be unsafe.
     if (m_QtWindow != nullptr && m_QtWindow->screen() != nullptr) {
-        m_ClientDisplayName = m_QtWindow->screen()->name();
+        m_ClientDisplayName = m_QtWindow->screen()->name().toStdWString();
     }
 #endif
 
@@ -1111,8 +1111,7 @@ bool Session::initialize(QQuickWindow* qtWindow)
 
 #ifdef Q_OS_WIN32
     if (m_GpuiClientDisplay>=0) {
-        QScreen* screen=qtScreenForSdlDisplay(m_GpuiClientDisplay);
-        if (screen) m_ClientDisplayName=screen->name();
+        m_ClientDisplayName = WindowsDisplayBrightness::displayDeviceName(m_GpuiClientDisplay);
     }
 #endif
     // Stop text input. SDL enables it by default
@@ -3421,7 +3420,7 @@ bool Session::startConnectionAsync()
     float detectedMaxAverageBrightness = 0, sdrWhiteBrightness = 0;
 #ifdef Q_OS_WIN32
     if (m_StreamConfig.hdrMode != 0) {
-        WindowsDisplayBrightness::queryHdrBrightness(m_ClientDisplayName.toStdWString(),
+        WindowsDisplayBrightness::queryHdrBrightness(m_ClientDisplayName,
                                   detectedMaxBrightness,
                                   detectedMinBrightness,
                                   detectedMaxAverageBrightness,
@@ -4194,16 +4193,13 @@ void Session::exec()
         lastSdrWhiteCheckTicks = now;
 
         const int displayIndex = SDL_GetWindowDisplayIndex(m_Window);
-        QScreen* clientScreen = qtScreenForSdlDisplay(
-            displayIndex, SdlDisplayMatchPolicy::ExactOnly);
-        if (clientScreen == nullptr || clientScreen->name().isEmpty()) {
-            return;
+        std::wstring displayName;
+        if (m_GpuiClientDisplay >= 0) {
+            displayName = WindowsDisplayBrightness::displayDeviceName(displayIndex);
+        } else if (QScreen* clientScreen = qtScreenForSdlDisplay(displayIndex, SdlDisplayMatchPolicy::ExactOnly)) {
+            displayName = clientScreen->name().toStdWString();
         }
-
-        // SDL exposes a friendly monitor name on Windows, while DisplayConfig
-        // source paths use the GDI device name (for example, \\.\DISPLAY1).
-        // QScreen::name() is the latter, so resolve the SDL display first.
-        const float nits = WindowsDisplayBrightness::querySdrWhiteNits(clientScreen->name().toStdWString(), false);
+        const float nits = WindowsDisplayBrightness::querySdrWhiteNits(displayName, false);
         if (nits < 50.0f || qAbs(nits - m_LastClientSdrWhiteNits) < 0.5f) {
             return;
         }
