@@ -24,6 +24,10 @@
 #include <thread>
 #include <utility>
 
+#ifdef Q_OS_WIN32
+#include <windows.h>
+#endif
+
 namespace {
 bool writeProtocol(QJsonObject event) {
     static std::mutex outputMutex;
@@ -178,6 +182,52 @@ bool applySettings(const QJsonObject& value, StreamingPreferences* prefs) {
 }
 }
 
+#ifdef Q_OS_WIN32
+struct GpuiCoreBridge::InputWakeWindow {
+    static constexpr wchar_t ClassName[] = L"MoonlightLiteCoreInputWake";
+    static constexpr UINT WakeMessage = WM_APP;
+    HWND window = nullptr;
+
+    explicit InputWakeWindow(GpuiCoreBridge* bridge)
+    {
+        const HINSTANCE instance = GetModuleHandleW(nullptr);
+        WNDCLASSW windowClass{};
+        windowClass.lpfnWndProc = handleMessage;
+        windowClass.hInstance = instance;
+        windowClass.lpszClassName = ClassName;
+        if (RegisterClassW(&windowClass) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+            return;
+        }
+        window = CreateWindowExW(0, ClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE,
+                                 nullptr, instance, bridge);
+    }
+
+    ~InputWakeWindow()
+    {
+        if (window != nullptr) {
+            DestroyWindow(window);
+        }
+    }
+
+    static LRESULT CALLBACK handleMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        if (message == WM_NCCREATE) {
+            const auto* creation = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+            SetWindowLongPtrW(window, GWLP_USERDATA,
+                              reinterpret_cast<LONG_PTR>(creation->lpCreateParams));
+        }
+        else if (message == WakeMessage) {
+            auto* bridge = reinterpret_cast<GpuiCoreBridge*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+            if (bridge != nullptr) {
+                bridge->drainInput();
+            }
+            return 0;
+        }
+        return DefWindowProcW(window, message, wParam, lParam);
+    }
+};
+#endif
+
 GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent) {
     auto* prefs = StreamingPreferences::get();
     prefs->enableMdns = false;
@@ -217,6 +267,8 @@ GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent) {
     });
 }
 
+GpuiCoreBridge::~GpuiCoreBridge() = default;
+
 void GpuiCoreBridge::send(QJsonObject event) {
     if (!writeProtocol(event)) {
         SessionApiRpc::broker().close();
@@ -237,7 +289,13 @@ void GpuiCoreBridge::enqueueInput(Input input)
             return;
         }
     }
+#ifdef Q_OS_WIN32
+    if (!PostMessageW(m_InputWakeWindow->window, InputWakeWindow::WakeMessage, 0, 0)) {
+        QMetaObject::invokeMethod(this, &GpuiCoreBridge::drainInput, Qt::QueuedConnection);
+    }
+#else
     QMetaObject::invokeMethod(this, &GpuiCoreBridge::drainInput, Qt::QueuedConnection);
+#endif
     Session::wakeForCoreCommands();
 }
 
@@ -273,6 +331,14 @@ void GpuiCoreBridge::drainInput()
 }
 
 void GpuiCoreBridge::start() {
+#ifdef Q_OS_WIN32
+    m_InputWakeWindow = std::make_unique<InputWakeWindow>(this);
+    if (m_InputWakeWindow->window == nullptr) {
+        fail("core_input_wake", tr("Unable to initialize the worker command dispatcher."));
+        shutdown();
+        return;
+    }
+#endif
     if (m_RustMonitor) SessionApiRpc::broker().install([](uint64_t id,const std::string& payload) {
         const auto request=QJsonDocument::fromJson(QByteArray::fromStdString(payload)).object();
         return writeProtocol({{"event","session_api"},{"request_id",double(id)},

@@ -5,6 +5,7 @@
 #include <QPointer>
 #include <QHash>
 #include <deque>
+#include <memory>
 #include <mutex>
 
 class ComputerManager;
@@ -18,13 +19,14 @@ class Session;
 // (typed Rust poll results), quit_rust/quit_complete (Rust cancel/verification).
 // session_api events carry typed C++ control requests; session_api_result is
 // completed directly on the pipe reader without a Qt/main-thread dependency.
-// Other commands are drained on the worker owner thread by SDL or the idle
-// Qt loop. stdout is reserved for protocol events; diagnostics stay on stderr.
+// SDL or a Windows message wakes the owner thread to drain other commands.
+// stdout is reserved for protocol events; diagnostics stay on stderr.
 class GpuiCoreBridge : public QObject
 {
     Q_OBJECT
 public:
     explicit GpuiCoreBridge(QObject* parent = nullptr);
+    ~GpuiCoreBridge() override;
     void start();
 private:
     enum class InputKind { Command, Oversized, EndOfInput };
@@ -58,4 +60,8 @@ private:
     std::mutex m_InputMutex;
     std::deque<Input> m_Input;
     bool m_DrainingInput = false; // Owner thread only.
+#ifdef Q_OS_WIN32
+    struct InputWakeWindow;
+    std::unique_ptr<InputWakeWindow> m_InputWakeWindow;
+#endif
 };
