@@ -15,28 +15,12 @@
 #include <QSettings>
 #include <QRunnable>
 #include <QTimer>
-#include <QMutex>
-#include <QWaitCondition>
 #include <QSet>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 
 class ComputerManager;
-
-class DelayedFlushThread : public QThread
-{
-    Q_OBJECT
-
-public:
-    DelayedFlushThread(ComputerManager* cm)
-        : m_ComputerManager(cm)
-    {
-        setObjectName("CM Delayed Flush Thread");
-    }
-
-    void run();
-
-private:
-    ComputerManager* m_ComputerManager;
-};
 
 class MdnsPendingComputer : public QObject
 {
@@ -215,7 +199,6 @@ class ComputerManager : public QObject
     friend class DeferredHostDeletionTask;
     friend class PendingAddTask;
     friend class PendingPairingTask;
-    friend class DelayedFlushThread;
 
 public:
     explicit ComputerManager(StreamingPreferences* prefs, bool externalPolling = false);
@@ -265,6 +248,8 @@ private slots:
 private:
     void saveHosts();
 
+    void runDelayedFlush();
+
     void saveHost(NvComputer* computer);
 
     QHostAddress getBestGlobalAddressV6(QVector<QHostAddress>& addresses);
@@ -283,8 +268,9 @@ private:
     QMdnsEngine::Browser* m_MdnsBrowser;
     QVector<MdnsPendingComputer*> m_PendingResolution;
     CompatFetcher m_CompatFetcher;
-    DelayedFlushThread* m_DelayedFlushThread;
-    QMutex m_DelayedFlushMutex; // Lock ordering: Must never be acquired while holding NvComputer lock
-    QWaitCondition m_DelayedFlushCondition;
+    std::thread m_DelayedFlushThread;
+    std::mutex m_DelayedFlushMutex; // Lock ordering: Must never be acquired while holding NvComputer lock
+    std::condition_variable m_DelayedFlushCondition;
     bool m_NeedsDelayedFlush;
+    bool m_DelayedFlushStopping = false; // Protected by m_DelayedFlushMutex.
 };

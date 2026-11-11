@@ -190,8 +190,7 @@ ComputerManager::ComputerManager(StreamingPreferences* prefs, bool externalPolli
     settings.endArray();
 
     // Start the delayed flush thread to handle saveHosts() calls
-    m_DelayedFlushThread = new DelayedFlushThread(this);
-    m_DelayedFlushThread->start();
+    m_DelayedFlushThread = std::thread(&ComputerManager::runDelayedFlush, this);
 
     // To quit in a timely manner, we must block additional requests
     // after we receive the aboutToQuit() signal. This is necessary
@@ -207,12 +206,14 @@ ComputerManager::~ComputerManager()
     // to avoid deadlocking with a flush that needs the lock in read mode.
     {
         // Wake the delayed flush thread
-        m_DelayedFlushThread->requestInterruption();
-        m_DelayedFlushCondition.wakeOne();
+        {
+            std::lock_guard lock(m_DelayedFlushMutex);
+            m_DelayedFlushStopping = true;
+        }
+        m_DelayedFlushCondition.notify_one();
 
         // Wait for it to terminate (and finish any pending flush)
-        m_DelayedFlushThread->wait();
-        delete m_DelayedFlushThread;
+        m_DelayedFlushThread.join();
 
         // Delayed flushes should have completed by now
         Q_ASSERT(!m_NeedsDelayedFlush);
@@ -247,33 +248,32 @@ ComputerManager::~ComputerManager()
     }
 }
 
-void DelayedFlushThread::run() {
+void ComputerManager::runDelayedFlush() {
     for (;;) {
         // Wait for a delayed flush request or an interruption
         {
-            QMutexLocker locker(&m_ComputerManager->m_DelayedFlushMutex);
-
-            while (!QThread::currentThread()->isInterruptionRequested() && !m_ComputerManager->m_NeedsDelayedFlush) {
-                m_ComputerManager->m_DelayedFlushCondition.wait(&m_ComputerManager->m_DelayedFlushMutex);
-            }
+            std::unique_lock locker(m_DelayedFlushMutex);
+            m_DelayedFlushCondition.wait(locker, [this] {
+                return m_DelayedFlushStopping || m_NeedsDelayedFlush;
+            });
 
             // Bail without flushing if we woke up for an interruption alone.
             // If we have both an interruption and a flush request, do the flush.
-            if (!m_ComputerManager->m_NeedsDelayedFlush) {
-                Q_ASSERT(QThread::currentThread()->isInterruptionRequested());
+            if (!m_NeedsDelayedFlush) {
+                Q_ASSERT(m_DelayedFlushStopping);
                 break;
             }
 
             // Reset the delayed flush flag to ensure any racing saveHosts() call will set it again
-            m_ComputerManager->m_NeedsDelayedFlush = false;
+            m_NeedsDelayedFlush = false;
 
             // Update the last serialized hosts map under the delayed flush mutex
-            m_ComputerManager->m_LastSerializedHosts.clear();
-            for (const NvComputer* computer : std::as_const(m_ComputerManager->m_KnownHosts)) {
+            m_LastSerializedHosts.clear();
+            for (const NvComputer* computer : std::as_const(m_KnownHosts)) {
                 // Copy the current state of the NvComputer to allow us to check later if we need
                 // to serialize it again when attribute updates occur.
                 QReadLocker computerLock(&computer->lock);
-                m_ComputerManager->m_LastSerializedHosts[computer->uuid] = *computer;
+                m_LastSerializedHosts[computer->uuid] = *computer;
             }
         }
 
@@ -284,9 +284,9 @@ void DelayedFlushThread::run() {
             // First, write to the backup location
             settings.beginWriteArray(SER_HOSTS_BACKUP);
             {
-                QReadLocker lock(&m_ComputerManager->m_Lock);
+                QReadLocker lock(&m_Lock);
                 int i = 0;
-                for (const NvComputer* computer : std::as_const(m_ComputerManager->m_KnownHosts)) {
+                for (const NvComputer* computer : std::as_const(m_KnownHosts)) {
                     settings.setArrayIndex(i++);
                     computer->serialize(settings, false);
                 }
@@ -297,9 +297,9 @@ void DelayedFlushThread::run() {
             settings.remove(SER_HOSTS);
             settings.beginWriteArray(SER_HOSTS);
             {
-                QReadLocker lock(&m_ComputerManager->m_Lock);
+                QReadLocker lock(&m_Lock);
                 int i = 0;
-                for (const NvComputer* computer : std::as_const(m_ComputerManager->m_KnownHosts)) {
+                for (const NvComputer* computer : std::as_const(m_KnownHosts)) {
                     settings.setArrayIndex(i++);
                     computer->serialize(settings, true);
                 }
@@ -314,13 +314,13 @@ void DelayedFlushThread::run() {
 
 void ComputerManager::saveHosts()
 {
-    Q_ASSERT(m_DelayedFlushThread != nullptr && m_DelayedFlushThread->isRunning());
+    Q_ASSERT(m_DelayedFlushThread.joinable());
 
     // Punt to a worker thread because QSettings on macOS can take ages (> 500 ms)
     // to persist our host list to disk (especially when a host has a bunch of apps).
-    QMutexLocker locker(&m_DelayedFlushMutex);
+    std::lock_guard locker(m_DelayedFlushMutex);
     m_NeedsDelayedFlush = true;
-    m_DelayedFlushCondition.wakeOne();
+    m_DelayedFlushCondition.notify_one();
 }
 
 QHostAddress ComputerManager::getBestGlobalAddressV6(QVector<QHostAddress> &addresses)
@@ -464,7 +464,7 @@ void ComputerManager::handleMdnsServiceResolved(MdnsPendingComputer* computer,
 void ComputerManager::saveHost(NvComputer *computer)
 {
     // If no serializable properties changed, don't bother saving hosts
-    QMutexLocker lock(&m_DelayedFlushMutex);
+    std::unique_lock lock(m_DelayedFlushMutex);
     QReadLocker computerLock(&computer->lock);
     if (!m_LastSerializedHosts.value(computer->uuid).isEqualSerialized(*computer)) {
         // Queue a request for a delayed flush to QSettings outside of the lock
