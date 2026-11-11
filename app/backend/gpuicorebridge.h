@@ -4,6 +4,8 @@
 #include <QJsonObject>
 #include <QPointer>
 #include <QHash>
+#include <deque>
+#include <mutex>
 
 class ComputerManager;
 class NvComputer;
@@ -16,8 +18,8 @@ class Session;
 // (typed Rust poll results), quit_rust/quit_complete (Rust cancel/verification).
 // session_api events carry typed C++ control requests; session_api_result is
 // completed directly on the pipe reader without a Qt/main-thread dependency.
-// Other host/session commands dispatch on Qt's main thread. No QML engine is
-// created. stdout is reserved for protocol events; diagnostics stay on stderr.
+// Other commands are drained on the worker owner thread by SDL or the idle
+// Qt loop. stdout is reserved for protocol events; diagnostics stay on stderr.
 class GpuiCoreBridge : public QObject
 {
     Q_OBJECT
@@ -25,6 +27,13 @@ public:
     explicit GpuiCoreBridge(QObject* parent = nullptr);
     void start();
 private:
+    enum class InputKind { Command, Oversized, EndOfInput };
+    struct Input {
+        InputKind kind;
+        QByteArray line;
+    };
+    void enqueueInput(Input input);
+    void drainInput();
     void command(const QByteArray& line);
     void send(QJsonObject event);
     void fail(const QString& code, const QString& message);
@@ -46,4 +55,7 @@ private:
     int m_RustQuitRequest = 0;
     bool m_ShuttingDown = false;
     bool m_AddPending = false;
+    std::mutex m_InputMutex;
+    std::deque<Input> m_Input;
+    bool m_DrainingInput = false; // Owner thread only.
 };

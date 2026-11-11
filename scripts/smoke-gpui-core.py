@@ -77,7 +77,7 @@ def check(executable, profile, eof=False, seeded=False):
                 assert hosts == []
                 send('{"command":"list"}')
                 assert event("hosts")["hosts"] == []
-                for request, code in [
+                invalid_requests = [
                     ('[]', 'invalid_json'),
                     ('{"command":"unsupported"}', 'unknown_command'),
                     ('{"command":"controls","action":"open"}', 'controls_unavailable'),
@@ -98,8 +98,11 @@ def check(executable, profile, eof=False, seeded=False):
                     ('{"command":"pair_name","host":"missing","request_id":1,"name":"test"}', 'stale_pairing'),
                     ('{"command":"pair_complete","host":"missing","request_id":1,"state":0,"certificate":"invalid","error":""}', 'stale_pairing'),
                     ('x' * (64 * 1024 + 1), 'request_too_large'),
-                ]:
+                ]
+                # Submit a burst before reading replies to verify FIFO dispatch.
+                for request, _ in invalid_requests:
                     send(request)
+                for _, code in invalid_requests:
                     assert event("error")["code"] == code
                 send('{"command":"shutdown"}')
             process.stdin.close()

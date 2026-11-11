@@ -22,6 +22,7 @@
 #include <QTimer>
 #include <cstdio>
 #include <thread>
+#include <utility>
 
 namespace {
 bool writeProtocol(QJsonObject event) {
@@ -226,6 +227,51 @@ void GpuiCoreBridge::fail(const QString& code, const QString& message) {
     qWarning() << "GPUI operation failed:" << code;
     send({{"event", "error"}, {"code", code}, {"message", message}});
 }
+void GpuiCoreBridge::enqueueInput(Input input)
+{
+    {
+        std::lock_guard lock(m_InputMutex);
+        const bool needsWake = m_Input.empty();
+        m_Input.push_back(std::move(input));
+        if (!needsWake) {
+            return;
+        }
+    }
+    QMetaObject::invokeMethod(this, &GpuiCoreBridge::drainInput, Qt::QueuedConnection);
+    Session::wakeForCoreCommands();
+}
+
+void GpuiCoreBridge::drainInput()
+{
+    if (m_DrainingInput) {
+        return;
+    }
+    m_DrainingInput = true;
+    while (!m_ShuttingDown) {
+        Input input;
+        {
+            std::lock_guard lock(m_InputMutex);
+            if (m_Input.empty()) {
+                break;
+            }
+            input = std::move(m_Input.front());
+            m_Input.pop_front();
+        }
+        switch (input.kind) {
+        case InputKind::Command:
+            command(input.line);
+            break;
+        case InputKind::Oversized:
+            fail("request_too_large", tr("Request exceeds 64 KiB."));
+            break;
+        case InputKind::EndOfInput:
+            shutdown();
+            break;
+        }
+    }
+    m_DrainingInput = false;
+}
+
 void GpuiCoreBridge::start() {
     if (m_RustMonitor) SessionApiRpc::broker().install([](uint64_t id,const std::string& payload) {
         const auto request=QJsonDocument::fromJson(QByteArray::fromStdString(payload)).object();
@@ -258,21 +304,17 @@ void GpuiCoreBridge::start() {
                         SessionApiRpc::broker().complete(uint64_t(id),QJsonDocument(object["result"].toObject()).toJson(QJsonDocument::Compact).toStdString());
                     line.clear(); oversized=false; continue;
                 }
-                if (object["command"]=="shutdown") SessionApiRpc::broker().close();
-                const QByteArray request = oversized ? QByteArray() : line;
-                QMetaObject::invokeMethod(this, [this, request, oversized] {
-                    if (oversized) fail("request_too_large", tr("Request exceeds 64 KiB."));
-                    else command(request);
-                }, Qt::QueuedConnection);
-                Session::wakeForCoreCommands();
-                if (!oversized && QJsonDocument::fromJson(line).object().value("command").toString() == "shutdown") return;
+                const bool shutdownRequested = object["command"] == "shutdown";
+                if (shutdownRequested) SessionApiRpc::broker().close();
+                enqueueInput(oversized ? Input{InputKind::Oversized, {}} :
+                                         Input{InputKind::Command, std::move(line)});
+                if (shutdownRequested) return;
                 line.clear(); oversized = false;
             } else if (line.size() < MaxLine) line.append(char(ch));
             else oversized = true;
         }
         SessionApiRpc::broker().close();
-        QMetaObject::invokeMethod(this, [this] { shutdown(); }, Qt::QueuedConnection);
-        Session::wakeForCoreCommands();
+        enqueueInput({InputKind::EndOfInput, {}});
     }).detach();
 }
 void GpuiCoreBridge::publishHosts() {
@@ -690,6 +732,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
     auto* session = new Session(host, selected, preferences,advanced["host_display"].toString(),vdd==0?std::nullopt:std::optional<bool>(vdd==2));
     session->setClientDisplay(clientDisplay);
     session->setGpuiControlsClient(static_cast<unsigned long>(request["client_pid"].toInt()));
+    session->setCoreCommandHandler([this] { drainInput(); });
     m_Session = session;
     connect(session, &Session::hostQuitFailed, this, [this](const QString& message) {
         fail("host_quit_failed", message);

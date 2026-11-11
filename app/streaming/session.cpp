@@ -3140,6 +3140,10 @@ void Session::handleSdlUserEvent(const SDL_UserEvent& event)
         m_InputHandler->flushPendingTouchpadFrameEvent();
         break;
     case SDL_CODE_PROCESS_CORE_COMMANDS:
+        if (m_CoreCommandHandler) {
+            m_CoreCommandHandler();
+        }
+        // The transition worker still uses Qt for queued notifications.
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         break;
     case SDL_CODE_FLUSH_CURSOR_VISIBILITY:

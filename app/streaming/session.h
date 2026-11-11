@@ -6,11 +6,13 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <functional>
 #include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <utility>
 
 #include <Limelight.h>
 #include <opus_multistream.h>
@@ -57,6 +59,7 @@ public:
     void openGpuiControls();
     bool handleGpuiControl(const QString& action, int value = 0, int requestId = 0);
     static void wakeForCoreCommands();
+    void setCoreCommandHandler(std::function<void()> handler) { m_CoreCommandHandler = std::move(handler); }
     Q_INVOKABLE bool initialize(QQuickWindow* qtWindow);
     Q_INVOKABLE void start();
     Q_INVOKABLE void interrupt();
@@ -112,6 +115,7 @@ signals:
 private:
     int m_GpuiClientDisplay = -1;
     unsigned long m_GpuiControlsClient = 0;
+    std::function<void()> m_CoreCommandHandler;
     bool m_GpuiControlsActive = false;
     bool m_GpuiRestoreCapture = false;
     struct WaylandWindowSnapshot
