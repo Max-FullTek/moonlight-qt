@@ -10,6 +10,7 @@
 
 #include <QBuffer>
 #include <QClipboard>
+#include <QColorSpace>
 #include <QGuiApplication>
 #include <QImage>
 #include <QImageReader>
@@ -434,8 +435,8 @@ void ClipboardSync::applyInboundText(const QByteArray& payload)
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
     if (m_ClipboardListener) {
         const auto result = m_ClipboardListener->writeText(text.toStdWString());
-        if (result == WindowsClipboardListener::TextWriteResult::FileClipboard) return;
-        if (result == WindowsClipboardListener::TextWriteResult::Written) {
+        if (result == WindowsClipboardListener::WriteResult::FileClipboard) return;
+        if (result == WindowsClipboardListener::WriteResult::Written) {
             QString canonical = text;
             canonical.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
             rememberClipboard(canonical.toUtf8(), QImage());
@@ -465,6 +466,26 @@ void ClipboardSync::applyInboundPng(const QByteArray& payload)
         ClipboardLog::debug("ClipboardSync: preserving local file clipboard; inbound PNG ignored");
         return;
     }
+
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+    // The native write publishes complete buffers eagerly. Use the existing
+    // delayed-rendering path for large images and non-sRGB color profiles.
+    constexpr qint64 nativeWriteLimit = 32LL * 1024 * 1024;
+    const qint64 writeBytes = qint64(image.width()) * image.height() * 4 + 2LL * payload.size();
+    if (m_ClipboardListener && writeBytes <= nativeWriteLimit &&
+        (!image.colorSpace().isValid() || image.colorSpace() == QColorSpace(QColorSpace::SRgb))) {
+        const auto bitmap = image.convertToFormat(QImage::Format_ARGB32);
+        const auto result = m_ClipboardListener->writePng(
+            {payload.constData(), static_cast<size_t>(payload.size())}, bitmap.constBits(),
+            bitmap.width(), bitmap.height(), static_cast<size_t>(bitmap.bytesPerLine()),
+            bitmap.dotsPerMeterX(), bitmap.dotsPerMeterY());
+        if (result == WindowsClipboardListener::WriteResult::FileClipboard) return;
+        if (result == WindowsClipboardListener::WriteResult::Written) {
+            rememberClipboard(QByteArray(), image);
+            return;
+        }
+    }
+#endif
 
     rememberClipboard(QByteArray(), image);
 
