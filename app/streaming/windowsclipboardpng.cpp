@@ -31,28 +31,43 @@ uint32_t readBigEndian(const char* bytes)
     return value;
 }
 
-bool hasValidChunkChecksums(std::string_view png, WindowsClipboardPng::Metadata metadata)
+bool readChunks(std::string_view png, WindowsClipboardPng::Metadata metadata,
+                WindowsClipboardPng::Image& image)
 {
     constexpr std::string_view signature("\x89PNG\r\n\x1a\n", 8);
     if (png.substr(0, signature.size()) != signature) return false;
     png.remove_prefix(signature.size());
+    bool seenImageData = false;
 
     // The CRC covers the type and data, excluding the length and CRC fields.
     while (png.size() >= 12) {
         const size_t dataSize = readBigEndian(png.data());
         if (dataSize > png.size() - 12 || dataSize > 0x7fffffffu) return false;
         const auto type = png.substr(4, 4);
-        // The RGBA buffer does not carry color profiles, resolution, or other
-        // metadata. Let the caller use its metadata-aware decoder for paste.
-        if (metadata == WindowsClipboardPng::Metadata::PreserveForPaste &&
-            type != "IHDR" && type != "PLTE" && type != "tRNS" &&
-            type != "IDAT" && type != "IEND") return false;
         uint32_t crc = 0xffffffffu;
         for (const unsigned char byte : png.substr(4, 4 + dataSize)) {
             crc = PngCrcTable[(crc ^ byte) & 0xff] ^ (crc >> 8);
         }
         if ((crc ^ 0xffffffffu) != readBigEndian(png.data() + 8 + dataSize)) return false;
+        if (type == "IDAT") seenImageData = true;
         if (type == "IEND") return dataSize == 0;
+        if (metadata == WindowsClipboardPng::Metadata::PreserveForPaste) {
+            if (type == "pHYs") {
+                if (seenImageData || image.dotsPerMeterX || dataSize != 9 || png[16] != 1) return false;
+                const auto x = readBigEndian(png.data() + 8);
+                const auto y = readBigEndian(png.data() + 12);
+                constexpr auto maxResolution = static_cast<uint32_t>((std::numeric_limits<int>::max)());
+                if (!x || !y || x > maxResolution || y > maxResolution) return false;
+                image.dotsPerMeterX = static_cast<int>(x);
+                image.dotsPerMeterY = static_cast<int>(y);
+            } else if (type == "sRGB") {
+                if (seenImageData || image.srgb || dataSize != 1 ||
+                    static_cast<unsigned char>(png[8]) > 3) return false;
+                image.srgb = true;
+            } else if (type != "IHDR" && type != "PLTE" && type != "tRNS" && type != "IDAT") {
+                return false;
+            }
+        }
         png.remove_prefix(12 + dataSize);
     }
     return false;
@@ -63,11 +78,12 @@ WindowsClipboardPng::Image WindowsClipboardPng::decode(std::string_view png, siz
                                                        Metadata metadata)
 {
     constexpr auto maxBuffer = (std::numeric_limits<UINT>::max)();
+    Image image;
     // Keep pixel hashing consistent with the clipboard's existing decoder.
     // This path is verified for 8-bit RGBA and indexed PNGs.
     if (png.size() < 33 || png.size() > maxBuffer ||
         png.substr(12, 4) != "IHDR" || png[24] != 8 ||
-        (png[25] != 3 && png[25] != 6) || !hasValidChunkChecksums(png, metadata)) return {};
+        (png[25] != 3 && png[25] != 6) || !readChunks(png, metadata, image)) return {};
 
     const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE) return {};
@@ -90,7 +106,6 @@ WindowsClipboardPng::Image WindowsClipboardPng::decode(std::string_view png, siz
         FAILED(decoder->Initialize(stream.Get(), WICDecodeMetadataCacheOnDemand)) ||
         FAILED(decoder->GetFrame(0, frame.GetAddressOf()))) return {};
 
-    Image image;
     if (FAILED(frame->GetSize(&image.width, &image.height)) ||
         !image.width || !image.height) return {};
     const auto pixels = static_cast<size_t>(image.width) * image.height;

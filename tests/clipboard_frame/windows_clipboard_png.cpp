@@ -40,14 +40,23 @@ int main()
     oversizedChunk[8] = '\x7f';
     constexpr char resolutionChunk[] =
         "\x00\x00\x00\x09\x70\x48\x59\x73\x00\x00\x2e\x23\x00\x00\x2e\x23\x01\x78\xa5\x3f\x76";
-    std::string withResolution(rgba);
-    withResolution.insert(33, resolutionChunk, sizeof(resolutionChunk) - 1);
+    constexpr char srgbChunk[] = "\x00\x00\x00\x01\x73\x52\x47\x42\x00\xae\xce\x1c\xe9";
+    constexpr char textChunk[] =
+        "\x00\x00\x00\x0d\x74\x45\x58\x74\x54\x69\x74\x6c\x65\x00\x46\x69\x78\x74\x75\x72\x65\x80\x8f\x8b\x10";
+    std::string withMetadata(rgba);
+    withMetadata.insert(33, resolutionChunk, sizeof(resolutionChunk) - 1);
+    withMetadata.insert(33, srgbChunk, sizeof(srgbChunk) - 1);
+    std::string withText(withMetadata);
+    withText.insert(33, textChunk, sizeof(textChunk) - 1);
     using WindowsClipboardPng::Metadata;
+    const auto metadataImage = WindowsClipboardPng::decode(withMetadata, 2, Metadata::PreserveForPaste);
     if (!checkImage(rgba) || !checkImage(indexed) ||
         WindowsClipboardPng::decode(rgba, 2, Metadata::PreserveForPaste).rgba.empty() ||
         WindowsClipboardPng::decode(indexed, 2, Metadata::PreserveForPaste).rgba.empty() ||
-        !checkImage(withResolution) ||
-        !WindowsClipboardPng::decode(withResolution, 2, Metadata::PreserveForPaste).rgba.empty() ||
+        !checkImage(withMetadata) || metadataImage.rgba != WindowsClipboardPng::decode(rgba, 2).rgba ||
+        metadataImage.dotsPerMeterX != 11811 || metadataImage.dotsPerMeterY != 11811 || !metadataImage.srgb ||
+        !checkImage(withText) ||
+        !WindowsClipboardPng::decode(withText, 2, Metadata::PreserveForPaste).rgba.empty() ||
         !WindowsClipboardPng::decode(badIdatChecksum, 2).rgba.empty() ||
         !WindowsClipboardPng::decode(oversizedChunk, 2).rgba.empty() ||
         !WindowsClipboardPng::decode(rgba.substr(0, rgba.size() - 12), 2).rgba.empty() ||

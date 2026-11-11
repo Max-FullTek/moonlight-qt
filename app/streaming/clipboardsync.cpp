@@ -1039,13 +1039,18 @@ bool ClipboardSync::decodeInboundPng(const QByteArray& bytes, QImage& image) con
             WindowsClipboardPng::Metadata::PreserveForPaste);
         if (!decoded.rgba.empty()) {
             auto pixels = std::make_unique<std::vector<unsigned char>>(std::move(decoded.rgba));
-            image = QImage(static_cast<const uchar*>(pixels->data()),
+            image = QImage(pixels->data(),
                            static_cast<int>(decoded.width), static_cast<int>(decoded.height),
                            static_cast<qsizetype>(decoded.width) * 4, QImage::Format_RGBA8888,
                            [](void* buffer) { delete static_cast<std::vector<unsigned char>*>(buffer); },
                            pixels.get());
             if (!image.isNull()) {
                 pixels.release();
+                if (decoded.dotsPerMeterX) {
+                    image.setDotsPerMeterX(decoded.dotsPerMeterX);
+                    image.setDotsPerMeterY(decoded.dotsPerMeterY);
+                }
+                if (decoded.srgb) image.setColorSpace(QColorSpace(QColorSpace::SRgb));
                 return true;
             }
         }
