@@ -154,6 +154,12 @@ target_compile_options(lite-clipboard-listener PRIVATE /W3 /WX)
 target_include_directories(lite-clipboard-listener PUBLIC "${LITE_SOURCE_ROOT}/app")
 target_link_libraries(lite-clipboard-listener PUBLIC user32)
 
+add_library(lite-clipboard-png STATIC "${LITE_SOURCE_ROOT}/app/streaming/windowsclipboardpng.cpp")
+target_compile_features(lite-clipboard-png PUBLIC cxx_std_17)
+target_compile_options(lite-clipboard-png PRIVATE /W3 /WX)
+target_include_directories(lite-clipboard-png PUBLIC "${LITE_SOURCE_ROOT}/app")
+target_link_libraries(lite-clipboard-png PUBLIC windowscodecs ole32)
+
 add_library(lite-touch-input STATIC
     "${LITE_SOURCE_ROOT}/app/streaming/input/abstouch.cpp"
     "${LITE_SOURCE_ROOT}/app/streaming/input/reltouch.cpp"
@@ -322,6 +328,10 @@ target_compile_definitions(lite-decoder-factory PRIVATE HAVE_FFMPEG)
 target_link_libraries(lite-decoder-factory PUBLIC lite-ffmpeg-decoder)
 
 if(BUILD_TESTING)
+    add_executable(windows_clipboard_png "${LITE_SOURCE_ROOT}/tests/clipboard_frame/windows_clipboard_png.cpp")
+    target_link_libraries(windows_clipboard_png PRIVATE lite-clipboard-png)
+    add_test(NAME windows_clipboard_png COMMAND windows_clipboard_png)
+
     add_executable(clipboard_frame "${LITE_SOURCE_ROOT}/tests/clipboard_frame/main.cpp")
     target_compile_options(clipboard_frame PRIVATE /W3 /WX)
     target_link_libraries(clipboard_frame PRIVATE lite-clipboard-frame)
