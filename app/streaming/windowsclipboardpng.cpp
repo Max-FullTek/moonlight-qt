@@ -72,6 +72,13 @@ bool readChunks(std::string_view png, WindowsClipboardPng::Metadata metadata,
     }
     return false;
 }
+
+bool supportedPixelFormat(unsigned depth, unsigned color)
+{
+    // Keep 16-bit samples on the path that retains their original precision.
+    if (depth == 1 || depth == 2 || depth == 4) return color == 0 || color == 3;
+    return depth == 8 && (color == 0 || color == 2 || color == 3 || color == 4 || color == 6);
+}
 }
 
 WindowsClipboardPng::Image WindowsClipboardPng::decode(std::string_view png, size_t maxPixels,
@@ -79,11 +86,10 @@ WindowsClipboardPng::Image WindowsClipboardPng::decode(std::string_view png, siz
 {
     constexpr auto maxBuffer = (std::numeric_limits<UINT>::max)();
     Image image;
-    // Keep pixel hashing consistent with the clipboard's existing decoder.
-    // This path is verified for 8-bit RGBA and indexed PNGs.
     if (png.size() < 33 || png.size() > maxBuffer ||
-        png.substr(12, 4) != "IHDR" || png[24] != 8 ||
-        (png[25] != 3 && png[25] != 6) || !readChunks(png, metadata, image)) return {};
+        png.substr(12, 4) != "IHDR" ||
+        !supportedPixelFormat(static_cast<unsigned char>(png[24]), static_cast<unsigned char>(png[25])) ||
+        !readChunks(png, metadata, image)) return {};
 
     const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE) return {};
