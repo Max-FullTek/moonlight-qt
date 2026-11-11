@@ -166,6 +166,12 @@ target_compile_options(lite-worker-dispatch PRIVATE /W3 /WX)
 target_include_directories(lite-worker-dispatch PUBLIC "${LITE_SOURCE_ROOT}/app")
 target_link_libraries(lite-worker-dispatch PUBLIC user32)
 
+add_library(lite-bandwidth STATIC "${LITE_SOURCE_ROOT}/app/streaming/network/bandwidth.cpp")
+target_compile_features(lite-bandwidth PUBLIC cxx_std_17)
+target_compile_options(lite-bandwidth PRIVATE /W3 /WX)
+target_include_directories(lite-bandwidth PUBLIC "${LITE_SOURCE_ROOT}/app")
+target_link_libraries(lite-bandwidth PUBLIC user32 iphlpapi ws2_32)
+
 add_library(lite-touch-input STATIC
     "${LITE_SOURCE_ROOT}/app/streaming/input/abstouch.cpp"
     "${LITE_SOURCE_ROOT}/app/streaming/input/reltouch.cpp"
@@ -334,6 +340,14 @@ target_compile_definitions(lite-decoder-factory PRIVATE HAVE_FFMPEG)
 target_link_libraries(lite-decoder-factory PUBLIC lite-ffmpeg-decoder)
 
 if(BUILD_TESTING)
+    add_executable(windows_bandwidth "${LITE_SOURCE_ROOT}/tests/windows_bandwidth/main.cpp")
+    target_compile_definitions(windows_bandwidth PRIVATE SDL_MAIN_HANDLED)
+    target_link_libraries(windows_bandwidth PRIVATE lite-bandwidth lite-sdl2)
+    add_test(NAME windows_bandwidth COMMAND windows_bandwidth)
+    set_tests_properties(windows_bandwidth PROPERTIES TIMEOUT 10
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${LITE_DEPS_LIB}")
+    # Desktop/SDL message-pump verification is explicit: windows_bandwidth --sdl-pump.
+
     add_executable(worker_command_pipe "${LITE_SOURCE_ROOT}/tests/windows_worker_dispatch/pipe.cpp")
     target_compile_features(worker_command_pipe PRIVATE cxx_std_17)
     target_compile_options(worker_command_pipe PRIVATE /W3 /WX)

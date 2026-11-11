@@ -363,7 +363,6 @@ HEADERS += \
     streaming/video/decoder.h \
     streaming/video/videodecoderoptions.h \
     streaming/video/overlayrenderer.h \
-    streaming/network/bandwidth.h \
     streaming/streamutils.h \
     path.h \
     settings/mappingmanager.h \
@@ -393,6 +392,8 @@ HEADERS += \
 !config_SL:!macx: SOURCES += streaming/macpermissions_stub.cpp
 
 # 把红绿灯沉到我们自己那条 bar 的中线上，顺带让 AppKit 的标题栏拖动区覆盖整条 bar
+!win32:HEADERS += streaming/network/bandwidth.h
+
 macx {
     HEADERS += \
         gui/macwindowchrome.h \

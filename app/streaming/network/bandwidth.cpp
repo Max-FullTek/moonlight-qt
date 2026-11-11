@@ -1,5 +1,5 @@
 #include "bandwidth.h"
-#ifdef Q_OS_WIN
+#ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
@@ -33,15 +33,15 @@ BandwidthCalculator *BandwidthCalculator::instance()
 class SystemNetworkStats
 {
 public:
-    static bool getNetworkUsage(qint64 &bytesReceived, qint64 &bytesSent);
+    static bool getNetworkUsage(std::int64_t &bytesReceived, std::int64_t &bytesSent);
 
 private:
-#ifdef Q_OS_WIN
-    static bool getWindowsNetworkUsage(qint64 &bytesReceived, qint64 &bytesSent);
+#ifdef _WIN32
+    static bool getWindowsNetworkUsage(std::int64_t &bytesReceived, std::int64_t &bytesSent);
 #elif defined(Q_OS_LINUX)
-    static bool getLinuxNetworkUsage(qint64 &bytesReceived, qint64 &bytesSent);
+    static bool getLinuxNetworkUsage(std::int64_t &bytesReceived, std::int64_t &bytesSent);
 #elif defined(Q_OS_DARWIN)
-    static bool getMacOSNetworkUsage(qint64 &bytesReceived, qint64 &bytesSent);
+    static bool getMacOSNetworkUsage(std::int64_t &bytesReceived, std::int64_t &bytesSent);
 #endif
 };
 
@@ -50,8 +50,10 @@ BandwidthCalculator::BandwidthCalculator() : m_bytesReceived(0),
                                              m_currentBandwidthKbps(0),
                                              m_running(false)
 {
+#ifndef _WIN32
     connect(&m_updateTimer, &QTimer::timeout,
             this, &BandwidthCalculator::updateBandwidth);
+#endif
 }
 
 BandwidthCalculator::~BandwidthCalculator()
@@ -59,7 +61,7 @@ BandwidthCalculator::~BandwidthCalculator()
     stop();
 }
 
-void BandwidthCalculator::addBytes(qint64 bytes)
+void BandwidthCalculator::addBytes(std::int64_t bytes)
 {
     if (m_running)
     {
@@ -79,8 +81,22 @@ void BandwidthCalculator::start()
         m_bytesReceived = 0;
         m_lastBytesReceived = 0;
         m_currentBandwidthKbps = 0;
+#ifdef _WIN32
+        m_lastUpdate = std::chrono::steady_clock::now();
+        m_updateTimer = SetTimer(nullptr, 0, 1000,
+            [](HWND, UINT, UINT_PTR id, DWORD) {
+                // KillTimer does not remove a queued WM_TIMER. Ignore stale
+                // callbacks after stop, and keep all sampling on the owner.
+                auto* self = s_instance;
+                if (self && self->m_running && self->m_updateTimer == id) {
+                    self->updateBandwidth();
+                }
+            });
+        if (!m_updateTimer) return;
+#else
         m_elapsedTimer.start();
         m_updateTimer.start(1000); // 每秒更新一次
+#endif
         m_running = true;
     }
 }
@@ -89,15 +105,20 @@ void BandwidthCalculator::stop()
 {
     if (m_running)
     {
+#ifdef _WIN32
+        KillTimer(nullptr, m_updateTimer);
+        m_updateTimer = 0;
+#else
         m_updateTimer.stop();
+#endif
         m_running = false;
     }
 }
 
 void BandwidthCalculator::updateBandwidth()
 {
-    qint64 currentBytes = 0;
-    qint64 sentBytes = 0;
+    std::int64_t currentBytes = 0;
+    std::int64_t sentBytes = 0;
 
     // 从系统获取实际网络使用情况
     if (SystemNetworkStats::getNetworkUsage(currentBytes, sentBytes))
@@ -110,10 +131,16 @@ void BandwidthCalculator::updateBandwidth()
         currentBytes = m_bytesReceived.load();
     }
 
-    qint64 bytesTransferred = currentBytes - m_lastBytesReceived;
+    std::int64_t bytesTransferred = currentBytes - m_lastBytesReceived;
 
     // 计算带宽（bits per second）
-    qint64 elapsedMs = m_elapsedTimer.restart();
+#ifdef _WIN32
+    const auto now = std::chrono::steady_clock::now();
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastUpdate).count();
+    m_lastUpdate = now;
+#else
+    const auto elapsedMs = m_elapsedTimer.restart();
+#endif
     if (elapsedMs > 0)
     {
         // 转换为Kbps (bits per second / 1000)
@@ -124,9 +151,9 @@ void BandwidthCalculator::updateBandwidth()
 }
 
 // 系统网络统计实现
-bool SystemNetworkStats::getNetworkUsage(qint64 &bytesReceived, qint64 &bytesSent)
+bool SystemNetworkStats::getNetworkUsage(std::int64_t &bytesReceived, std::int64_t &bytesSent)
 {
-#ifdef Q_OS_WIN
+#ifdef _WIN32
     return getWindowsNetworkUsage(bytesReceived, bytesSent);
 #elif defined(Q_OS_LINUX)
     return getLinuxNetworkUsage(bytesReceived, bytesSent);
@@ -139,8 +166,8 @@ bool SystemNetworkStats::getNetworkUsage(qint64 &bytesReceived, qint64 &bytesSen
 #endif
 }
 
-#ifdef Q_OS_WIN
-bool SystemNetworkStats::getWindowsNetworkUsage(qint64 &bytesReceived, qint64 &bytesSent)
+#ifdef _WIN32
+bool SystemNetworkStats::getWindowsNetworkUsage(std::int64_t &bytesReceived, std::int64_t &bytesSent)
 {
     // 初始化计数器
     bytesReceived = 0;
@@ -183,7 +210,7 @@ bool SystemNetworkStats::getWindowsNetworkUsage(qint64 &bytesReceived, qint64 &b
     return true;
 }
 #elif defined(Q_OS_LINUX)
-bool SystemNetworkStats::getLinuxNetworkUsage(qint64 &bytesReceived, qint64 &bytesSent)
+bool SystemNetworkStats::getLinuxNetworkUsage(std::int64_t &bytesReceived, std::int64_t &bytesSent)
 {
     // Linux 实现：读取 /proc/net/dev 文件
     QFile file("/proc/net/dev");
@@ -217,7 +244,7 @@ bool SystemNetworkStats::getLinuxNetworkUsage(qint64 &bytesReceived, qint64 &byt
     return true;
 }
 #elif defined(Q_OS_DARWIN)
-bool SystemNetworkStats::getMacOSNetworkUsage(qint64 &bytesReceived, qint64 &bytesSent)
+bool SystemNetworkStats::getMacOSNetworkUsage(std::int64_t &bytesReceived, std::int64_t &bytesSent)
 {
     struct ifaddrs *ifaddrs;
     bytesReceived = 0;
