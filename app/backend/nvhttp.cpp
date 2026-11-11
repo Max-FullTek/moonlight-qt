@@ -3,7 +3,7 @@
 #include "sessionapirpc.h"
 #include <Limelight.h>
 
-#include <QHostInfo>
+#include "clienthostname.h"
 #include <QDebug>
 #include <QUuid>
 #include <QtNetwork/QNetworkReply>
@@ -27,7 +27,7 @@
 bool NvHTTP::usesRustSessionApi() { return SessionApiRpc::broker().enabled(); }
 QJsonObject NvHTTP::rustSessionCall(QJsonObject request,unsigned timeoutMs) {
     auto clientName=NvComputer::getPairname(m_Uuid);
-    if (clientName.isEmpty()) clientName=QHostInfo::localHostName();
+    if (clientName.isEmpty()) clientName=localClientHostname();
     const QJsonObject context{{"base_url",httpsPort() == 0 ? QString() : m_BaseUrlHttps.toString()},
         {"server_certificate",PairedCertificate::toOptionalPem(m_ServerCert)},
         {"client_certificate",QString::fromLatin1(IdentityManager::get()->getCertificate())},
@@ -777,7 +777,7 @@ NvHTTP::openConnection(QUrl baseUrl,
     url.setPath("/" + command);
 
     // Get clientname - prefer pairname if available, otherwise use local hostname
-    QString clientname = QHostInfo::localHostName().toUtf8();
+    QString clientname = localClientHostname().toUtf8();
     if (!m_Uuid.isEmpty()) {
         QString pairname = NvComputer::getPairname(m_Uuid);
         if (!pairname.isEmpty()) {

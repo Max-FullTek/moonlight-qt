@@ -24,7 +24,7 @@
 #include "network/bandwidth.h"
 #include "utils.h"
 #include <QCoreApplication>
-#include <QHostInfo>
+#include "backend/clienthostname.h"
 #include <future>
 
 #ifdef HAVE_FFMPEG
@@ -135,7 +135,7 @@ IFFmpegDecoderHost* decoderHost()
 #include <QtGlobal>
 #include <QMutexLocker>
 #include <QUuid>
-#include <QElapsedTimer>
+#include <chrono>
 #include <QUrl>
 
 #include <utility>
@@ -2726,7 +2726,7 @@ void Session::startRuntimeBitrateWorker()
     }
 
     // Build clientname the same way as openConnection() does for /launch
-    QString clientname = QHostInfo::localHostName();
+    QString clientname = localClientHostname();
     if (!uuid.isEmpty()) {
         QString pairname = NvComputer::getPairname(uuid);
         if (!pairname.isEmpty()) {
@@ -3783,9 +3783,9 @@ void Session::exec()
     // 必须在这儿做完：exec() 往下就进 SDL 事件循环了，那之后 Qt 的定时器和队列信号
     // 只在串流覆盖层可见时才会被 pump，QML 侧再也等不到机会。
     if (m_QtWindow != nullptr) {
-        QElapsedTimer veilTimer;
-        veilTimer.start();
-        while (veilTimer.elapsed() < k_StreamEnterVeilMs) {
+        const auto veilDeadline = std::chrono::steady_clock::now() +
+                                  std::chrono::milliseconds(k_StreamEnterVeilMs);
+        while (std::chrono::steady_clock::now() < veilDeadline) {
             QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
             SDL_Delay(4);
         }

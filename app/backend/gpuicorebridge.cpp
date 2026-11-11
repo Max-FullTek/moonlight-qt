@@ -11,7 +11,7 @@
 #include "settings/streamingpreferences.h"
 
 #include <QCoreApplication>
-#include <QHostInfo>
+#include "clienthostname.h"
 #include <QUuid>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -447,7 +447,7 @@ void GpuiCoreBridge::publishMonitorContexts() {
         }
         QReadLocker lock(&host->lock);
         auto clientName=NvComputer::getPairname(host->uuid);
-        if (clientName.isEmpty()) clientName=QHostInfo::localHostName();
+        if (clientName.isEmpty()) clientName=localClientHostname();
         const QJsonObject context{{"base_url",QString()},{"server_certificate",PairedCertificate::toOptionalPem(host->serverCert)},
             {"client_certificate",QString::fromLatin1(IdentityManager::get()->getCertificate())},
             {"client_key",QString::fromLatin1(IdentityManager::get()->getPrivateKey())},
@@ -667,7 +667,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         base.setHost(host->activeAddress.address());
         base.setPort(host->activeHttpsPort);
         auto clientName = NvComputer::getPairname(host->uuid);
-        if (clientName.isEmpty()) clientName = QHostInfo::localHostName();
+        if (clientName.isEmpty()) clientName = localClientHostname();
         // Temporary read-only profile adapter, only on inherited anonymous
         // stdout. Never log or persist it. Remove with Rust profile ownership.
         QUrl http=base; http.setScheme("http"); http.setPort(host->activeAddress.port());
@@ -777,7 +777,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
             https.setScheme("https"); https.setHost(host->activeAddress.address()); https.setPort(host->activeHttpsPort);
             http.setScheme("http"); http.setHost(host->activeAddress.address()); http.setPort(host->activeAddress.port());
             auto clientName=NvComputer::getPairname(host->uuid);
-            if (clientName.isEmpty()) clientName=QHostInfo::localHostName();
+            if (clientName.isEmpty()) clientName=localClientHostname();
             send({{"event","pair_context"},{"host",host->uuid},{"request_id",m_RustPairingRequest},
                 {"context",QJsonObject{{"http_url",http.toString()},{"generation",host->appVersion.section('.',0,0).toInt()},{"pin",pin},
                     {"host",QJsonObject{{"base_url",https.toString()},{"server_certificate",QString()},
