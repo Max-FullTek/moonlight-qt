@@ -1,4 +1,5 @@
 #include "streaming/audio/audiopipeline.h"
+#include "streaming/audio/audiostream.h"
 #include "SDL_compat.h"
 
 #include <algorithm>
@@ -155,5 +156,38 @@ int main()
     require(AudioPipeline::createRenderer(AudioPipeline::Backend::Sdl, config) == nullptr &&
             SDL_WasInit(SDL_INIT_AUDIO) == 0, "failed explicit backend releases audio subsystem");
     require(errors == 3, "only three expected backend errors");
-    std::puts("audio_pipeline=passed (real Opus, dummy audio, no host)");
+    config.sampleRate = 48000;
+    config.streams = 1;
+    config.coupledStreams = 1;
+    config.mapping[0] = 0;
+    config.mapping[1] = 1;
+    require(SDL_setenv("ML_AUDIO", "SDL", 1) == 0 &&
+            AudioPipeline::backendFromEnvironment() == AudioPipeline::Backend::Sdl,
+            "retain case-insensitive explicit backend");
+    require(SDL_setenv("ML_AUDIO", " sdl", 1) == 0 &&
+            AudioPipeline::backendFromEnvironment() == AudioPipeline::Backend::Unknown,
+            "do not silently trim unknown backend names");
+    {
+        AudioStream stream;
+        stream.initialize(config); // Unknown backend: retain deferred recovery.
+        require(SDL_WasInit(SDL_INIT_AUDIO) == 0, "initial audio failure releases subsystem");
+        require(SDL_setenv("ML_AUDIO", "sdl", 1) == 0, "restore supported backend");
+        for (int i = 0; i < 199; ++i) stream.decodeAndPlay(nullptr, 0);
+        require(SDL_WasInit(SDL_INIT_AUDIO) == 0, "do not retry before 200 samples");
+        stream.decodeAndPlay(nullptr, 0);
+        require(SDL_WasInit(SDL_INIT_AUDIO) != 0, "retry initializes native audio at sample 200");
+        stream.setMuted(true);
+        stream.decodeAndPlay(nullptr, 0);
+        stream.setMuted(false);
+        stream.cleanup();
+        stream.cleanup();
+        require(SDL_WasInit(SDL_INIT_AUDIO) == 0, "cleanup is safe when repeated");
+        stream.initialize(config);
+        stream.decodeAndPlay(nullptr, 0);
+    }
+    require(SDL_WasInit(SDL_INIT_AUDIO) == 0 && errors == 4,
+            "audio stream destruction releases playback; only expected errors");
+    require(AudioStream::capabilities() & CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION,
+            "retain variable-duration audio support");
+    std::puts("audio_pipeline=passed (real Opus, dummy audio, native lifecycle, no host)");
 }

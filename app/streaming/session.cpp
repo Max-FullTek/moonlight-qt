@@ -1,4 +1,5 @@
 #include "session.h"
+#include "video/decoderfactory.h"
 #include "path.h"
 #include "clipboardhelperclient.h"
 #include "settings/streamingpreferences.h"
@@ -70,6 +71,17 @@ public:
 SessionFFmpegDecoderHost s_FFmpegDecoderHost;
 }
 #endif
+
+namespace {
+IFFmpegDecoderHost* decoderHost()
+{
+#ifdef HAVE_FFMPEG
+    return &s_FFmpegDecoderHost;
+#else
+    return nullptr;
+#endif
+}
+}
 
 #ifdef Q_OS_DARWIN
 #include "streaming/video/macqteventpumpinputguard.h"
@@ -845,71 +857,15 @@ void Session::clSetAdaptiveTriggers(uint16_t controllerNumber, uint8_t eventFlag
 bool Session::chooseDecoder(StreamingPreferences::VideoDecoderSelection vds,
                             StreamingPreferences::RendererSelection renderer,
                             SDL_Window* window, int videoFormat, int width, int height,
-                            int frameRate, bool enableVsync, bool enableFramePacing, bool enableVideoEnhancement, bool ignoreAspectRatio, bool testOnly, IVideoDecoder*& chosenDecoder)
+                            int frameRate, bool enableVsync, bool enableFramePacing,
+                            bool enableVideoEnhancement, bool ignoreAspectRatio,
+                            bool testOnly, IVideoDecoder*& chosenDecoder)
 {
-    DECODER_PARAMETERS params;
-
-    // We should never have vsync enabled for test-mode.
-    // It introduces unnecessary delay for renderers that may
-    // block while waiting for a backbuffer swap.
-    SDL_assert(!enableVsync || !testOnly);
-
-    params.width = width;
-    params.height = height;
-    params.frameRate = frameRate;
-    params.videoFormat = videoFormat;
-    params.window = window;
-    params.enableVsync = enableVsync;
-    params.enableFramePacing = enableFramePacing;
-    // Preserve the saved preference while making the effective decoder state
-    // match the UI: video enhancement is unavailable with software decoding.
-    params.enableVideoEnhancement = enableVideoEnhancement &&
-                                    vds != StreamingPreferences::VDS_FORCE_SOFTWARE;
-    params.ignoreAspectRatio = ignoreAspectRatio;
-    params.testOnly = testOnly;
-    params.vds = static_cast<VideoDecoderOptions::Decoder>(vds);
-    params.renderer = static_cast<VideoDecoderOptions::Renderer>(renderer);
-
-    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "V-sync %s",
-                enableVsync ? "enabled" : "disabled");
-
-#ifdef HAVE_SLVIDEO
-    chosenDecoder = new SLVideoDecoder(testOnly);
-    if (chosenDecoder->initialize(&params)) {
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "SLVideo video decoder chosen");
-        return true;
-    }
-    else {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Unable to load SLVideo decoder");
-        delete chosenDecoder;
-        chosenDecoder = nullptr;
-    }
-#endif
-
-#ifdef HAVE_FFMPEG
-    chosenDecoder = new FFmpegVideoDecoder(testOnly, s_FFmpegDecoderHost);
-    if (chosenDecoder->initialize(&params)) {
-        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                    "FFmpeg-based video decoder chosen");
-        return true;
-    }
-    else {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Unable to load FFmpeg decoder");
-        delete chosenDecoder;
-        chosenDecoder = nullptr;
-    }
-#endif
-
-#if !defined(HAVE_FFMPEG) && !defined(HAVE_SLVIDEO)
-#error No video decoding libraries available!
-#endif
-
-    // If we reach this, we didn't initialize any decoders successfully
-    return false;
+    return VideoDecoderFactory::choose(decoderHost(),
+        static_cast<VideoDecoderOptions::Decoder>(vds),
+        static_cast<VideoDecoderOptions::Renderer>(renderer),
+        window, videoFormat, width, height, frameRate, enableVsync, enableFramePacing,
+        enableVideoEnhancement, ignoreAspectRatio, testOnly, chosenDecoder);
 }
 
 int Session::drSetup(int videoFormat, int width, int height, int frameRate, void *, int)
@@ -964,105 +920,10 @@ void Session::getDecoderInfo(SDL_Window* window,
                              bool& isHardwareAccelerated, bool& isFullScreenOnly,
                              bool& isHdrSupported, QSize& maxResolution)
 {
-    IVideoDecoder* decoder;
-
-    // Since AV1 support on the host side is in its infancy, let's not consider
-    // _only_ a working AV1 decoder to be acceptable and still show the warning
-    // dialog indicating lack of hardware decoding support.
-
-    // Try an HEVC Main10 decoder first to see if we have HDR support
-    if (chooseDecoder(StreamingPreferences::VDS_FORCE_HARDWARE,
-                      StreamingPreferences::RS_PROBE_ONLY,
-                      window, VIDEO_FORMAT_H265_MAIN10, 1920, 1080, 60,
-                      false, false, false, false, true, decoder)) {
-        isHardwareAccelerated = decoder->isHardwareAccelerated();
-        isFullScreenOnly = decoder->isAlwaysFullScreen();
-        isHdrSupported = decoder->isHdrSupported();
-        const auto resolution = decoder->getDecoderMaxResolution();
-        maxResolution = QSize(resolution.width, resolution.height);
-        delete decoder;
-
-        return;
-    }
-
-    // Try an AV1 Main10 decoder next to see if we have HDR support
-    if (chooseDecoder(StreamingPreferences::VDS_FORCE_HARDWARE,
-                      StreamingPreferences::RS_PROBE_ONLY,
-                      window, VIDEO_FORMAT_AV1_MAIN10, 1920, 1080, 60,
-                      false, false, false, false, true, decoder)) {
-        // If we've got a working AV1 Main 10-bit decoder, we'll enable the HDR checkbox
-        // but we will still continue probing to get other attributes for HEVC or H.264
-        // decoders. See the AV1 comment at the top of the function for more info.
-        isHdrSupported = decoder->isHdrSupported();
-        delete decoder;
-    }
-    else {
-        // If we found no hardware decoders with HDR, check for a renderer
-        // that supports HDR rendering with software decoded frames.
-        if (chooseDecoder(StreamingPreferences::VDS_FORCE_SOFTWARE,
-                          StreamingPreferences::RS_PROBE_ONLY,
-                          window, VIDEO_FORMAT_H265_MAIN10, 1920, 1080, 60,
-                          false, false, false, false, true, decoder) ||
-            chooseDecoder(StreamingPreferences::VDS_FORCE_SOFTWARE,
-                          StreamingPreferences::RS_PROBE_ONLY,
-                          window, VIDEO_FORMAT_AV1_MAIN10, 1920, 1080, 60,
-                          false, false, false, false, true, decoder)) {
-            isHdrSupported = decoder->isHdrSupported();
-            delete decoder;
-        }
-        else {
-            // We weren't compiled with an HDR-capable renderer or we don't
-            // have the required GPU driver support for any HDR renderers.
-            isHdrSupported = false;
-        }
-    }
-
-    // Try a regular hardware accelerated HEVC decoder now
-    if (chooseDecoder(StreamingPreferences::VDS_FORCE_HARDWARE,
-                      StreamingPreferences::RS_PROBE_ONLY,
-                      window, VIDEO_FORMAT_H265, 1920, 1080, 60,
-                      false, false, false, false, true, decoder)) {
-        isHardwareAccelerated = decoder->isHardwareAccelerated();
-        isFullScreenOnly = decoder->isAlwaysFullScreen();
-        const auto resolution = decoder->getDecoderMaxResolution();
-        maxResolution = QSize(resolution.width, resolution.height);
-        delete decoder;
-
-        return;
-    }
-
-#if 0 // See AV1 comment at the top of this function
-    if (chooseDecoder(StreamingPreferences::VDS_FORCE_HARDWARE,
-                      StreamingPreferences::RS_PROBE_ONLY,
-                      window, VIDEO_FORMAT_AV1_MAIN8, 1920, 1080, 60,
-                      false, false, false, false, true, decoder)) {
-        isHardwareAccelerated = decoder->isHardwareAccelerated();
-        isFullScreenOnly = decoder->isAlwaysFullScreen();
-        const auto resolution = decoder->getDecoderMaxResolution();
-        maxResolution = QSize(resolution.width, resolution.height);
-        delete decoder;
-
-        return;
-    }
-#endif
-
-    // If we still didn't find a hardware decoder, try H.264 now.
-    // This will fall back to software decoding, so it should always work.
-    if (chooseDecoder(StreamingPreferences::VDS_AUTO,
-                      StreamingPreferences::RS_PROBE_ONLY,
-                      window, VIDEO_FORMAT_H264, 1920, 1080, 60,
-                      false, false, false, false, true, decoder)) {
-        isHardwareAccelerated = decoder->isHardwareAccelerated();
-        isFullScreenOnly = decoder->isAlwaysFullScreen();
-        const auto resolution = decoder->getDecoderMaxResolution();
-        maxResolution = QSize(resolution.width, resolution.height);
-        delete decoder;
-
-        return;
-    }
-
-    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                 "Failed to find ANY working H.264 or HEVC decoder!");
+    VideoResolution resolution{maxResolution.width(), maxResolution.height()};
+    VideoDecoderFactory::getInfo(decoderHost(), window, isHardwareAccelerated,
+                                isFullScreenOnly, isHdrSupported, resolution);
+    maxResolution = QSize(resolution.width, resolution.height);
 }
 
 Session::DecoderAvailability
@@ -1070,20 +931,9 @@ Session::getDecoderAvailability(SDL_Window* window,
                                 StreamingPreferences::VideoDecoderSelection vds,
                                 int videoFormat, int width, int height, int frameRate)
 {
-    IVideoDecoder* decoder;
-
-    if (!chooseDecoder(vds,
-                       StreamingPreferences::RS_PROBE_ONLY,
-                       window, videoFormat, width, height, frameRate,
-                       false, false, false, false, true, decoder)) {
-        return DecoderAvailability::None;
-    }
-
-    bool hw = decoder->isHardwareAccelerated();
-
-    delete decoder;
-
-    return hw ? DecoderAvailability::Hardware : DecoderAvailability::Software;
+    return VideoDecoderFactory::getAvailability(decoderHost(), window,
+        static_cast<VideoDecoderOptions::Decoder>(vds),
+        videoFormat, width, height, frameRate);
 }
 
 bool Session::populateDecoderProperties(SDL_Window* window)
@@ -1148,15 +998,13 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences* prefere
                      !WMUtils::isRunningDesktopEnvironment()),
       m_Computer(computer), m_App(app), m_LaunchDisplayName(std::move(launchDisplayName)),
       m_LaunchUseVdd(launchUseVdd), m_Window(nullptr), m_VideoDecoder(nullptr),
-      m_DecoderLock(SDL_CreateMutex()), m_AudioMuted(false), m_QtWindow(nullptr),
+      m_DecoderLock(SDL_CreateMutex()), m_QtWindow(nullptr),
       m_WaylandStreamWindow(nullptr), m_WaylandOverlayShortcutPressed(false),
       m_UnexpectedTermination(true), // Failure prior to streaming is unexpected
       m_InputHandler(nullptr), m_MouseEmulationRefCount(0), m_FlushingWindowEventsRef(0),
       m_ShouldExit(false), m_ConnectionInterrupted(false), m_SuppressConnectionErrorDialog(false),
       m_HasReceivedVideo(false), m_LastTerminationErrorCode(0), m_AsyncConnectionSuccess(false),
-      m_LastClientSdrWhiteNits(0.0f), m_PortTestResults(0), m_OpusDecoder(nullptr),
-      m_AudioRenderer(nullptr), m_DualSenseHapticsRenderer(nullptr), m_AudioSampleCount(0),
-      m_DropAudioEndTime(0), m_OverlayManager(Path::readDataFile("ModeSeven.ttf").toStdString()),
+      m_LastClientSdrWhiteNits(0.0f), m_PortTestResults(0), m_DualSenseHapticsRenderer(nullptr), m_OverlayManager(Path::readDataFile("ModeSeven.ttf").toStdString()),
       m_MenuPanel(nullptr), m_DeferCaptureRestore(false),
       m_PendingMicToggle(false),
 #ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS
@@ -4493,7 +4341,7 @@ void Session::exec()
             case SDL_WINDOWEVENT_FOCUS_LOST:
                 m_WaylandOverlayShortcutPressed = false;
                 if (m_Preferences->muteOnFocusLoss) {
-                    m_AudioMuted = true;
+                    m_AudioStream.setMuted(true);
                 }
                 m_InputHandler->notifyFocusLost();
                 // Close overlay menu when main window loses focus
@@ -4503,7 +4351,7 @@ void Session::exec()
                 break;
             case SDL_WINDOWEVENT_FOCUS_GAINED:
                 if (m_Preferences->muteOnFocusLoss) {
-                    m_AudioMuted = false;
+                    m_AudioStream.setMuted(false);
                 }
                 m_InputHandler->notifyFocusGained();
                 if (m_GpuiControlsActive) handleGpuiControl(QStringLiteral("resume"));

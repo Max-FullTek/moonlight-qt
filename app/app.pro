@@ -284,6 +284,7 @@ SOURCES += \
     streaming/clipboardipc.cpp \
     streaming/audio/audio.cpp \
     streaming/audio/audiopipeline.cpp \
+    streaming/audio/audiostream.cpp \
     streaming/audio/dualsensehaptics.cpp \
     streaming/audio/renderers/sdlaud.cpp \
     streaming/network/bandwidth.cpp \
@@ -296,6 +297,7 @@ SOURCES += \
     gui/windowplacement.cpp \
     gui/windowsdisplaygeometry.cpp \
     gui/windowswindowchrome.cpp \
+    streaming/video/decoderfactory.cpp \
     streaming/video/overlaymanager.cpp \
     streaming/video/overlaymenupanel.cpp \
     streaming/video/overlaybuttonposition.cpp \
@@ -347,6 +349,7 @@ HEADERS += \
     streaming/clipboardipc.h \
     streaming/audio/renderers/renderer.h \
     streaming/audio/audiopipeline.h \
+    streaming/audio/audiostream.h \
     streaming/audio/dualsensehaptics.h \
     streaming/audio/dualsensehapticscalibration.h \
     streaming/audio/dualsensehapticsrouting.h \
@@ -366,6 +369,7 @@ HEADERS += \
     gui/windowplacement.h \
     gui/windowsdisplaygeometry.h \
     gui/windowswindowchrome.h \
+    streaming/video/decoderfactory.h \
     streaming/video/overlaymanager.h \
     streaming/video/overlaymenupanel.h \
     streaming/video/overlaybuttonposition.h \

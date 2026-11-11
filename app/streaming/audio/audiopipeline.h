@@ -6,8 +6,11 @@
 namespace AudioPipeline {
 enum class Backend { Automatic, Sdl, SlAudio, Unknown };
 
-// Caller owns the returned renderer. Backend parsing remains at the caller so
-// the existing environment-variable interpretation is preserved.
+// ML_AUDIO accepts empty (automatic), sdl, and the built-in slaudio backend,
+// case-insensitively; unknown names retain the renderer-failure path.
+Backend backendFromEnvironment();
+
+// Caller owns the returned renderer.
 IAudioRenderer* createRenderer(Backend backend, const OPUS_MULTISTREAM_CONFIGURATION& config);
 
 OpusMSDecoder* createDecoder(const OPUS_MULTISTREAM_CONFIGURATION& config, int* error);

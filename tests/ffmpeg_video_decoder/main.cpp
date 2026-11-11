@@ -1,4 +1,6 @@
 #include "streaming/video/ffmpeg.h"
+#include "streaming/video/decoderfactory.h"
+#include <memory>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -45,23 +47,23 @@ void probeDecoders(Host& host)
     require(window != nullptr, SDL_GetError());
     for (auto choice : {VideoDecoderOptions::Software, VideoDecoderOptions::Hardware}) {
         for (int format : {VIDEO_FORMAT_H264, VIDEO_FORMAT_H265, VIDEO_FORMAT_AV1_MAIN8}) {
-            FFmpegVideoDecoder decoder(true, host);
-            DECODER_PARAMETERS parameters = {};
-            parameters.window = window;
-            parameters.width = 640;
-            parameters.height = 360;
-            parameters.frameRate = 60;
-            parameters.videoFormat = format;
-            parameters.vds = choice;
-            parameters.renderer = VideoDecoderOptions::Automatic;
-            parameters.testOnly = true;
-            require(decoder.initialize(&parameters), "production sample decode and renderer mapping");
-            require(decoder.isHardwareAccelerated() == (choice == VideoDecoderOptions::Hardware),
+            IVideoDecoder* selected = nullptr;
+            require(VideoDecoderFactory::choose(&host, choice, VideoDecoderOptions::Automatic,
+                        window, format, 640, 360, 60,
+                        false, false, false, false, true, selected),
+                    "production factory sample decode and renderer mapping");
+            std::unique_ptr<IVideoDecoder> decoder(selected);
+            require(decoder->isHardwareAccelerated() == (choice == VideoDecoderOptions::Hardware),
                     "retain explicit software/hardware selection");
-            require(decoder.getDecoderCapabilities() & CAPABILITY_PULL_RENDERER, "retain pull renderer capability");
-            std::printf("production decoder probe passed: format=%x hardware=%d\n", format, decoder.isHardwareAccelerated());
+            require(decoder->getDecoderCapabilities() & CAPABILITY_PULL_RENDERER, "retain pull renderer capability");
+            std::printf("production decoder probe passed: format=%x hardware=%d\n", format, decoder->isHardwareAccelerated());
         }
     }
+    bool hardware = false, fullscreenOnly = false, hdr = false;
+    VideoResolution maximum{-1, -1};
+    VideoDecoderFactory::getInfo(&host, window, hardware, fullscreenOnly, hdr, maximum);
+    require(hardware && maximum.width >= 0 && maximum.height >= 0,
+            "production capability probing finds available hardware and reports resolution limits");
     require(host.shaderRequests > 0, "production hardware path obtains shaders from native owner");
     SDL_DestroyWindow(window);
 }

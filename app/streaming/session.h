@@ -21,7 +21,8 @@
 #include "supportedvideoformats.h"
 #include "input/input.h"
 #include "video/decoder.h"
-#include "audio/renderers/renderer.h"
+#include "video/decoderfactory.h"
+#include "audio/audiostream.h"
 #include "video/overlaymanager.h"
 #include "video/overlaymenupanel.h"
 #include "video/overlaymenubutton.h"
@@ -156,10 +157,6 @@ private:
 
     bool populateDecoderProperties(SDL_Window* window);
 
-    IAudioRenderer* createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATION opusConfig);
-
-    bool initializeAudioRenderer();
-
     bool testAudio(int audioConfiguration);
 
     int getAudioRendererCapabilities(int audioConfiguration);
@@ -208,11 +205,7 @@ private:
 
     void updateOptimalWindowDisplayMode();
 
-    enum class DecoderAvailability {
-        None,
-        Software,
-        Hardware
-    };
+    using DecoderAvailability = VideoDecoderFactory::Availability;
 
     static
     DecoderAvailability getDecoderAvailability(SDL_Window* window,
@@ -314,7 +307,6 @@ private:
     IVideoDecoder* m_VideoDecoder;
     SDL_mutex* m_DecoderLock;
     bool m_AudioDisabled;
-    bool m_AudioMuted;
     Uint32 m_FullScreenFlag;
     QQuickWindow* m_QtWindow;
     QWindow* m_WaylandStreamWindow;
@@ -343,13 +335,8 @@ private:
     int m_ActiveVideoHeight;
     int m_ActiveVideoFrameRate;
 
-    OpusMSDecoder* m_OpusDecoder;
-    IAudioRenderer* m_AudioRenderer;
+    AudioStream m_AudioStream;
     DualSenseHapticsRenderer* m_DualSenseHapticsRenderer;
-    OPUS_MULTISTREAM_CONFIGURATION m_ActiveAudioConfig;
-    OPUS_MULTISTREAM_CONFIGURATION m_OriginalAudioConfig;
-    int m_AudioSampleCount;
-    Uint32 m_DropAudioEndTime;
 
     Overlay::OverlayManager m_OverlayManager;
     bool m_WasCapturedBeforeMenu;  // 菜单打开前鼠标是否处于捕获状态

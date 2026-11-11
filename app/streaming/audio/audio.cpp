@@ -1,187 +1,28 @@
 #include "../session.h"
-#include "renderers/renderer.h"
+#include "audiostream.h"
 
-#include "audiopipeline.h"
-
-IAudioRenderer* Session::createAudioRenderer(const POPUS_MULTISTREAM_CONFIGURATION opusConfig)
+int Session::getAudioRendererCapabilities(int /* audioConfiguration */)
 {
-    // Preserve the Qt path's exact environment parsing during migration.
-    const QString mlAudio = qgetenv("ML_AUDIO").toLower();
-    auto backend = AudioPipeline::Backend::Unknown;
-    if (mlAudio.isEmpty()) {
-        backend = AudioPipeline::Backend::Automatic;
-    }
-    else if (mlAudio == "sdl") {
-        backend = AudioPipeline::Backend::Sdl;
-    }
-#ifdef HAVE_SLAUDIO
-    else if (mlAudio == "slaudio") {
-        backend = AudioPipeline::Backend::SlAudio;
-    }
-#endif
-    return AudioPipeline::createRenderer(backend, *opusConfig);
-}
-
-bool Session::initializeAudioRenderer()
-{
-    int error;
-
-    SDL_assert(m_OriginalAudioConfig.channelCount > 0);
-    SDL_assert(m_AudioRenderer == nullptr);
-    SDL_assert(m_OpusDecoder == nullptr);
-
-    m_AudioRenderer = createAudioRenderer(&m_OriginalAudioConfig);
-
-    // We may be unable to create an audio renderer right now
-    if (m_AudioRenderer == nullptr) {
-        return false;
-    }
-
-    // Allow the chosen renderer to remap Opus channels as needed to ensure proper output
-    m_ActiveAudioConfig = m_OriginalAudioConfig;
-    m_AudioRenderer->remapChannels(&m_ActiveAudioConfig);
-
-    // Create the Opus decoder with the renderer's preferred channel mapping
-    m_OpusDecoder = AudioPipeline::createDecoder(m_ActiveAudioConfig, &error);
-    if (m_OpusDecoder == nullptr) {
-        delete m_AudioRenderer;
-        m_AudioRenderer = nullptr;
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Failed to create decoder: %d",
-                     error);
-        return false;
-    }
-
-    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                "Audio stream has %d channels",
-                m_ActiveAudioConfig.channelCount);
-    return true;
-}
-
-int Session::getAudioRendererCapabilities(int audioConfiguration)
-{
-    int caps = 0;
-
-    Q_UNUSED(audioConfiguration);
-
-    // All audio renderers support arbitrary audio duration
-    caps |= CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION;
-
-#ifdef STEAM_LINK
-    // Steam Link devices have slow Opus decoders
-    caps |= CAPABILITY_SLOW_OPUS_DECODER;
-#endif
-
-    return caps;
+    return AudioStream::capabilities();
 }
 
 bool Session::testAudio(int audioConfiguration)
 {
-    // Build a fake OPUS_MULTISTREAM_CONFIGURATION to give
-    // the renderer the channel count and sample rate.
-    OPUS_MULTISTREAM_CONFIGURATION opusConfig = {};
-    opusConfig.sampleRate = 48000;
-    opusConfig.samplesPerFrame = 240;
-    opusConfig.channelCount = CHANNEL_COUNT_FROM_AUDIO_CONFIGURATION(audioConfiguration);
-
-    IAudioRenderer* audioRenderer = createAudioRenderer(&opusConfig);
-    if (audioRenderer == nullptr) {
-        return false;
-    }
-
-    delete audioRenderer;
-
-    return true;
+    return AudioStream::testConfiguration(audioConfiguration);
 }
 
-int Session::arInit(int /* audioConfiguration */,
-                    const POPUS_MULTISTREAM_CONFIGURATION opusConfig,
-                    void* /* arContext */, int /* arFlags */)
+int Session::arInit(int, const POPUS_MULTISTREAM_CONFIGURATION opusConfig, void*, int)
 {
-    SDL_memcpy(&s_ActiveSession->m_OriginalAudioConfig, opusConfig, sizeof(*opusConfig));
-    s_ActiveSession->initializeAudioRenderer();
+    s_ActiveSession->m_AudioStream.initialize(*opusConfig);
     return 0;
 }
 
 void Session::arCleanup()
 {
-    delete s_ActiveSession->m_AudioRenderer;
-    s_ActiveSession->m_AudioRenderer = nullptr;
-
-    opus_multistream_decoder_destroy(s_ActiveSession->m_OpusDecoder);
-    s_ActiveSession->m_OpusDecoder = nullptr;
+    s_ActiveSession->m_AudioStream.cleanup();
 }
 
 void Session::arDecodeAndPlaySample(char* sampleData, int sampleLength)
 {
-#ifndef STEAM_LINK
-    // Set this thread to high priority to reduce the chance of missing
-    // our sample delivery time. On Steam Link, this causes starvation
-    // of other threads due to severely restricted CPU time available,
-    // so we will skip it on that platform.
-    if (s_ActiveSession->m_AudioSampleCount == 0) {
-        if (SDL_SetThreadPriority(SDL_THREAD_PRIORITY_HIGH) < 0) {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "Unable to set audio thread to high priority: %s",
-                        SDL_GetError());
-        }
-    }
-#endif
-
-    // See if we need to drop this sample
-    if (s_ActiveSession->m_DropAudioEndTime != 0) {
-        if (SDL_TICKS_PASSED(SDL_GetTicks(), s_ActiveSession->m_DropAudioEndTime)) {
-            // Avoid calling SDL_GetTicks() now
-            s_ActiveSession->m_DropAudioEndTime = 0;
-
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Audio drop window has ended");
-        }
-        else {
-            // We're still in the drop window
-            return;
-        }
-    }
-
-    s_ActiveSession->m_AudioSampleCount++;
-
-    // If audio is muted, don't decode or play the audio
-    if (s_ActiveSession->m_AudioMuted) {
-        return;
-    }
-
-    if (s_ActiveSession->m_AudioRenderer != nullptr) {
-        if (!AudioPipeline::decodeAndSubmit(s_ActiveSession->m_OpusDecoder,
-                                            *s_ActiveSession->m_AudioRenderer,
-                                            s_ActiveSession->m_ActiveAudioConfig,
-                                            sampleData, sampleLength)) {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "Reinitializing audio renderer after failure");
-
-            opus_multistream_decoder_destroy(s_ActiveSession->m_OpusDecoder);
-            s_ActiveSession->m_OpusDecoder = nullptr;
-
-            delete s_ActiveSession->m_AudioRenderer;
-            s_ActiveSession->m_AudioRenderer = nullptr;
-        }
-    }
-
-    // Only try to recreate the audio renderer every 200 samples (1 second)
-    // to avoid thrashing if the audio device is unavailable. It is
-    // safe to reinitialize here because we can't be torn down while
-    // the audio decoder/playback thread is still alive.
-    if (s_ActiveSession->m_AudioRenderer == nullptr && (s_ActiveSession->m_AudioSampleCount % 200) == 0) {
-        // Since we're doing this inline and audio initialization takes time, we need
-        // to drop samples to account for the time we've spent blocking audio rendering
-        // so we return to real-time playback and don't accumulate latency.
-        Uint32 audioReinitStartTime = SDL_GetTicks();
-        if (s_ActiveSession->initializeAudioRenderer()) {
-            Uint32 audioReinitStopTime = SDL_GetTicks();
-
-            s_ActiveSession->m_DropAudioEndTime = audioReinitStopTime + (audioReinitStopTime - audioReinitStartTime);
-            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Audio reinitialization took %d ms - starting drop window",
-                        audioReinitStopTime - audioReinitStartTime);
-        }
-    }
+    s_ActiveSession->m_AudioStream.decodeAndPlay(sampleData, sampleLength);
 }

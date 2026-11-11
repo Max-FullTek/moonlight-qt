@@ -18,6 +18,17 @@ IAudioRenderer* tryRenderer(const OPUS_MULTISTREAM_CONFIGURATION& config)
 }
 }
 
+Backend backendFromEnvironment()
+{
+    const char* name = SDL_getenv("ML_AUDIO");
+    if (name == nullptr || *name == '\0') return Backend::Automatic;
+    if (SDL_strcasecmp(name, "sdl") == 0) return Backend::Sdl;
+#ifdef HAVE_SLAUDIO
+    if (SDL_strcasecmp(name, "slaudio") == 0) return Backend::SlAudio;
+#endif
+    return Backend::Unknown;
+}
+
 IAudioRenderer* createRenderer(Backend backend, const OPUS_MULTISTREAM_CONFIGURATION& config)
 {
     switch (backend) {

@@ -119,7 +119,8 @@ set_target_properties(lite-opus PROPERTIES
     IMPORTED_LOCATION "${LITE_DEPS_LIB}/opus.dll"
     INTERFACE_INCLUDE_DIRECTORIES "${LITE_DEPS_ROOT}/include")
 add_library(lite-audio-pipeline STATIC
-    "${LITE_SOURCE_ROOT}/app/streaming/audio/audiopipeline.cpp")
+    "${LITE_SOURCE_ROOT}/app/streaming/audio/audiopipeline.cpp"
+    "${LITE_SOURCE_ROOT}/app/streaming/audio/audiostream.cpp")
 target_compile_features(lite-audio-pipeline PUBLIC cxx_std_17)
 target_compile_options(lite-audio-pipeline PRIVATE /W3 /WX)
 target_link_libraries(lite-audio-pipeline PUBLIC lite-sdl-audio lite-opus)
@@ -293,6 +294,12 @@ set_source_files_properties("${LITE_SOURCE_ROOT}/app/streaming/video/ffmpeg.cpp"
 target_link_libraries(lite-ffmpeg-decoder PUBLIC lite-d3d11-video lite-dxva2-video
     lite-vulkan-video lite-generic-hwaccel lite-sdl-video lite-video-buffer lite-video-pacer lite-overlay-text)
 
+add_library(lite-decoder-factory STATIC "${LITE_SOURCE_ROOT}/app/streaming/video/decoderfactory.cpp")
+target_compile_features(lite-decoder-factory PUBLIC cxx_std_17)
+target_compile_options(lite-decoder-factory PRIVATE /W3 /WX)
+target_compile_definitions(lite-decoder-factory PRIVATE HAVE_FFMPEG)
+target_link_libraries(lite-decoder-factory PUBLIC lite-ffmpeg-decoder)
+
 if(BUILD_TESTING)
     add_executable(reachability_policy "${LITE_SOURCE_ROOT}/tests/reachability_policy/main.cpp")
     target_compile_features(reachability_policy PRIVATE cxx_std_17)
@@ -378,7 +385,7 @@ if(BUILD_TESTING)
     add_executable(ffmpeg_video_decoder "${LITE_SOURCE_ROOT}/tests/ffmpeg_video_decoder/main.cpp")
     target_compile_definitions(ffmpeg_video_decoder PRIVATE SDL_MAIN_HANDLED)
     target_compile_options(ffmpeg_video_decoder PRIVATE /W3 /WX)
-    target_link_libraries(ffmpeg_video_decoder PRIVATE lite-ffmpeg-decoder)
+    target_link_libraries(ffmpeg_video_decoder PRIVATE lite-decoder-factory)
     add_test(NAME ffmpeg_video_decoder COMMAND ffmpeg_video_decoder "${LITE_SOURCE_ROOT}")
     set_tests_properties(ffmpeg_video_decoder PROPERTIES TIMEOUT 15)
 
