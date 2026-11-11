@@ -795,7 +795,24 @@ void ClipboardSync::onLocalClipboardChanged()
     // multiple extraction paths rather than only mime->imageData().
     QByteArray png;
     QString imageSourceDescription;
-    const bool havePng = extractClipboardPng(mime, png, &imageSourceDescription);
+    QImage image;
+    bool havePng = false;
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+    if (m_ClipboardListener) {
+        const auto bytes = m_ClipboardListener->readPng(MAX_BLOB_BYTES);
+        if (!bytes.empty()) {
+            const auto candidate = QByteArray::fromRawData(bytes.data(), static_cast<qsizetype>(bytes.size()));
+            QImage decoded;
+            if (decodeImage(candidate, decoded, "PNG")) {
+                image = std::move(decoded);
+                png = QByteArray(candidate.constData(), candidate.size());
+                imageSourceDescription = QStringLiteral("Win32 PNG");
+                havePng = true;
+            }
+        }
+    }
+#endif
+    if (!havePng) havePng = extractClipboardPng(mime, png, &imageSourceDescription);
     if (hasFileReferences(mime) && !havePng) {
         beginClipboardChange();
         m_HaveClipboardSnapshot = false;
@@ -826,8 +843,7 @@ void ClipboardSync::onLocalClipboardChanged()
         utf8 = text.toUtf8();
     }
 
-    QImage image;
-    if (havePng && !decodeImage(png, image, "PNG")) {
+    if (havePng && image.isNull() && !decodeImage(png, image, "PNG")) {
         return;
     }
     const uint64_t textHash = hashBytes(utf8);

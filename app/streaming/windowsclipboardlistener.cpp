@@ -8,6 +8,12 @@ struct ClipboardLock {
     ~ClipboardLock() { CloseClipboard(); }
 };
 
+struct GlobalMemoryLock {
+    HGLOBAL buffer;
+    void* data = GlobalLock(buffer);
+    ~GlobalMemoryLock() { if (data) GlobalUnlock(buffer); }
+};
+
 bool hasFileFormats()
 {
     if (IsClipboardFormatAvailable(CF_HDROP)) return true;
@@ -126,12 +132,32 @@ std::optional<std::wstring> WindowsClipboardListener::readText(size_t maxCharact
 
     const auto buffer = GetClipboardData(CF_UNICODETEXT);
     if (!buffer) return std::nullopt;
-    const auto* characters = static_cast<const wchar_t*>(GlobalLock(buffer));
+    const GlobalMemoryLock memory{buffer};
+    const auto* characters = static_cast<const wchar_t*>(memory.data);
     if (!characters) return std::nullopt;
-    struct TextLock {
-        HGLOBAL buffer;
-        ~TextLock() { GlobalUnlock(buffer); }
-    } textLock{buffer};
-
     return decodeClipboardText({characters, GlobalSize(buffer) / sizeof(wchar_t)}, maxCharacters);
+}
+
+std::vector<char> WindowsClipboardListener::readPng(size_t maxBytes) const
+{
+    if (!active() || !OpenClipboard(m_Window->handle)) return {};
+    const ClipboardLock lock;
+
+    for (const auto* name : {L"image/png", L"PNG"}) {
+        const auto format = RegisterClipboardFormatW(name);
+        if (!format) continue;
+        const auto buffer = GetClipboardData(format);
+        if (!buffer) continue;
+        const size_t size = GlobalSize(buffer);
+        if (!size || size > maxBytes) continue;
+        const GlobalMemoryLock memory{buffer};
+        const auto* bytes = static_cast<const char*>(memory.data);
+        if (!bytes) continue;
+        // Some providers use a registered PNG name for other image data.
+        constexpr std::string_view signature("\x89PNG\r\n\x1a\n", 8);
+        if (size >= signature.size() && std::string_view(bytes, signature.size()) == signature) {
+            return {bytes, bytes + size};
+        }
+    }
+    return {};
 }
