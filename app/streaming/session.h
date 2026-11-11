@@ -198,13 +198,6 @@ private:
 #ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS
     void restoreCaptureAfterStylusReplayPanel();
 #endif
-#ifdef Q_OS_WIN32
-    void queryDisplayHdrBrightness(const QString& preferredDisplayName,
-                                   float& maxNits, float& minNits,
-                                   float& maxFullNits, float& sdrWhiteNits);
-    float queryDisplaySdrWhiteNits(const QString& displayName, bool logFailures = true);
-#endif
-
     void notifyMouseEmulationMode(bool enabled) override;
 
     static

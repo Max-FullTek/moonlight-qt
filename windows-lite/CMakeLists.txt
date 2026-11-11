@@ -143,6 +143,14 @@ target_compile_definitions(lite-touch-input PUBLIC HAVE_WINDOWS_PEN_INPUT HAVE_W
     PRIVATE NOMINMAX)
 target_link_libraries(lite-touch-input PUBLIC lite-stream-utils moonlight-common-c comctl32 hid)
 
+add_library(lite-display-brightness STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/windowsdisplaybrightness.cpp")
+target_compile_features(lite-display-brightness PUBLIC cxx_std_17)
+target_compile_options(lite-display-brightness PRIVATE /W3 /WX)
+target_compile_definitions(lite-display-brightness PRIVATE NOMINMAX)
+target_include_directories(lite-display-brightness PUBLIC "${LITE_SOURCE_ROOT}/app")
+target_link_libraries(lite-display-brightness PUBLIC lite-sdl2 dxgi user32)
+
 add_library(lite-input-events STATIC
     "${LITE_SOURCE_ROOT}/app/streaming/input/input.cpp"
     "${LITE_SOURCE_ROOT}/app/streaming/input/gamepad.cpp"

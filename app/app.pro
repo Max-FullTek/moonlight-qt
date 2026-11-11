@@ -208,8 +208,10 @@ win32:!winrt {
     LIBS += -lhid
     SOURCES += \
         streaming/input/wintouchpad.cpp \
-        streaming/input/winpen.cpp
-    HEADERS += streaming/input/wintouchpad.h
+        streaming/input/winpen.cpp \
+        streaming/windowsdisplaybrightness.cpp
+    HEADERS += streaming/input/wintouchpad.h \
+        streaming/windowsdisplaybrightness.h
 
 }
 
