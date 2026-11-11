@@ -437,69 +437,6 @@ Session* Session::s_ActiveSession;
 std::mutex Session::s_ActiveSessionMutex;
 std::condition_variable Session::s_ActiveSessionChanged;
 
-class AbrFeedbackTask : public QRunnable
-{
-public:
-    AbrFeedbackTask(NvAddress address,
-                    uint16_t httpsPort,
-                    QSslCertificate serverCert,
-                    QString uuid,
-                    double packetLoss,
-                    double rttMs,
-                    double decodeFps,
-                    int droppedFrames,
-                    std::shared_ptr<std::atomic_bool> inFlight,
-                    std::shared_ptr<std::atomic_int> currentBitrateKbps)
-        : m_Address(address),
-          m_HttpsPort(httpsPort),
-          m_ServerCert(serverCert),
-          m_Uuid(uuid),
-          m_PacketLoss(packetLoss),
-          m_RttMs(rttMs),
-          m_DecodeFps(decodeFps),
-          m_DroppedFrames(droppedFrames),
-          m_InFlight(inFlight),
-          m_CurrentBitrateKbps(currentBitrateKbps)
-    {
-    }
-
-    virtual void run() override
-    {
-        try {
-            NvHTTP http(m_Address, m_HttpsPort, m_ServerCert, true, nullptr, m_Uuid);
-            QJsonObject response = http.sendAbrFeedback(m_PacketLoss,
-                                                        m_RttMs,
-                                                        m_DecodeFps,
-                                                        m_DroppedFrames,
-                                                        m_CurrentBitrateKbps->load(),
-                                                        2000);
-
-            int newBitrate = response.value("newBitrate").toInt(0);
-            if (newBitrate > 0) {
-                m_CurrentBitrateKbps->store(newBitrate);
-                qInfo() << "Sunshine ABR adjusted bitrate to" << newBitrate << "Kbps:" << response.value("reason").toString();
-            }
-        }
-        catch (const std::exception& e) {
-            qWarning() << "Sunshine ABR feedback failed:" << e.what();
-        }
-
-        m_InFlight->store(false);
-    }
-
-private:
-    NvAddress m_Address;
-    uint16_t m_HttpsPort;
-    QSslCertificate m_ServerCert;
-    QString m_Uuid;
-    double m_PacketLoss;
-    double m_RttMs;
-    double m_DecodeFps;
-    int m_DroppedFrames;
-    std::shared_ptr<std::atomic_bool> m_InFlight;
-    std::shared_ptr<std::atomic_int> m_CurrentBitrateKbps;
-};
-
 void Session::clStageStarting(int stage)
 {
     // We know this is called on the same thread as LiStartConnection()
@@ -1227,7 +1164,6 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences* prefere
       m_StylusReplayTest(nullptr), m_WasCapturedBeforeStylusReplayPanel(false),
 #endif
       m_SunshineAbrEnabled(false), m_LastAbrFeedbackTicks(0),
-      m_AbrFeedbackInFlight(std::make_shared<std::atomic_bool>(false)),
       m_AbrCurrentBitrateKbps(std::make_shared<std::atomic_int>(0)), m_Toast(nullptr),
       m_MenuCloseTicks(0), m_MicStream(nullptr)
 {
@@ -1239,6 +1175,9 @@ Session::~Session()
 {
     if (m_ConnectionThread.joinable()) {
         m_ConnectionThread.join();
+    }
+    if (m_AbrFeedback.valid()) {
+        m_AbrFeedback.wait();
     }
 
     // NB: This may not get destroyed for a long time! Don't put any non-trivial cleanup here.
@@ -1983,6 +1922,10 @@ void Session::finishConnectionCleanup()
     stopControllerRumbleAtConnectionBoundary(nullptr);
     delete m_DualSenseHapticsRenderer;
     m_DualSenseHapticsRenderer = nullptr;
+
+    if (m_AbrFeedback.valid()) {
+        m_AbrFeedback.wait();
+    }
 
     if (shouldQuit) {
         NvHTTP http(m_Computer);
@@ -2981,6 +2924,11 @@ void Session::startSunshineAbr()
         return;
     }
 
+    // A previous connection's feedback must finish before reconfiguring ABR.
+    if (m_AbrFeedback.valid()) {
+        m_AbrFeedback.wait();
+    }
+
     try {
         NvHTTP http(m_Computer);
 
@@ -3004,7 +2952,6 @@ void Session::startSunshineAbr()
 
         int initialBitrate = configResponse.value("initialBitrate").toInt(m_StreamConfig.bitrate);
         m_AbrCurrentBitrateKbps->store(initialBitrate);
-        m_AbrFeedbackInFlight->store(false);
 
         const RTP_VIDEO_STATS* videoStats = LiGetRTPVideoStats();
         if (videoStats != nullptr) {
@@ -3064,13 +3011,13 @@ void Session::sendSunshineAbrFeedback()
         return;
     }
 
-    if (m_AbrFeedbackInFlight->exchange(true)) {
+    if (m_AbrFeedback.valid() &&
+            m_AbrFeedback.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
         return;
     }
 
     const RTP_VIDEO_STATS* videoStats = LiGetRTPVideoStats();
     if (videoStats == nullptr) {
-        m_AbrFeedbackInFlight->store(false);
         return;
     }
 
@@ -3091,16 +3038,35 @@ void Session::sendSunshineAbrFeedback()
     uint32_t rttVariance = 0;
     LiGetEstimatedRttInfo(&rtt, &rttVariance);
 
-    QThreadPool::globalInstance()->start(new AbrFeedbackTask(m_Computer->activeAddress,
-                                                             m_Computer->activeHttpsPort,
-                                                             m_Computer->serverCert,
-                                                             m_Computer->uuid,
-                                                             packetLoss,
-                                                             rtt,
-                                                             m_ActiveVideoFrameRate,
-                                                             droppedFrames,
-                                                             m_AbrFeedbackInFlight,
-                                                             m_AbrCurrentBitrateKbps));
+    NvAddress address;
+    uint16_t httpsPort;
+    QSslCertificate certificate;
+    QString uuid;
+    {
+        QReadLocker lock(&m_Computer->lock);
+        address = m_Computer->activeAddress;
+        httpsPort = m_Computer->activeHttpsPort;
+        certificate = m_Computer->serverCert;
+        uuid = m_Computer->uuid;
+    }
+
+    m_AbrFeedback = std::async(std::launch::async,
+            [address, httpsPort, certificate, uuid, packetLoss, rtt,
+             decodeFps = m_ActiveVideoFrameRate, droppedFrames, bitrate = m_AbrCurrentBitrateKbps] {
+        try {
+            NvHTTP http(address, httpsPort, certificate, true, nullptr, uuid);
+            const auto response = http.sendAbrFeedback(packetLoss, rtt, decodeFps, droppedFrames,
+                                                       bitrate->load(), 2000);
+            const int newBitrate = response.value("newBitrate").toInt(0);
+            if (newBitrate > 0) {
+                bitrate->store(newBitrate);
+                qInfo() << "Sunshine ABR adjusted bitrate to" << newBitrate
+                        << "Kbps:" << response.value("reason").toString();
+            }
+        } catch (const std::exception& error) {
+            qWarning() << "Sunshine ABR feedback failed:" << error.what();
+        }
+    });
 }
 
 void Session::notifyMouseEmulationMode(bool enabled)

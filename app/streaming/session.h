@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -355,7 +356,7 @@ private:
     bool m_SunshineAbrEnabled;
     Uint32 m_LastAbrFeedbackTicks;
     RTP_VIDEO_STATS m_LastAbrVideoStats;
-    std::shared_ptr<std::atomic_bool> m_AbrFeedbackInFlight;
+    std::future<void> m_AbrFeedback;
     std::shared_ptr<std::atomic_int> m_AbrCurrentBitrateKbps;
     // Runtime bitrate requests coalesce here; a single background worker
     // applies the newest value so HTTP never blocks the stream loop.
