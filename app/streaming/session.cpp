@@ -99,6 +99,7 @@ SessionFFmpegDecoderHost s_FFmpegDecoderHost;
 #define SDL_CODE_CURSOR_UPDATE 107
 #define SDL_CODE_FLUSH_CURSOR_VISIBILITY 108
 #define SDL_CODE_PROCESS_CORE_COMMANDS 110
+#define SDL_CODE_RUNTIME_BITRATE_FINISHED 111
 #if defined(Q_OS_WIN32) || defined(Q_OS_DARWIN) || \
         defined(HAVE_LINUX_DISPLAY_EVENT_MONITOR)
 #define SDL_CODE_PROCESS_QT_OVERLAY_EVENTS 109
@@ -2895,28 +2896,49 @@ void Session::startRuntimeBitrateWorker()
                          "Runtime bitrate change failed: unknown error");
         }
 
-        QMetaObject::invokeMethod(this, [this, requestId, bitrateToApply, success, error] {
-            // Once cleanup owns the thread, ignore any queued completion.
-            if (m_RuntimeBitrateClosing) {
-                return;
-            }
-            m_RuntimeBitrateThread.join();
-            if (success) {
-                m_AbrCurrentBitrateKbps->store(bitrateToApply);
-                if (!usesGpuiControls()) {
-                    showStreamingToast(tr("Bitrate: %1").arg(
-                            OverlayMenuPanel::formatBitrateKbps(bitrateToApply)));
-                }
-            }
-            if (usesGpuiControls()) {
-                emit gpuiBitrateResult(requestId, bitrateToApply, success, error);
-            }
-            if (!m_RuntimeBitrateClosing && m_PendingRuntimeBitrateKbps != 0 &&
-                    !m_RuntimeBitrateThread.joinable()) {
-                startRuntimeBitrateWorker();
-            }
-        }, Qt::QueuedConnection);
+        {
+            std::lock_guard lock(m_RuntimeBitrateResultMutex);
+            m_RuntimeBitrateResult = RuntimeBitrateResult{requestId, bitrateToApply, success, std::move(error)};
+        }
+        SDL_Event event{};
+        event.type = SDL_USEREVENT;
+        event.user.code = SDL_CODE_RUNTIME_BITRATE_FINISHED;
+        if (SDL_PushEvent(&event) != 1) {
+            QMetaObject::invokeMethod(this, &Session::finishRuntimeBitrateChange, Qt::QueuedConnection);
+        }
     });
+}
+
+void Session::finishRuntimeBitrateChange()
+{
+    if (m_RuntimeBitrateClosing) {
+        return;
+    }
+
+    std::optional<RuntimeBitrateResult> result;
+    {
+        std::lock_guard lock(m_RuntimeBitrateResultMutex);
+        result.swap(m_RuntimeBitrateResult);
+    }
+    if (!result) {
+        return;
+    }
+
+    m_RuntimeBitrateThread.join();
+    if (result->success) {
+        m_AbrCurrentBitrateKbps->store(result->bitrateKbps);
+        if (!usesGpuiControls()) {
+            showStreamingToast(tr("Bitrate: %1").arg(
+                    OverlayMenuPanel::formatBitrateKbps(result->bitrateKbps)));
+        }
+    }
+    if (usesGpuiControls()) {
+        emit gpuiBitrateResult(result->requestId, result->bitrateKbps, result->success, result->error);
+    }
+    if (!m_RuntimeBitrateClosing && m_PendingRuntimeBitrateKbps != 0 &&
+            !m_RuntimeBitrateThread.joinable()) {
+        startRuntimeBitrateWorker();
+    }
 }
 
 void Session::startSunshineAbr()
@@ -3138,6 +3160,9 @@ void Session::handleSdlUserEvent(const SDL_UserEvent& event)
         break;
     case SDL_CODE_FLUSH_TOUCHPAD_FRAME:
         m_InputHandler->flushPendingTouchpadFrameEvent();
+        break;
+    case SDL_CODE_RUNTIME_BITRATE_FINISHED:
+        finishRuntimeBitrateChange();
         break;
     case SDL_CODE_PROCESS_CORE_COMMANDS:
         if (m_CoreCommandHandler) {

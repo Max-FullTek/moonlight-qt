@@ -182,6 +182,7 @@ private:
     void dispatchQtMenuAction(OverlayMenuPanel::MenuAction action);
     void requestRuntimeBitrateChange(int bitrateKbps, int requestId = 0);
     void startRuntimeBitrateWorker();
+    void finishRuntimeBitrateChange();
     void showStreamingToast(const QString& message, int durationMs = 2000);
     void processQtOverlayEvents();
 #ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS
@@ -365,6 +366,14 @@ private:
     // Runtime bitrate requests coalesce here; a single background worker
     // applies the newest value so HTTP never blocks the stream loop.
     std::thread m_RuntimeBitrateThread;
+    struct RuntimeBitrateResult {
+        int requestId;
+        int bitrateKbps;
+        bool success;
+        QString error;
+    };
+    std::mutex m_RuntimeBitrateResultMutex;
+    std::optional<RuntimeBitrateResult> m_RuntimeBitrateResult;
     // Pending request and closing state belong to the session owner thread.
     int m_PendingRuntimeBitrateKbps = 0;
     int m_PendingRuntimeBitrateRequestId = 0;
