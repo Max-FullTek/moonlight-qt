@@ -462,17 +462,26 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
     };
     if (useNativeReachability) {
         const QHostAddress literal(copyOfActiveAddress.address());
-        if (!literal.isNull()) {
-            // Use the same canonical address Qt would connect to.
-            const auto host = literal.toString().toStdWString();
-            if (const auto route = WindowsReachability::probeNumeric(host.c_str(), copyOfActiveAddress.port())) {
-                return cacheNativeRoute(*route);
-            }
-        } else {
-            const auto ace = QUrl::toAce(copyOfActiveAddress.address());
-            const std::wstring host(ace.begin(), ace.end());
-            return cacheNativeRoute(WindowsReachability::probeHostname(host.c_str(), copyOfActiveAddress.port()));
+        WindowsReachability::Address address;
+        if (literal.protocol() == QAbstractSocket::IPv4Protocol) {
+            const auto bytes = ReachabilityPolicy::ipv4Bytes(literal.toIPv4Address());
+            std::copy(bytes.begin(), bytes.end(), address.bytes.begin());
+            address.size = 4;
+            return cacheNativeRoute(WindowsReachability::probeAddress(address, copyOfActiveAddress.port()));
         }
+        if (literal.protocol() == QAbstractSocket::IPv6Protocol) {
+            const auto bytes = literal.toIPv6Address();
+            std::copy_n(bytes.c, 16, address.bytes.begin());
+            address.size = 16;
+            const auto scopeName = literal.scopeId();
+            bool numeric = false;
+            const auto number = scopeName.toUInt(&numeric);
+            const auto scope = numeric ? number : WindowsReachability::interfaceIndex(scopeName.toStdWString().c_str());
+            return cacheNativeRoute(WindowsReachability::probeAddress(address, copyOfActiveAddress.port(), scope));
+        }
+        const auto ace = QUrl::toAce(copyOfActiveAddress.address());
+        const std::wstring host(ace.begin(), ace.end());
+        return cacheNativeRoute(WindowsReachability::probeHostname(host.c_str(), copyOfActiveAddress.port()));
     }
 #endif
 
@@ -482,26 +491,6 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
     if (s.waitForConnected(3000)) {
         Q_ASSERT(!s.localAddress().isNull());
         Q_ASSERT(!s.peerAddress().isNull());
-
-#ifdef Q_OS_WIN
-        if (useNativeReachability) {
-            const auto bytes = [](const QHostAddress& host) {
-                WindowsReachability::Address result;
-                if (host.protocol() == QAbstractSocket::IPv4Protocol) {
-                    const auto ipv4 = ReachabilityPolicy::ipv4Bytes(host.toIPv4Address());
-                    std::copy(ipv4.begin(), ipv4.end(), result.bytes.begin());
-                    result.size = 4;
-                } else if (host.protocol() == QAbstractSocket::IPv6Protocol) {
-                    const auto ipv6 = host.toIPv6Address();
-                    std::copy_n(ipv6.c, 16, result.bytes.begin());
-                    result.size = 16;
-                }
-                return result;
-            };
-            const auto route = WindowsReachability::classify(bytes(s.localAddress()), bytes(s.peerAddress()));
-            return cacheNativeRoute(route);
-        }
-#endif
 
         const auto allInterfaces = QNetworkInterface::allInterfaces();
         for (const QNetworkInterface& nic : allInterfaces) {

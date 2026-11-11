@@ -56,6 +56,19 @@ int main(int argc, char* argv[])
                   QStringLiteral("Qt subnet behavior matches the native reachability cases"), err);
 
 #ifdef Q_OS_WIN
+    const auto addressBytes = [](const QHostAddress& ip) {
+        WindowsReachability::Address result;
+        if (ip.protocol() == QAbstractSocket::IPv4Protocol) {
+            const auto bytes = ReachabilityPolicy::ipv4Bytes(ip.toIPv4Address());
+            std::copy(bytes.begin(), bytes.end(), result.bytes.begin());
+            result.size = 4;
+        } else if (ip.protocol() == QAbstractSocket::IPv6Protocol) {
+            const auto bytes = ip.toIPv6Address();
+            std::copy_n(bytes.c, 16, result.bytes.begin());
+            result.size = 16;
+        }
+        return result;
+    };
     const auto addresses = QNetworkInterface::allInterfaces();
     QList<QHostAddress> checked;
     for (const auto& nic : addresses) {
@@ -68,16 +81,8 @@ int main(int argc, char* argv[])
             if (checked.contains(ip)) {
                 continue;
             }
-            WindowsReachability::Address local;
-            if (ip.protocol() == QAbstractSocket::IPv4Protocol) {
-                const auto bytes = ReachabilityPolicy::ipv4Bytes(ip.toIPv4Address());
-                std::copy(bytes.begin(), bytes.end(), local.bytes.begin());
-                local.size = 4;
-            } else if (ip.protocol() == QAbstractSocket::IPv6Protocol) {
-                const auto bytes = ip.toIPv6Address();
-                std::copy_n(bytes.c, 16, local.bytes.begin());
-                local.size = 16;
-            } else {
+            const auto local = addressBytes(ip);
+            if (!local.size) {
                 continue;
             }
             checked.append(ip);
@@ -103,18 +108,27 @@ int main(int argc, char* argv[])
         if (!listener.isListening()) {
             continue;
         }
-        const auto host = ip.toString().toStdWString();
+        const auto address = addressBytes(ip);
         const auto port = listener.serverPort();
-        const auto connected = WindowsReachability::probeNumeric(host.c_str(), port);
-        ok &= require(connected && *connected != ReachabilityPolicy::Route::Unknown &&
+        const auto connected = WindowsReachability::probeAddress(address, port);
+        ok &= require(connected != ReachabilityPolicy::Route::Unknown &&
                           listener.waitForNewConnection(1000),
                       QStringLiteral("Winsock probes the actual loopback listener at %1").arg(ip.toString()), err);
         listener.close();
-        ok &= require(WindowsReachability::probeNumeric(host.c_str(), port) == ReachabilityPolicy::Route::Unknown,
+        ok &= require(WindowsReachability::probeAddress(address, port) == ReachabilityPolicy::Route::Unknown,
                       QStringLiteral("closed loopback port falls back to unknown route"), err);
     }
-    ok &= require(!WindowsReachability::probeNumeric(L"localhost", 1),
-                  QStringLiteral("numeric probe leaves hostnames to the existing resolver"), err);
+    ok &= require(WindowsReachability::probeAddress({}, 1) == ReachabilityPolicy::Route::Unknown,
+                  QStringLiteral("an absent address has no route"), err);
+    QTcpServer mappedListener;
+    ok &= require(mappedListener.listen(QHostAddress::LocalHost),
+                  QStringLiteral("IPv4 listener for mapped address starts"), err);
+    if (mappedListener.isListening()) {
+        const auto mapped = addressBytes(QHostAddress(QStringLiteral("::ffff:127.0.0.1")));
+        WindowsReachability::probeAddress(mapped, mappedListener.serverPort());
+        ok &= require(mappedListener.waitForNewConnection(1000),
+                      QStringLiteral("IPv4-mapped IPv6 reaches the IPv4 listener"), err);
+    }
     QHostAddress scoped;
     for (const auto& nic : addresses) {
         if (!nic.flags().testFlag(QNetworkInterface::IsUp) || nic.name().isEmpty()) {
@@ -144,10 +158,11 @@ int main(int argc, char* argv[])
                 ok &= require(listener.waitForNewConnection(1000),
                               QStringLiteral("listener receives the Qt connection"), err);
             }
-            const auto named = scoped.toString().toStdWString();
-            const auto route = WindowsReachability::probeNumeric(named.c_str(), listener.serverPort());
-            ok &= require(route.has_value(),
-                          QStringLiteral("Winsock recognizes the Windows interface name"), err);
+            const auto scopeName = scoped.scopeId();
+            const auto index = WindowsReachability::interfaceIndex(scopeName.toStdWString().c_str());
+            ok &= require(index != 0 && index == QNetworkInterface::interfaceIndexFromName(scopeName),
+                          QStringLiteral("Windows and Qt resolve the same interface index"), err);
+            WindowsReachability::probeAddress(addressBytes(scoped), listener.serverPort(), index);
             const bool winsockConnected = listener.waitForNewConnection(1000);
             ok &= require(qtConnected == winsockConnected,
                           QStringLiteral("named scope connection outcome matches Qt"), err);
@@ -156,8 +171,8 @@ int main(int argc, char* argv[])
     } else {
         QTextStream(stdout) << "named_ipv6_scope_skipped=no_link_local_address\n";
     }
-    ok &= require(!WindowsReachability::probeNumeric(L"::1%moonlight-no-such-interface", 1),
-                  QStringLiteral("unrecognized scope keeps the legacy fallback"), err);
+    ok &= require(WindowsReachability::interfaceIndex(L"moonlight-no-such-interface") == 0,
+                  QStringLiteral("unrecognized scope maps to the default index"), err);
     const auto localhost = QHostInfo::fromName(QStringLiteral("localhost")).addresses();
     ok &= require(!localhost.isEmpty(), QStringLiteral("localhost resolves"), err);
     if (!localhost.isEmpty()) {

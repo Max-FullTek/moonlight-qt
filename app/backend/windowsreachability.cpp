@@ -11,8 +11,10 @@
 #include <chrono>
 #include <climits>
 #include <cstdlib>
+#include <cstring>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -105,7 +107,20 @@ std::optional<ReachabilityPolicy::Route> probeEndpoint(const ADDRINFOW& endpoint
                                                       Clock::time_point deadline)
 {
     const ProbeSocket socket{::socket(endpoint.ai_family, SOCK_STREAM, IPPROTO_TCP)};
-    if (socket.handle == INVALID_SOCKET || !connectBefore(socket.handle, endpoint, deadline)) {
+    if (socket.handle == INVALID_SOCKET) {
+        return std::nullopt;
+    }
+    if (endpoint.ai_family == AF_INET6) {
+        const auto* address = reinterpret_cast<const sockaddr_in6*>(endpoint.ai_addr);
+        if (IN6_IS_ADDR_V4MAPPED(&address->sin6_addr)) {
+            const DWORD ipv6Only = 0;
+            if (setsockopt(socket.handle, IPPROTO_IPV6, IPV6_V6ONLY,
+                           reinterpret_cast<const char*>(&ipv6Only), sizeof(ipv6Only)) != 0) {
+                return std::nullopt;
+            }
+        }
+    }
+    if (!connectBefore(socket.handle, endpoint, deadline)) {
         return std::nullopt;
     }
     sockaddr_storage local{};
@@ -122,62 +137,50 @@ std::optional<ReachabilityPolicy::Route> probeEndpoint(const ADDRINFOW& endpoint
                                          readAddress({peerAddress, peerSize}));
 }
 
-std::optional<sockaddr_in6> namedScopeEndpoint(const wchar_t* host, std::uint16_t port)
-{
-    const std::wstring_view address(host);
-    const auto separator = address.find(L'%');
-    if (separator == std::wstring::npos || separator + 1 == address.size()) {
-        return std::nullopt;
-    }
-
-    sockaddr_in6 endpoint{};
-    const std::wstring literal(address.substr(0, separator));
-    if (InetPtonW(AF_INET6, literal.c_str(), &endpoint.sin6_addr) != 1) {
-        return std::nullopt;
-    }
-
-    NET_LUID luid{};
-    NET_IFINDEX index = 0;
-    if (ConvertInterfaceNameToLuidW(host + separator + 1, &luid) != NO_ERROR ||
-        ConvertInterfaceLuidToIndex(&luid, &index) != NO_ERROR) {
-        return std::nullopt;
-    }
-    endpoint.sin6_family = AF_INET6;
-    endpoint.sin6_port = htons(port);
-    endpoint.sin6_scope_id = index;
-    return endpoint;
-}
-
 } // namespace
 
-std::optional<ReachabilityPolicy::Route> WindowsReachability::probeNumeric(
-    const wchar_t* host, std::uint16_t port)
+std::uint32_t WindowsReachability::interfaceIndex(const wchar_t* name)
+{
+    NET_LUID luid{};
+    NET_IFINDEX index = 0;
+    if (name && *name && ConvertInterfaceNameToLuidW(name, &luid) == NO_ERROR &&
+        ConvertInterfaceLuidToIndex(&luid, &index) == NO_ERROR) {
+        return index;
+    }
+    return 0;
+}
+
+ReachabilityPolicy::Route WindowsReachability::probeAddress(
+    const Address& address, std::uint16_t port, std::uint32_t scope)
 {
     using ReachabilityPolicy::Route;
     const Winsock winsock;
     if (!winsock.ready) {
         return Route::Unknown;
     }
-    // Use the Windows interface name, not the display alias, just as Qt
-    // does when building a scoped sockaddr for its socket engine.
-    if (auto scoped = namedScopeEndpoint(host, port)) {
-        ADDRINFOW endpoint{};
+
+    ADDRINFOW endpoint{};
+    sockaddr_in ipv4{};
+    sockaddr_in6 ipv6{};
+    if (address.size == 4) {
+        ipv4.sin_family = AF_INET;
+        ipv4.sin_port = htons(port);
+        std::memcpy(&ipv4.sin_addr, address.bytes.data(), 4);
+        endpoint.ai_family = AF_INET;
+        endpoint.ai_addr = reinterpret_cast<sockaddr*>(&ipv4);
+        endpoint.ai_addrlen = sizeof(ipv4);
+    } else if (address.size == 16) {
+        ipv6.sin6_family = AF_INET6;
+        ipv6.sin6_port = htons(port);
+        ipv6.sin6_scope_id = scope;
+        std::copy_n(address.bytes.begin(), 16, ipv6.sin6_addr.s6_addr);
         endpoint.ai_family = AF_INET6;
-        endpoint.ai_addr = reinterpret_cast<sockaddr*>(&*scoped);
-        endpoint.ai_addrlen = sizeof(*scoped);
-        return probeEndpoint(endpoint, Clock::now() + ProbeBudget).value_or(Route::Unknown);
+        endpoint.ai_addr = reinterpret_cast<sockaddr*>(&ipv6);
+        endpoint.ai_addrlen = sizeof(ipv6);
+    } else {
+        return Route::Unknown;
     }
-    ADDRINFOW hints{};
-    hints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    const auto service = std::to_wstring(port);
-    ADDRINFOW* endpoint = nullptr;
-    if (GetAddrInfoW(host, service.c_str(), &hints, &endpoint) != 0 || !endpoint) {
-        return std::nullopt;
-    }
-    const std::unique_ptr<ADDRINFOW, decltype(&FreeAddrInfoW)> address(endpoint, FreeAddrInfoW);
-    return probeEndpoint(*address, Clock::now() + ProbeBudget).value_or(Route::Unknown);
+    return probeEndpoint(endpoint, Clock::now() + ProbeBudget).value_or(Route::Unknown);
 }
 
 ReachabilityPolicy::Route WindowsReachability::probeHostname(const wchar_t* host, std::uint16_t port)
