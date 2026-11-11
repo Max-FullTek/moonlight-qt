@@ -26,7 +26,7 @@
 #include <utility>
 
 #ifdef Q_OS_WIN32
-#include <windows.h>
+#include "windowsworkerdispatch.h"
 #endif
 
 namespace {
@@ -183,83 +183,6 @@ bool applySettings(const QJsonObject& value, StreamingPreferences* prefs) {
 }
 }
 
-#ifdef Q_OS_WIN32
-struct GpuiCoreBridge::InputWakeWindow {
-    static constexpr wchar_t ClassName[] = L"MoonlightLiteCoreInputWake";
-    static constexpr UINT WakeMessage = WM_APP;
-    static constexpr UINT LifecycleMessage = WM_APP + 1;
-    std::mutex lifecycleMutex;
-    std::function<void()> lifecycleCompletion;
-    HWND window = nullptr;
-
-    explicit InputWakeWindow(GpuiCoreBridge* bridge)
-        : bridge(bridge)
-    {
-        const HINSTANCE instance = GetModuleHandleW(nullptr);
-        WNDCLASSW windowClass{};
-        windowClass.lpfnWndProc = handleMessage;
-        windowClass.hInstance = instance;
-        windowClass.lpszClassName = ClassName;
-        if (RegisterClassW(&windowClass) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-            return;
-        }
-        window = CreateWindowExW(0, ClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE,
-                                 nullptr, instance, this);
-    }
-
-    ~InputWakeWindow()
-    {
-        if (window != nullptr) {
-            DestroyWindow(window);
-        }
-    }
-
-    // The launch completion consumes its slot before entering the stream loop.
-    // Cleanup can then publish the next completion using the same slot.
-    void postLifecycle(std::function<void()> completion)
-    {
-        {
-            std::lock_guard lock(lifecycleMutex);
-            Q_ASSERT(!lifecycleCompletion);
-            lifecycleCompletion = std::move(completion);
-        }
-        if (!PostMessageW(window, LifecycleMessage, 0, 0)) {
-            QMetaObject::invokeMethod(bridge, [this] { finishLifecycle(); }, Qt::QueuedConnection);
-        }
-    }
-
-    void finishLifecycle()
-    {
-        std::function<void()> completion;
-        {
-            std::lock_guard lock(lifecycleMutex);
-            completion.swap(lifecycleCompletion);
-        }
-        if (completion) completion();
-    }
-
-    GpuiCoreBridge* const bridge;
-
-    static LRESULT CALLBACK handleMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
-    {
-        if (message == WM_NCCREATE) {
-            const auto* creation = reinterpret_cast<const CREATESTRUCTW*>(lParam);
-            SetWindowLongPtrW(window, GWLP_USERDATA,
-                              reinterpret_cast<LONG_PTR>(creation->lpCreateParams));
-        }
-        else if (message == WakeMessage || message == LifecycleMessage) {
-            auto* dispatcher = reinterpret_cast<InputWakeWindow*>(GetWindowLongPtrW(window, GWLP_USERDATA));
-            if (dispatcher != nullptr) {
-                if (message == WakeMessage) dispatcher->bridge->drainInput();
-                else dispatcher->finishLifecycle();
-            }
-            return 0;
-        }
-        return DefWindowProcW(window, message, wParam, lParam);
-    }
-};
-#endif
-
 GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent) {
     auto* prefs = StreamingPreferences::get();
     prefs->enableMdns = false;
@@ -322,7 +245,7 @@ void GpuiCoreBridge::enqueueInput(Input input)
         }
     }
 #ifdef Q_OS_WIN32
-    if (!PostMessageW(m_InputWakeWindow->window, InputWakeWindow::WakeMessage, 0, 0)) {
+    if (!m_InputWakeWindow->postInput()) {
         QMetaObject::invokeMethod(this, &GpuiCoreBridge::drainInput, Qt::QueuedConnection);
     }
 #else
@@ -364,8 +287,8 @@ void GpuiCoreBridge::drainInput()
 
 void GpuiCoreBridge::start() {
 #ifdef Q_OS_WIN32
-    m_InputWakeWindow = std::make_unique<InputWakeWindow>(this);
-    if (m_InputWakeWindow->window == nullptr) {
+    m_InputWakeWindow = std::make_unique<WindowsWorkerDispatch>([this] { drainInput(); });
+    if (!m_InputWakeWindow->active()) {
         fail("core_input_wake", tr("Unable to initialize the worker command dispatcher."));
         shutdown();
         return;
@@ -833,7 +756,10 @@ void GpuiCoreBridge::command(const QByteArray& line) {
     session->setCoreCommandHandler([this] { drainInput(); });
 #ifdef Q_OS_WIN32
     session->setLifecycleDispatcher([this](std::function<void()> completion) {
-        m_InputWakeWindow->postLifecycle(std::move(completion));
+        if (!m_InputWakeWindow->postLifecycle(std::move(completion))) {
+            QMetaObject::invokeMethod(this, [this] { m_InputWakeWindow->finishLifecycle(); },
+                                      Qt::QueuedConnection);
+        }
     });
 #endif
     m_Session = session;

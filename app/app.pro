@@ -203,6 +203,7 @@ win32 {
     LIBS += -llibssl -llibcrypto -lSDL2 -lSDL2_ttf -lavcodec -lavutil -lswscale -lopus -ldxgi -ld3d11 -llibplacebo
     CONFIG += ffmpeg libplacebo
 }
+win32: SOURCES += backend/windowsworkerdispatch.cpp
 win32:!winrt {
     DEFINES += HAVE_WINDOWS_RAW_TOUCHPAD HAVE_WINDOWS_PEN_INPUT HAVE_PHYSICAL_DS5_HAPTICS
     LIBS += -lhid

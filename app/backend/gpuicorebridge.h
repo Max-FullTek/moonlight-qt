@@ -11,6 +11,9 @@
 class ComputerManager;
 class NvComputer;
 class Session;
+#ifdef Q_OS_WIN32
+class WindowsWorkerDispatch;
+#endif
 
 // Protocol 1: newline-delimited JSON on inherited anonymous stdio pipes only.
 // Commands: list, add, pair, rename, remove, quit, displays, app_preferences,
@@ -61,7 +64,6 @@ private:
     std::deque<Input> m_Input;
     bool m_DrainingInput = false; // Owner thread only.
 #ifdef Q_OS_WIN32
-    struct InputWakeWindow;
-    std::unique_ptr<InputWakeWindow> m_InputWakeWindow;
+    std::unique_ptr<WindowsWorkerDispatch> m_InputWakeWindow;
 #endif
 };
