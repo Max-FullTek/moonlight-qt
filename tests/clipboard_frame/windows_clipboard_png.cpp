@@ -1,6 +1,7 @@
 #include "streaming/windowsclipboardpng.h"
 
 #include <cstdio>
+#include <string>
 #include <windows.h>
 
 namespace {
@@ -33,7 +34,14 @@ int main()
 {
     constexpr std::string_view rgba{RgbaPng, sizeof(RgbaPng) - 1};
     constexpr std::string_view indexed{IndexedPng, sizeof(IndexedPng) - 1};
+    std::string badIdatChecksum(rgba);
+    badIdatChecksum[rgba.size() - 13] ^= 1;
+    std::string oversizedChunk(rgba);
+    oversizedChunk[8] = '\x7f';
     if (!checkImage(rgba) || !checkImage(indexed) ||
+        !WindowsClipboardPng::decode(badIdatChecksum, 2).rgba.empty() ||
+        !WindowsClipboardPng::decode(oversizedChunk, 2).rgba.empty() ||
+        !WindowsClipboardPng::decode(rgba.substr(0, rgba.size() - 12), 2).rgba.empty() ||
         !WindowsClipboardPng::decode(rgba.substr(0, 30), 2).rgba.empty() ||
         !WindowsClipboardPng::decode("not a PNG", 2).rgba.empty()) {
         std::fputs("WIC PNG decode or input limit check failed\n", stderr);

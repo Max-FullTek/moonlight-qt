@@ -3,6 +3,7 @@
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
 #include "qtclipboardtransfer.h"
 #include "windowsclipboardlistener.h"
+#include "windowsclipboardpng.h"
 #else
 #include "backend/pairedcertificate.h"
 #endif
@@ -795,6 +796,9 @@ void ClipboardSync::onLocalClipboardChanged()
     // multiple extraction paths rather than only mime->imageData().
     QByteArray png;
     QString imageSourceDescription;
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+    WindowsClipboardPng::Image nativeImage;
+#endif
     QImage image;
     bool havePng = false;
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
@@ -802,9 +806,15 @@ void ClipboardSync::onLocalClipboardChanged()
         const auto bytes = m_ClipboardListener->readPng(MAX_BLOB_BYTES);
         if (!bytes.empty()) {
             const auto candidate = QByteArray::fromRawData(bytes.data(), static_cast<qsizetype>(bytes.size()));
-            QImage decoded;
-            if (decodeImage(candidate, decoded, "PNG")) {
-                image = std::move(decoded);
+            nativeImage = WindowsClipboardPng::decode({bytes.data(), bytes.size()}, MAX_IMAGE_PIXELS);
+            if (!nativeImage.rgba.empty()) {
+                image = QImage(static_cast<const uchar*>(nativeImage.rgba.data()),
+                               static_cast<int>(nativeImage.width), static_cast<int>(nativeImage.height),
+                               static_cast<qsizetype>(nativeImage.width) * 4, QImage::Format_RGBA8888);
+            } else if (!decodeImage(candidate, image, "PNG")) {
+                image = QImage();
+            }
+            if (!image.isNull()) {
                 png = QByteArray(candidate.constData(), candidate.size());
                 imageSourceDescription = QStringLiteral("Win32 PNG");
                 havePng = true;

@@ -9,8 +9,9 @@ OPENSSL_LIBS = $$PWD/../libs/windows/lib/x64
 DEFINES += LITE_NATIVE_CLIPBOARD_HTTP
 SOURCES += $$PWD/../app/streaming/qtclipboardtransfer.cpp
 SOURCES += $$PWD/../app/streaming/windowsclipboardlistener.cpp
+SOURCES += $$PWD/../app/streaming/windowsclipboardpng.cpp
 HEADERS += $$PWD/../app/streaming/qtclipboardtransfer.h
 LIBS += $$quote($$NATIVE_HTTP_LIB) $$quote($$CURL_LIB) \
     $$quote($$OPENSSL_LIBS/libssl.lib) $$quote($$OPENSSL_LIBS/libcrypto.lib) \
-    ws2_32.lib wldap32.lib bcrypt.lib crypt32.lib iphlpapi.lib user32.lib
+    ws2_32.lib wldap32.lib bcrypt.lib crypt32.lib iphlpapi.lib user32.lib windowscodecs.lib ole32.lib
 PRE_TARGETDEPS += $$quote($$NATIVE_HTTP_LIB) $$quote($$CURL_LIB)
