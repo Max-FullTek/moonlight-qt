@@ -115,6 +115,49 @@ int main(int argc, char* argv[])
     }
     ok &= require(!WindowsReachability::probeNumeric(L"localhost", 1),
                   QStringLiteral("numeric probe leaves hostnames to the existing resolver"), err);
+    QHostAddress scoped;
+    for (const auto& nic : addresses) {
+        if (!nic.flags().testFlag(QNetworkInterface::IsUp) || nic.name().isEmpty()) {
+            continue;
+        }
+        for (const auto& entry : nic.addressEntries()) {
+            if (entry.ip().protocol() == QAbstractSocket::IPv6Protocol && entry.ip().isLinkLocal()) {
+                scoped = entry.ip();
+                scoped.setScopeId(nic.name());
+                break;
+            }
+        }
+        if (!scoped.isNull()) {
+            break;
+        }
+    }
+    if (!scoped.isNull()) {
+        QTcpServer listener;
+        ok &= require(listener.listen(scoped),
+                      QStringLiteral("scoped IPv6 listener starts"), err);
+        if (listener.isListening()) {
+            QTcpSocket reference;
+            reference.setProxy(QNetworkProxy::NoProxy);
+            reference.connectToHost(scoped, listener.serverPort());
+            const bool qtConnected = reference.waitForConnected(3000);
+            if (qtConnected) {
+                ok &= require(listener.waitForNewConnection(1000),
+                              QStringLiteral("listener receives the Qt connection"), err);
+            }
+            const auto named = scoped.toString().toStdWString();
+            const auto route = WindowsReachability::probeNumeric(named.c_str(), listener.serverPort());
+            ok &= require(route.has_value(),
+                          QStringLiteral("Winsock recognizes the Windows interface name"), err);
+            const bool winsockConnected = listener.waitForNewConnection(1000);
+            ok &= require(qtConnected == winsockConnected,
+                          QStringLiteral("named scope connection outcome matches Qt"), err);
+            QTextStream(stdout) << "named_ipv6_scope_connected=" << winsockConnected << '\n';
+        }
+    } else {
+        QTextStream(stdout) << "named_ipv6_scope_skipped=no_link_local_address\n";
+    }
+    ok &= require(!WindowsReachability::probeNumeric(L"::1%moonlight-no-such-interface", 1),
+                  QStringLiteral("unrecognized scope keeps the legacy fallback"), err);
     const auto localhost = QHostInfo::fromName(QStringLiteral("localhost")).addresses();
     ok &= require(!localhost.isEmpty(), QStringLiteral("localhost resolves"), err);
     if (!localhost.isEmpty()) {

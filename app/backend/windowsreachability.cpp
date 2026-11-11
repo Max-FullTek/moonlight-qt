@@ -122,6 +122,32 @@ std::optional<ReachabilityPolicy::Route> probeEndpoint(const ADDRINFOW& endpoint
                                          readAddress({peerAddress, peerSize}));
 }
 
+std::optional<sockaddr_in6> namedScopeEndpoint(const wchar_t* host, std::uint16_t port)
+{
+    const std::wstring_view address(host);
+    const auto separator = address.find(L'%');
+    if (separator == std::wstring::npos || separator + 1 == address.size()) {
+        return std::nullopt;
+    }
+
+    sockaddr_in6 endpoint{};
+    const std::wstring literal(address.substr(0, separator));
+    if (InetPtonW(AF_INET6, literal.c_str(), &endpoint.sin6_addr) != 1) {
+        return std::nullopt;
+    }
+
+    NET_LUID luid{};
+    NET_IFINDEX index = 0;
+    if (ConvertInterfaceNameToLuidW(host + separator + 1, &luid) != NO_ERROR ||
+        ConvertInterfaceLuidToIndex(&luid, &index) != NO_ERROR) {
+        return std::nullopt;
+    }
+    endpoint.sin6_family = AF_INET6;
+    endpoint.sin6_port = htons(port);
+    endpoint.sin6_scope_id = index;
+    return endpoint;
+}
+
 } // namespace
 
 std::optional<ReachabilityPolicy::Route> WindowsReachability::probeNumeric(
@@ -131,6 +157,15 @@ std::optional<ReachabilityPolicy::Route> WindowsReachability::probeNumeric(
     const Winsock winsock;
     if (!winsock.ready) {
         return Route::Unknown;
+    }
+    // Use the Windows interface name, not the display alias, just as Qt
+    // does when building a scoped sockaddr for its socket engine.
+    if (auto scoped = namedScopeEndpoint(host, port)) {
+        ADDRINFOW endpoint{};
+        endpoint.ai_family = AF_INET6;
+        endpoint.ai_addr = reinterpret_cast<sockaddr*>(&*scoped);
+        endpoint.ai_addrlen = sizeof(*scoped);
+        return probeEndpoint(endpoint, Clock::now() + ProbeBudget).value_or(Route::Unknown);
     }
     ADDRINFOW hints{};
     hints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV;
