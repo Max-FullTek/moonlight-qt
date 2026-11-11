@@ -6,6 +6,7 @@
 #include <QUdpSocket>
 #include <QHostInfo>
 #include <QNetworkInterface>
+#include <QUrl>
 #ifdef Q_OS_WIN
 #include "windowsreachability.h"
 #endif
@@ -467,6 +468,10 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
             if (const auto route = WindowsReachability::probeNumeric(host.c_str(), copyOfActiveAddress.port())) {
                 return cacheNativeRoute(*route);
             }
+        } else {
+            const auto ace = QUrl::toAce(copyOfActiveAddress.address());
+            const std::wstring host(ace.begin(), ace.end());
+            return cacheNativeRoute(WindowsReachability::probeHostname(host.c_str(), copyOfActiveAddress.port()));
         }
     }
 #endif

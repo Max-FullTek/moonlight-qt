@@ -16,4 +16,7 @@ ReachabilityPolicy::Route classify(const Address& local, const Address& peer);
 // The caller can then use its existing hostname resolver.
 std::optional<ReachabilityPolicy::Route> probeNumeric(const wchar_t* host, std::uint16_t port);
 
+// host is the ASCII-compatible spelling used for DNS, widened to UTF-16.
+ReachabilityPolicy::Route probeHostname(const wchar_t* host, std::uint16_t port);
+
 } // namespace WindowsReachability

@@ -6,9 +6,12 @@
 #include <QCoreApplication>
 #include <QFile>
 #include <QHostAddress>
+#include <QHostInfo>
 #include <QNetworkInterface>
+#include <QNetworkProxy>
 #include <QSettings>
 #include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTextStream>
 
@@ -112,6 +115,28 @@ int main(int argc, char* argv[])
     }
     ok &= require(!WindowsReachability::probeNumeric(L"localhost", 1),
                   QStringLiteral("numeric probe leaves hostnames to the existing resolver"), err);
+    const auto localhost = QHostInfo::fromName(QStringLiteral("localhost")).addresses();
+    ok &= require(!localhost.isEmpty(), QStringLiteral("localhost resolves"), err);
+    if (!localhost.isEmpty()) {
+        // Listen only on the last address so a dual-stack resolver must
+        // recover from the first address refusing the connection.
+        QTcpServer listener;
+        ok &= require(listener.listen(localhost.last()), QStringLiteral("hostname probe listener starts"), err);
+        if (listener.isListening()) {
+            QTcpSocket reference;
+            reference.setProxy(QNetworkProxy::NoProxy);
+            reference.connectToHost(QStringLiteral("localhost"), listener.serverPort());
+            ok &= require(reference.waitForConnected(3000) && listener.waitForNewConnection(1000),
+                          QStringLiteral("Qt reaches the last localhost candidate"), err);
+            ok &= require(WindowsReachability::probeHostname(L"localhost", listener.serverPort()) !=
+                              ReachabilityPolicy::Route::Unknown &&
+                              listener.waitForNewConnection(1000),
+                          QStringLiteral("Winsock reaches the last localhost candidate"), err);
+            QTextStream(stdout) << "localhost_candidates=" << localhost.size() << '\n';
+        }
+    }
+    ok &= require(WindowsReachability::probeHostname(L"", 1) == ReachabilityPolicy::Route::Unknown,
+                  QStringLiteral("empty DNS name falls back to unknown route"), err);
 #endif
 
     ok &= require(VersionUtils::parseRelease("v6.2.82+14.g13ca12da.dirty") ==
