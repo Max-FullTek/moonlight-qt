@@ -129,7 +129,7 @@ add_library(lite-stream-utils STATIC "${LITE_SOURCE_ROOT}/app/streaming/streamut
 target_compile_features(lite-stream-utils PUBLIC cxx_std_17)
 target_compile_options(lite-stream-utils PRIVATE /W3 /WX)
 target_include_directories(lite-stream-utils PUBLIC "${LITE_SOURCE_ROOT}/app")
-target_link_libraries(lite-stream-utils PUBLIC lite-sdl2)
+target_link_libraries(lite-stream-utils PUBLIC lite-sdl2 user32)
 # Match the Windows Lite Qt build's window-probing preference.
 target_compile_definitions(lite-stream-utils PRIVATE HAVE_LIBPLACEBO_VULKAN)
 

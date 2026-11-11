@@ -16,6 +16,7 @@
 
 #ifdef _WIN32
 #include <Windows.h>
+#include <SDL_syswm.h>
 #if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
 #include <intrin.h>
 #endif
@@ -135,6 +136,25 @@ SDL_Window* StreamUtils::createTestWindow()
 
     return testWindow;
 }
+
+#ifdef _WIN32
+void StreamUtils::setWindowsWindowIcon(SDL_Window* window)
+{
+    SDL_SysWMinfo info{};
+    SDL_VERSION(&info.version);
+    if (!SDL_GetWindowWMInfo(window, &info) || info.subsystem != SDL_SYSWM_WINDOWS) {
+        return;
+    }
+
+    // qmake embeds moonlight.ico under IDI_ICON1. LoadIcon returns a shared
+    // handle that remains valid for the lifetime of the window.
+    HICON icon = LoadIconW(GetModuleHandleW(nullptr), L"IDI_ICON1");
+    if (icon != nullptr) {
+        SendMessageW(info.info.win.window, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(icon));
+        SendMessageW(info.info.win.window, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(icon));
+    }
+}
+#endif
 
 void StreamUtils::scaleSourceToDestinationSurface(SDL_Rect* src, SDL_Rect* dst)
 {

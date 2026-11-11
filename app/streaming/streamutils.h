@@ -11,6 +11,10 @@ public:
     static
     SDL_Window* createTestWindow();
 
+#ifdef _WIN32
+    static void setWindowsWindowIcon(SDL_Window* window);
+#endif
+
     static
     void scaleSourceToDestinationSurface(SDL_Rect* src, SDL_Rect* dst);
 

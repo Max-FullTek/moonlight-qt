@@ -92,12 +92,8 @@ IFFmpegDecoderHost* decoderHost()
 #endif
 
 #ifdef Q_OS_WIN32
-// Scaling the icon down on Win32 looks dreadful, so render at lower res
-#define ICON_SIZE 32
 #include <windows.h>
 #include "windowsdisplaybrightness.h"
-#else
-#define ICON_SIZE 64
 #endif
 
 #define SDL_CODE_FLUSH_WINDOW_EVENT_BARRIER 100
@@ -126,9 +122,11 @@ IFFmpegDecoderHost* decoderHost()
 #include <QThreadPool>
 #include <QRunnable>
 #include <QReadLocker>
+#if !defined(Q_OS_WIN32) && !defined(Q_OS_DARWIN)
 #include <QSvgRenderer>
 #include <QPainter>
 #include <QImage>
+#endif
 #include <QGuiApplication>
 #include <QCursor>
 #include <QProcess>
@@ -3895,24 +3893,23 @@ void Session::exec()
     syncWaylandSdlWindowState();
 #endif
 
+#ifdef Q_OS_WIN32
+    // Apply before fullscreen so the icon persists when returning to windowed mode.
+    StreamUtils::setWindowsWindowIcon(m_Window);
+#elif !defined(Q_OS_DARWIN)
     QSvgRenderer svgIconRenderer(QString(":/res/moonlight.svg"));
-    QImage svgImage(ICON_SIZE, ICON_SIZE, QImage::Format_RGBA8888);
+    QImage svgImage(64, 64, QImage::Format_RGBA8888);
     svgImage.fill(0);
-
-    QPainter svgPainter(&svgImage);
-    svgIconRenderer.render(&svgPainter);
-    SDL_Surface* iconSurface = SDL_CreateRGBSurfaceWithFormatFrom((void*)svgImage.constBits(),
-                                                                  svgImage.width(),
-                                                                  svgImage.height(),
-                                                                  32,
-                                                                  4 * svgImage.width(),
-                                                                  SDL_PIXELFORMAT_RGBA32);
-#ifndef Q_OS_DARWIN
-    // Other platforms seem to preserve our Qt icon when creating a new window.
+    {
+        QPainter svgPainter(&svgImage);
+        svgIconRenderer.render(&svgPainter);
+    }
+    SDL_Surface* iconSurface = SDL_CreateRGBSurfaceWithFormatFrom(
+        svgImage.bits(), svgImage.width(), svgImage.height(), 32,
+        static_cast<int>(svgImage.bytesPerLine()), SDL_PIXELFORMAT_RGBA32);
     if (iconSurface != nullptr) {
-        // This must be called before entering full-screen mode on Windows
-        // or our icon will not persist when toggling to windowed mode
         SDL_SetWindowIcon(m_Window, iconSurface);
+        SDL_FreeSurface(iconSurface);
     }
 #endif
 
@@ -5023,10 +5020,6 @@ DispatchDeferredCleanup:
     // release the Qt toplevel and its child overlay surfaces.
     delete m_WaylandStreamWindow;
     m_WaylandStreamWindow = nullptr;
-
-    if (iconSurface != nullptr) {
-        SDL_FreeSurface(iconSurface);
-    }
 
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 
