@@ -1,4 +1,5 @@
 #include "nvcomputer.h"
+#include "reachabilitypolicy.h"
 #include "nvapp.h"
 #include "settings/compatfetcher.h"
 
@@ -447,64 +448,30 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
                 if (addr.ip() == s.localAddress()) {
                     qInfo() << "Found matching interface:" << nic.humanReadableName() << nic.hardwareAddress() << nic.flags();
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
                     qInfo() << "Interface Type:" << nic.type();
                     qInfo() << "Interface MTU:" << nic.maximumTransmissionUnit();
-
-                    if (nic.type() == QNetworkInterface::Virtual ||
-                            nic.type() == QNetworkInterface::Ppp) {
-                        // Treat PPP and virtual interfaces as likely VPNs
-                        return cacheResult(ReachabilityType::RI_VPN);
-                    }
-
-                    if (nic.maximumTransmissionUnit() != 0 && nic.maximumTransmissionUnit() < 1500) {
-                        // Treat MTUs under 1500 as likely VPNs
-                        return cacheResult(ReachabilityType::RI_VPN);
-                    }
-#endif
-
-                    if (nic.flags() & QNetworkInterface::IsPointToPoint) {
-                        // Treat point-to-point links as likely VPNs.
-                        // This check detects OpenVPN on Unix-like OSes.
-                        return cacheResult(ReachabilityType::RI_VPN);
-                    }
-
 #ifdef Q_OS_WINDOWS
-                    if (nic.name().startsWith("iftype53_") || nic.name().startsWith("iftype131_")) {
-                        // Match by NDIS interface type. These values are Microsoft's recommended values for VPN connections:
-                        // https://learn.microsoft.com/en-US/troubleshoot/windows-client/networking/windows-connection-manager-disconnects-wlan#more-information
-                        //
-                        // The following VPNs use IF_TYPE_PROP_VIRTUAL under Windows:
-                        //  - WireguardNT VPNs
-                        //  - All WinTun-based VPNs (such as Slack Nebula)
-                        //  - OpenVPN with tap-windows6
-                        return cacheResult(ReachabilityType::RI_VPN);
-                    }
+                    constexpr bool windows = true;
+#else
+                    constexpr bool windows = false;
 #endif
+                    const int prefix = addr.prefixLength();
+                    const auto route = ReachabilityPolicy::classify({
+                        nic.type() == QNetworkInterface::Virtual || nic.type() == QNetworkInterface::Ppp,
+                        nic.maximumTransmissionUnit(),
+                        bool(nic.flags() & QNetworkInterface::IsPointToPoint),
+                        windows,
+                        nic.name().toStdString(),
+                        nic.hardwareAddress().toStdString(),
+                        nic.humanReadableName().toStdString()
+                    }, prefix >= 0 && s.localAddress().isInSubnet(s.peerAddress(), prefix));
 
-                    if (nic.hardwareAddress().startsWith("00:FF", Qt::CaseInsensitive)) {
-                        // OpenVPN TAP interfaces have a MAC address starting with 00:FF on Windows
+                    if (route == ReachabilityPolicy::Route::Vpn) {
                         return cacheResult(ReachabilityType::RI_VPN);
                     }
-
-                    if (nic.humanReadableName().startsWith("ZeroTier")) {
-                        // ZeroTier interfaces always start with "ZeroTier"
-                        return cacheResult(ReachabilityType::RI_VPN);
-                    }
-
-                    if (nic.humanReadableName().contains("VPN")) {
-                        // This one is just a final VPN heuristic if all else fails
-                        return cacheResult(ReachabilityType::RI_VPN);
-                    }
-
-                    // Didn't meet any of our VPN heuristics. Let's see if the peer address is on-link.
-                    Q_ASSERT(addr.prefixLength() >= 0);
-                    if (addr.prefixLength() >= 0 && s.localAddress().isInSubnet(s.peerAddress(), addr.prefixLength())) {
-                        return cacheResult(ReachabilityType::RI_LAN);
-                    }
-
-                    // Default to unknown if nothing else matched
-                    return cacheResult(ReachabilityType::RI_UNKNOWN);
+                    Q_ASSERT(prefix >= 0);
+                    return cacheResult(route == ReachabilityPolicy::Route::Lan
+                        ? ReachabilityType::RI_LAN : ReachabilityType::RI_UNKNOWN);
                 }
             }
         }

@@ -264,6 +264,11 @@ target_link_libraries(lite-ffmpeg-decoder PUBLIC lite-d3d11-video lite-dxva2-vid
     lite-vulkan-video lite-generic-hwaccel lite-sdl-video lite-video-buffer lite-video-pacer lite-overlay-text)
 
 if(BUILD_TESTING)
+    add_executable(reachability_policy "${LITE_SOURCE_ROOT}/tests/reachability_policy/main.cpp")
+    target_compile_features(reachability_policy PRIVATE cxx_std_17)
+    target_compile_options(reachability_policy PRIVATE /W3 /WX)
+    add_test(NAME reachability_policy COMMAND reachability_policy)
+
     add_executable(native_pairing "${LITE_SOURCE_ROOT}/tests/native_pairing/main.cpp")
     add_executable(native_identity "${LITE_SOURCE_ROOT}/tests/native_identity/main.cpp")
     target_include_directories(native_identity PRIVATE "${LITE_DEPS_ROOT}/include/x64")
