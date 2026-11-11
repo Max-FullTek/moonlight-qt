@@ -811,7 +811,16 @@ void ClipboardSync::onLocalClipboardChanged()
     // Note the burst text frame is inline-only: a REF text frame would race
     // the image frame onto the wire (blob upload latency) and flip legacy
     // peers' final state to text, so oversize text is dropped from bursts.
-    QString text = hasFileReferences(mime) ? QString() : cb->text();
+    QString text;
+    if (!hasFileReferences(mime)) {
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+        const auto nativeText = m_ClipboardListener
+            ? m_ClipboardListener->readText(MAX_BLOB_BYTES) : std::nullopt;
+        if (nativeText) text = QString::fromStdWString(*nativeText);
+        else
+#endif
+        text = cb->text();
+    }
     QByteArray utf8;
     if (!text.isEmpty()) {
         utf8 = text.toUtf8();

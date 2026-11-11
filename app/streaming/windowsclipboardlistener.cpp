@@ -3,6 +3,37 @@
 #include <windows.h>
 #include <utility>
 
+namespace {
+struct ClipboardLock {
+    ~ClipboardLock() { CloseClipboard(); }
+};
+
+bool hasFileFormats()
+{
+    if (IsClipboardFormatAvailable(CF_HDROP)) return true;
+    for (const auto* name : {L"FileNameW", L"FileGroupDescriptor", L"FileGroupDescriptorW",
+                             L"FileContents", L"Shell IDList Array"}) {
+        const auto format = RegisterClipboardFormatW(name);
+        if (format && IsClipboardFormatAvailable(format)) return true;
+    }
+    return false;
+}
+
+std::wstring decodeClipboardText(std::wstring_view buffer, size_t maxCharacters)
+{
+    std::wstring text;
+    for (size_t index = 0; index < buffer.size(); ++index) {
+        const wchar_t character = buffer[index];
+        if (character == 0) return text;
+        if (character == L'\r' && index + 1 < buffer.size() && buffer[index + 1] == L'\n') continue;
+        if (text.size() == maxCharacters) return {};
+        text.push_back(character);
+    }
+    // A provider must terminate CF_UNICODETEXT within its allocation.
+    return {};
+}
+}
+
 struct WindowsClipboardListener::Window {
     static constexpr wchar_t ClassName[] = L"MoonlightLiteClipboardListener";
 
@@ -61,18 +92,11 @@ bool WindowsClipboardListener::active() const
 WindowsClipboardListener::TextWriteResult WindowsClipboardListener::writeText(std::wstring_view text) const
 {
     if (!active() || !OpenClipboard(m_Window->handle)) return TextWriteResult::Unavailable;
-    struct ClipboardLock {
-        ~ClipboardLock() { CloseClipboard(); }
-    } lock;
+    const ClipboardLock lock;
 
     // Check again with the clipboard open, so a concurrent file copy cannot
     // be overwritten between the format check and EmptyClipboard.
-    if (IsClipboardFormatAvailable(CF_HDROP)) return TextWriteResult::FileClipboard;
-    for (const auto* name : {L"FileNameW", L"FileGroupDescriptor", L"FileGroupDescriptorW",
-                             L"FileContents", L"Shell IDList Array"}) {
-        const auto format = RegisterClipboardFormatW(name);
-        if (format && IsClipboardFormatAvailable(format)) return TextWriteResult::FileClipboard;
-    }
+    if (hasFileFormats()) return TextWriteResult::FileClipboard;
 
     const auto buffer = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, (text.size() * 2 + 1) * sizeof(wchar_t));
     if (!buffer) return TextWriteResult::Unavailable;
@@ -92,4 +116,22 @@ WindowsClipboardListener::TextWriteResult WindowsClipboardListener::writeText(st
     if (EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, buffer)) return TextWriteResult::Written;
     GlobalFree(buffer);
     return TextWriteResult::Unavailable;
+}
+
+std::optional<std::wstring> WindowsClipboardListener::readText(size_t maxCharacters) const
+{
+    if (!active() || !OpenClipboard(m_Window->handle)) return std::nullopt;
+    const ClipboardLock lock;
+    if (hasFileFormats()) return std::wstring();
+
+    const auto buffer = GetClipboardData(CF_UNICODETEXT);
+    if (!buffer) return std::nullopt;
+    const auto* characters = static_cast<const wchar_t*>(GlobalLock(buffer));
+    if (!characters) return std::nullopt;
+    struct TextLock {
+        HGLOBAL buffer;
+        ~TextLock() { GlobalUnlock(buffer); }
+    } textLock{buffer};
+
+    return decodeClipboardText({characters, GlobalSize(buffer) / sizeof(wchar_t)}, maxCharacters);
 }
