@@ -11,5 +11,6 @@ struct Image {
     std::vector<unsigned char> rgba;
 };
 
-Image decode(std::string_view png, size_t maxPixels);
+enum class Metadata { PixelsOnly, PreserveForPaste };
+Image decode(std::string_view png, size_t maxPixels, Metadata metadata = Metadata::PixelsOnly);
 }

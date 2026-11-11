@@ -190,6 +190,7 @@ private:
     static uint64_t hashBytes(const QByteArray& bytes);
     static uint64_t hashImagePixels(const QImage& image);
     static bool decodeImage(const QByteArray& bytes, QImage& image, const char* format = nullptr);
+    bool decodeInboundPng(const QByteArray& bytes, QImage& image) const;
     void rememberClipboard(const QByteArray& text, const QImage& image);
     void beginClipboardChange(quint32 token = 0);
     using BlobCallback = std::function<void(const QByteArray&)>;

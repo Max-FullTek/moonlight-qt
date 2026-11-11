@@ -355,7 +355,7 @@ void ClipboardSync::onIncomingFrame(QByteArray frame)
             return;
         }
         QImage image;
-        if (kind == KIND_PNG && decodeImage(payload, image, "PNG") &&
+        if (kind == KIND_PNG && decodeInboundPng(payload, image) &&
             hashImagePixels(image) == m_LastImageHash) {
             return;
         }
@@ -451,7 +451,7 @@ void ClipboardSync::applyInboundText(const QByteArray& payload)
 void ClipboardSync::applyInboundPng(const QByteArray& payload)
 {
     QImage image;
-    if (!decodeImage(payload, image, "PNG") || image.isNull()) {
+    if (!decodeInboundPng(payload, image)) {
         ClipboardLog::warn("ClipboardSync: dropping inbound PNG payload (decode failed, %d bytes)",
                     static_cast<int>(payload.size()));
         return;
@@ -1030,6 +1030,30 @@ bool ClipboardSync::decodeImage(const QByteArray& bytes, QImage& image, const ch
     return !image.isNull() && qint64(image.width()) * image.height() <= MAX_IMAGE_PIXELS;
 }
 
+bool ClipboardSync::decodeInboundPng(const QByteArray& bytes, QImage& image) const
+{
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+    if (m_ClipboardListener && !bytes.isEmpty() && bytes.size() <= MAX_BLOB_BYTES) {
+        auto decoded = WindowsClipboardPng::decode(
+            {bytes.constData(), static_cast<size_t>(bytes.size())}, MAX_IMAGE_PIXELS,
+            WindowsClipboardPng::Metadata::PreserveForPaste);
+        if (!decoded.rgba.empty()) {
+            auto pixels = std::make_unique<std::vector<unsigned char>>(std::move(decoded.rgba));
+            image = QImage(static_cast<const uchar*>(pixels->data()),
+                           static_cast<int>(decoded.width), static_cast<int>(decoded.height),
+                           static_cast<qsizetype>(decoded.width) * 4, QImage::Format_RGBA8888,
+                           [](void* buffer) { delete static_cast<std::vector<unsigned char>*>(buffer); },
+                           pixels.get());
+            if (!image.isNull()) {
+                pixels.release();
+                return true;
+            }
+        }
+    }
+#endif
+    return decodeImage(bytes, image, "PNG");
+}
+
 void ClipboardSync::rememberClipboard(const QByteArray& text, const QImage& image)
 {
     m_HaveClipboardSnapshot = true;
@@ -1370,7 +1394,7 @@ void ClipboardSync::applyCompound(const QByteArray& text, const QByteArray& png)
 
     const bool textOk = !text.isEmpty() && !text.contains('\0');
     QImage image;
-    if (!decodeImage(png, image, "PNG") || image.isNull()) {
+    if (!decodeInboundPng(png, image)) {
         image = QImage();
     }
 

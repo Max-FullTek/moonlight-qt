@@ -38,7 +38,16 @@ int main()
     badIdatChecksum[rgba.size() - 13] ^= 1;
     std::string oversizedChunk(rgba);
     oversizedChunk[8] = '\x7f';
+    constexpr char resolutionChunk[] =
+        "\x00\x00\x00\x09\x70\x48\x59\x73\x00\x00\x2e\x23\x00\x00\x2e\x23\x01\x78\xa5\x3f\x76";
+    std::string withResolution(rgba);
+    withResolution.insert(33, resolutionChunk, sizeof(resolutionChunk) - 1);
+    using WindowsClipboardPng::Metadata;
     if (!checkImage(rgba) || !checkImage(indexed) ||
+        WindowsClipboardPng::decode(rgba, 2, Metadata::PreserveForPaste).rgba.empty() ||
+        WindowsClipboardPng::decode(indexed, 2, Metadata::PreserveForPaste).rgba.empty() ||
+        !checkImage(withResolution) ||
+        !WindowsClipboardPng::decode(withResolution, 2, Metadata::PreserveForPaste).rgba.empty() ||
         !WindowsClipboardPng::decode(badIdatChecksum, 2).rgba.empty() ||
         !WindowsClipboardPng::decode(oversizedChunk, 2).rgba.empty() ||
         !WindowsClipboardPng::decode(rgba.substr(0, rgba.size() - 12), 2).rgba.empty() ||
