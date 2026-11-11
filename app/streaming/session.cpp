@@ -433,7 +433,8 @@ CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
 };
 
 Session* Session::s_ActiveSession;
-QSemaphore Session::s_ActiveSessionSemaphore(1);
+std::mutex Session::s_ActiveSessionMutex;
+std::condition_variable Session::s_ActiveSessionChanged;
 
 class AbrFeedbackTask : public QRunnable
 {
@@ -1159,7 +1160,7 @@ bool Session::populateDecoderProperties(SDL_Window* window)
     if (!chooseDecoder(m_Preferences->videoDecoderSelection,
                        m_Preferences->rendererSelection,
                        window,
-                       m_SupportedVideoFormats.first(),
+                       m_SupportedVideoFormats.front(),
                        m_StreamConfig.width,
                        m_StreamConfig.height,
                        m_StreamConfig.fps,
@@ -1835,12 +1836,12 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         else {
             m_SupportedVideoFormats.removeByMask(~m_SupportedVideoFormats.maskByServerCodecModes(m_Computer->serverCodecModeSupport));
 
-            if (!m_SupportedVideoFormats.isEmpty() &&
+            if (!m_SupportedVideoFormats.empty() &&
                 !(m_SupportedVideoFormats.front() & VIDEO_FORMAT_MASK_YUV444)) {
                 emitLaunchWarning(tr("Your host PC doesn't support YUV 4:4:4 streaming for selected video codec."));
             }
             else if (m_Preferences->videoDecoderSelection != StreamingPreferences::VDS_FORCE_SOFTWARE) {
-                while (!m_SupportedVideoFormats.isEmpty() &&
+                while (!m_SupportedVideoFormats.empty() &&
                        (m_SupportedVideoFormats.front() & VIDEO_FORMAT_MASK_YUV444) &&
                        getDecoderAvailability(testWindow,
                                               m_Preferences->videoDecoderSelection,
@@ -1856,7 +1857,7 @@ bool Session::validateLaunch(SDL_Window* testWindow)
                         break;
                     }
                 }
-                if (!m_SupportedVideoFormats.isEmpty() &&
+                if (!m_SupportedVideoFormats.empty() &&
                     !(m_SupportedVideoFormats.front() & VIDEO_FORMAT_MASK_YUV444)) {
                     emitLaunchWarning(tr("This PC's GPU doesn't support YUV 4:4:4 decoding for selected video codec."));
                 }
@@ -1962,8 +1963,11 @@ private:
     virtual ~DeferredSessionCleanupTask() override
     {
         // Allow another session to start now that we're cleaned up
-        Session::s_ActiveSession = nullptr;
-        Session::s_ActiveSessionSemaphore.release();
+        {
+            std::lock_guard lock(Session::s_ActiveSessionMutex);
+            Session::s_ActiveSession = nullptr;
+        }
+        Session::s_ActiveSessionChanged.notify_one();
 
         // Notify that the session is ready to be cleaned up
         emit m_Session->readyForDeletion();
@@ -3773,11 +3777,12 @@ void Session::setShouldExit(bool quitHostApp)
 
 void Session::start()
 {
-    // Wait for any old session to finish cleanup
-    s_ActiveSessionSemaphore.acquire();
-
-    // We're now active
-    s_ActiveSession = this;
+    // Wait for any old session to finish cleanup before publishing this one.
+    {
+        std::unique_lock lock(s_ActiveSessionMutex);
+        s_ActiveSessionChanged.wait(lock, [] { return s_ActiveSession == nullptr; });
+        s_ActiveSession = this;
+    }
 
 #ifndef STEAM_LINK
     // Construct the clipboard sync helper process before the control receive
@@ -5340,8 +5345,7 @@ DispatchDeferredCleanup:
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
 
     // Cleanup can take a while, so dispatch it to a worker thread.
-    // When it is complete, it will release our s_ActiveSessionSemaphore
-    // reference.
+    // Once cleanup finishes, another session can start.
     QThreadPool::globalInstance()->start(new DeferredSessionCleanupTask(this));
 
     // 停止带宽计算

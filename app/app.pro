@@ -338,6 +338,7 @@ HEADERS += \
     streaming/input/keyboardstate.h \
     streaming/input/touchpadcontacts.h \
     streaming/session.h \
+    streaming/supportedvideoformats.h \
     streaming/clipboardhelperclient.h \
     streaming/clipboardipc.h \
     streaming/audio/renderers/renderer.h \
