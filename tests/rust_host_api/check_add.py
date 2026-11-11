@@ -1,5 +1,6 @@
 """Real GPUI Client and worker add/merge through Rust, isolated loopback only."""
 import http.server
+import json
 import os
 from pathlib import Path
 import ssl
@@ -75,13 +76,27 @@ def main(worker, runtime, plugins, work, mode="new"):
                QT_QPA_PLATFORM_PLUGIN_PATH=str(Path(plugins).resolve() / "platforms"),
                PATH=str(Path(runtime).resolve()) + ";" + os.environ["PATH"])
     try:
-        subprocess.run(["cargo", "+1.99.1", "test", "--release", "--locked", "--manifest-path", str(root / "gpui-prototype/Cargo.toml"),
-                        "core::tests::rust_add_through_real_worker", "--", "--exact", "--ignored", "--nocapture"], env=env, check=True, timeout=45)
+        command = ["cargo", "+1.99.1", "test", "--release", "--locked", "--manifest-path",
+                   str(root / "gpui-prototype/Cargo.toml"), "core::tests::rust_add_through_real_worker",
+                   "--", "--exact", "--ignored", "--nocapture"]
+        subprocess.run(command, env=env, check=True, timeout=45)
         requests = [item for item in seen if item[1] == "/serverinfo"]
         assert requests and not requests[0][2], seen
         assert requests[0][3]["uniqueid"] == ["0123456789ABCDEF"], requests[0]
         if mode == "existing":
             assert any(secure and query["uniqueid"] == ["fixture-client"] for _, _, secure, query in requests), seen
+            identity_path = profile / "identity-v1.json"
+            identity_bytes = identity_path.read_bytes()
+            assert json.loads(identity_bytes)["unique_id"] == "fixture-client"
+            old_profile = settings.read_text(encoding="utf8")
+            assert "uniqueid=fixture-client" in old_profile
+            settings.write_text(old_profile.replace("uniqueid=fixture-client", "uniqueid=fixture-legacy"), encoding="utf8")
+            seen.clear()
+            subprocess.run(command, env=env, check=True, timeout=45)
+            assert any(secure and query["uniqueid"] == ["fixture-client"]
+                       for _, path, secure, query in seen if path == "/serverinfo")
+            assert identity_path.read_bytes() == identity_bytes
+            assert "uniqueid=fixture-legacy" in settings.read_text(encoding="utf8")
         if mode == "bad-pin":
             assert not any(secure for _, _, secure, _ in requests), "Wrong pin reached HTTP"
             saved = settings.read_text(encoding="utf8")

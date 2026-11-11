@@ -46,6 +46,9 @@ pub type HostDisplay = moonlight_host_api::Display;
 #[derive(Debug, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
+    ProfileIdentity {
+        identity: crate::profile_identity::ProfileIdentity,
+    },
     Ready {
         qml_loaded: bool,
     },
@@ -142,7 +145,8 @@ impl Client {
         let mut command = Command::new(exe);
         command
             .arg("--gpui-core")
-            .env("MOONLIGHT_GPUI_PROFILE", profile)
+            .env("MOONLIGHT_GPUI_PROFILE", &profile)
+            .env("MOONLIGHT_GPUI_RUST_IDENTITY", "1")
             .env("MOONLIGHT_GPUI_RUST_MONITOR", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -207,6 +211,15 @@ impl Client {
                     }
                 }
                 match event {
+                    Some(Event::ProfileIdentity { identity }) if !ready => {
+                        if identity.install(&profile).is_err() {
+                            let _ = events_tx.send(Event::Error {
+                                code: "identity_store".into(),
+                                message: "無法儲存配對身分。".into(),
+                            });
+                            break;
+                        }
+                    }
                     Some(Event::MonitorContexts {hosts}) if ready => reader_api.monitors(hosts),
                     Some(Event::SessionApi {request}) if ready => reader_api.session(request),
                     Some(Event::QuitContext {host, request_id, context, http_url}) if ready => {
@@ -228,7 +241,7 @@ impl Client {
                             break;
                         }
                     }
-                    Some(event) if ready => {
+                    Some(event) if ready && !matches!(event, Event::ProfileIdentity { .. }) => {
                         if events_tx.send(event).is_err() {
                             break;
                         }

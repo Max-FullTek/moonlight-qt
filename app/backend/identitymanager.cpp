@@ -2,6 +2,10 @@
 #include "nativeidentity.h"
 
 #include <QDebug>
+#include <QDir>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 
 #define SER_UNIQUEID "uniqueid"
@@ -48,6 +52,26 @@ void IdentityManager::createCredentials(QSettings& settings)
 
 IdentityManager::IdentityManager()
 {
+    if (qEnvironmentVariableIsSet("MOONLIGHT_GPUI_RUST_IDENTITY")) {
+        const auto profile = qEnvironmentVariable("MOONLIGHT_GPUI_PROFILE");
+        if (!profile.isEmpty()) {
+            QFile identity(QDir(profile).filePath("identity-v1.json"));
+            if (identity.exists()) {
+                if (!identity.open(QIODevice::ReadOnly) || identity.size() > 64 * 1024) {
+                    qFatal("Unable to read the GPUI identity");
+                }
+                const auto record = QJsonDocument::fromJson(identity.readAll()).object();
+                m_CachedUniqueId = record.value("unique_id").toString();
+                m_CachedPemCert = record.value("certificate").toString().toLatin1();
+                m_CachedPrivateKey = record.value("private_key").toString().toLatin1();
+                if (record.value("version").toInt() != 1 || m_CachedUniqueId.isEmpty() ||
+                    getSslCertificate().isNull() || getSslKey().isNull()) {
+                    qFatal("Invalid GPUI identity");
+                }
+                return;
+            }
+        }
+    }
     QSettings settings;
 
     m_CachedPemCert = settings.value(SER_CERT).toByteArray();

@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod advanced;
 mod core;
+mod profile_identity;
 mod host_api;
 mod monitor;
 mod controls;
@@ -456,7 +457,7 @@ impl Prototype {
         let had_modal = self.modal.is_some();
         for event in events {
             match event {
-                core::Event::HostApiContext { .. } | core::Event::PairContext { .. } | core::Event::MonitorContexts { .. } | core::Event::QuitContext { .. } | core::Event::SessionApi { .. } => unreachable!("context belongs to the host API owner"),
+                core::Event::HostApiContext { .. } | core::Event::PairContext { .. } | core::Event::MonitorContexts { .. } | core::Event::QuitContext { .. } | core::Event::SessionApi { .. } | core::Event::ProfileIdentity { .. } => unreachable!("private worker context must be handled before the UI"),
                 core::Event::HostRenamed => {
                     self.pending = false;
                     self.modal = None;

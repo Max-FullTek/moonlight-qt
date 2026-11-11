@@ -232,6 +232,14 @@ void GpuiCoreBridge::start() {
         return writeProtocol({{"event","session_api"},{"request_id",double(id)},
             {"context",request["context"]},{"request",request["request"]}});
     });
+    if (qEnvironmentVariableIsSet("MOONLIGHT_GPUI_RUST_IDENTITY")) {
+        auto* identity = IdentityManager::get();
+        send({{"event", "profile_identity"}, {"identity", QJsonObject{
+            {"version", 1}, {"unique_id", identity->getUniqueId()},
+            {"certificate", QString::fromLatin1(identity->getCertificate())},
+            {"private_key", QString::fromLatin1(identity->getPrivateKey())}
+        }}});
+    }
     send({{"event", "ready"}, {"qml_loaded", false}});
     publishHosts();
     m_Manager->startPolling();
