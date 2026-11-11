@@ -1,14 +1,14 @@
 """Check the real worker's protocol and lifetime without a network host."""
+import argparse
 import json
 import os
 from pathlib import Path
 import queue
 import subprocess
-import sys
 import threading
 
 
-def check(executable, profile, eof=False, seeded=False):
+def check(executable, profile, eof=False, seeded=False, platform="offscreen"):
     profile.mkdir(parents=True, exist_ok=False)
     if seeded:
         settings = profile / "Moonlight Game Streaming Project" / "MoonlightGPUI.ini"
@@ -19,7 +19,16 @@ def check(executable, profile, eof=False, seeded=False):
             "1\\manualaddress=127.0.0.1\n1\\manualport=1\n",
             encoding="utf-8")
     env = dict(os.environ, MOONLIGHT_GPUI_PROFILE=str(profile.resolve()),
-               QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software")
+               QT_QPA_PLATFORM=platform, QT_QUICK_BACKEND="software")
+    if platform == "windows":
+        # Verify the shipped platform without borrowing an SDK or caller's
+        # Qt plugin overrides. The worker creates no streaming window here.
+        for key in ("QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH"):
+            env.pop(key, None)
+        system_root = os.environ["SystemRoot"]
+        env["PATH"] = os.pathsep.join((str(executable.parent),
+                                      str(Path(system_root) / "System32"),
+                                      system_root))
     with (profile / "stderr.log").open("wb") as log:
         process = subprocess.Popen([str(executable), "--gpui-core"], env=env,
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -104,6 +113,12 @@ def check(executable, profile, eof=False, seeded=False):
                     send(request)
                 for _, code in invalid_requests:
                     assert event("error")["code"] == code
+                # A record above the pipe cap must be fully drained before
+                # the next command can be dispatched.
+                send("x" * (4 * 1024 * 1024 + 1))
+                assert event("error")["code"] == "request_too_large"
+                send('{"command":"list"}')
+                assert event("hosts")["hosts"] == []
                 send('{"command":"shutdown"}')
             process.stdin.close()
             assert process.wait(timeout=35) == 0
@@ -114,9 +129,14 @@ def check(executable, profile, eof=False, seeded=False):
 
 
 if __name__ == "__main__":
-    executable = Path(sys.argv[1]).resolve() / "Moonlight.exe"
-    root = Path(sys.argv[2]).resolve()
-    check(executable, root / "shutdown")
-    check(executable, root / "parent-eof", eof=True)
-    check(executable, root / "host-management", seeded=True)
-    print("GPUI worker handshake, validation, offline host management, shutdown and parent EOF passed; no real host used.")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("package", type=Path)
+    parser.add_argument("profile", type=Path)
+    parser.add_argument("--platform", choices=("offscreen", "windows"), default="offscreen")
+    args = parser.parse_args()
+    executable = args.package.resolve() / "Moonlight.exe"
+    root = args.profile.resolve()
+    check(executable, root / "shutdown", platform=args.platform)
+    check(executable, root / "parent-eof", eof=True, platform=args.platform)
+    check(executable, root / "host-management", seeded=True, platform=args.platform)
+    print(f"GPUI worker handshake, validation, offline host management, shutdown and parent EOF passed ({args.platform}); no real host used.")

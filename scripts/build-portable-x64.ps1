@@ -140,6 +140,8 @@ $testResults += @{ name = 'gui-qml-startup'; result = 'passed-offscreen-no-host'
 
 Invoke-Checked 'python' @((Join-Path $PSScriptRoot 'smoke-gpui-core.py'), $deploy, (Join-Path $root 'core-smoke'))
 $testResults += @{ name = 'gpui-core-protocol-lifecycle'; result = 'passed-offscreen-no-host' }
+Invoke-Checked 'python' @((Join-Path $PSScriptRoot 'smoke-gpui-core.py'), $deploy, (Join-Path $root 'core-smoke-windows'), '--platform', 'windows')
+$testResults += @{ name = 'gpui-core-packaged-platform'; result = 'passed-windows-without-sdk-path-no-host' }
 
 $githubActions = $env:GITHUB_ACTIONS -eq 'true'
 $provenance = [ordered]@{

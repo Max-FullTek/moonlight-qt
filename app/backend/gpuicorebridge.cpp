@@ -3,6 +3,7 @@
 #include "nvhttp.h"
 #include "pairedcertificate.h"
 #include "sessionapirpc.h"
+#include "workercommandpipe.h"
 #include "streaming/streamutils.h"
 #include "SDL_compat.h"
 #include <cmath>
@@ -38,7 +39,6 @@ bool writeProtocol(QJsonObject event) {
     return fwrite(line.constData(),1,size_t(line.size()),stdout)==size_t(line.size()) && fflush(stdout)==0;
 }
 constexpr int MaxControlLine = 64 * 1024;
-constexpr int MaxLine = 4 * 1024 * 1024; // Existing frontend event limit, also for typed host data.
 bool integer(const QJsonObject& object, const char* key, int low, int high) {
     const auto value = object.value(QLatin1String(key));
     return value.isDouble() && value.toDouble() == value.toInt(-999999) &&
@@ -272,7 +272,7 @@ void GpuiCoreBridge::drainInput()
         }
         switch (input.kind) {
         case InputKind::Command:
-            command(input.line);
+            command(QByteArray::fromRawData(input.line.data(), static_cast<int>(input.line.size())));
             break;
         case InputKind::Oversized:
             fail("request_too_large", tr("Request exceeds 64 KiB."));
@@ -313,26 +313,27 @@ void GpuiCoreBridge::start() {
     // The reader owns no Qt/network state and exits on shutdown or pipe EOF.
     // The process owns this thread; the parent closes stdin during teardown.
     std::thread([this] {
-        QByteArray line;
-        bool oversized = false;
-        int ch;
-        while ((ch = fgetc(stdin)) != EOF) {
-            if (ch == '\n') {
-                const auto object=oversized?QJsonObject():QJsonDocument::fromJson(line).object();
-                if (object["command"]=="session_api_result") {
-                    const double id=object["request_id"].toDouble();
-                    if (id>=1 && id<=9007199254740991.0 && std::floor(id)==id && object["result"].isObject())
-                        SessionApiRpc::broker().complete(uint64_t(id),QJsonDocument(object["result"].toObject()).toJson(QJsonDocument::Compact).toStdString());
-                    line.clear(); oversized=false; continue;
+        std::string line;
+        for (;;) {
+            const auto status = WorkerCommandPipe::read(stdin, line);
+            if (status == WorkerCommandPipe::ReadStatus::EndOfInput) break;
+            const bool oversized = status == WorkerCommandPipe::ReadStatus::Oversized;
+            const auto bytes = QByteArray::fromRawData(line.data(), static_cast<int>(line.size()));
+            const auto object = oversized ? QJsonObject() : QJsonDocument::fromJson(bytes).object();
+            if (object["command"] == "session_api_result") {
+                const double id = object["request_id"].toDouble();
+                if (id >= 1 && id <= 9007199254740991.0 && std::floor(id) == id &&
+                    object["result"].isObject()) {
+                    const auto result = QJsonDocument(object["result"].toObject()).toJson(QJsonDocument::Compact);
+                    SessionApiRpc::broker().complete(static_cast<uint64_t>(id), result.toStdString());
                 }
-                const bool shutdownRequested = object["command"] == "shutdown";
-                if (shutdownRequested) SessionApiRpc::broker().close();
-                enqueueInput(oversized ? Input{InputKind::Oversized, {}} :
-                                         Input{InputKind::Command, std::move(line)});
-                if (shutdownRequested) return;
-                line.clear(); oversized = false;
-            } else if (line.size() < MaxLine) line.append(char(ch));
-            else oversized = true;
+                continue;
+            }
+            const bool shutdownRequested = object["command"] == "shutdown";
+            if (shutdownRequested) SessionApiRpc::broker().close();
+            enqueueInput(oversized ? Input{InputKind::Oversized, {}} :
+                                     Input{InputKind::Command, std::move(line)});
+            if (shutdownRequested) return;
         }
         SessionApiRpc::broker().close();
         enqueueInput({InputKind::EndOfInput, {}});

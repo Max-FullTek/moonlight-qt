@@ -334,6 +334,12 @@ target_compile_definitions(lite-decoder-factory PRIVATE HAVE_FFMPEG)
 target_link_libraries(lite-decoder-factory PUBLIC lite-ffmpeg-decoder)
 
 if(BUILD_TESTING)
+    add_executable(worker_command_pipe "${LITE_SOURCE_ROOT}/tests/windows_worker_dispatch/pipe.cpp")
+    target_compile_features(worker_command_pipe PRIVATE cxx_std_17)
+    target_compile_options(worker_command_pipe PRIVATE /W3 /WX)
+    target_include_directories(worker_command_pipe PRIVATE "${LITE_SOURCE_ROOT}/app")
+    add_test(NAME worker_command_pipe COMMAND worker_command_pipe)
+
     add_executable(windows_worker_dispatch "${LITE_SOURCE_ROOT}/tests/windows_worker_dispatch/main.cpp")
     target_link_libraries(windows_worker_dispatch PRIVATE lite-worker-dispatch)
     add_test(NAME windows_worker_dispatch COMMAND windows_worker_dispatch)

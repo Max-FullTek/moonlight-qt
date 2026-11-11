@@ -7,6 +7,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <string>
 
 class ComputerManager;
 class NvComputer;
@@ -35,7 +36,7 @@ private:
     enum class InputKind { Command, Oversized, EndOfInput };
     struct Input {
         InputKind kind;
-        QByteArray line;
+        std::string line;
     };
     void enqueueInput(Input input);
     void drainInput();
