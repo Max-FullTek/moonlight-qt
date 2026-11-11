@@ -38,4 +38,5 @@ struct InputOptions
     bool absoluteMouseMode;
     bool absoluteTouchMode;
     bool backgroundGamepad;
+    bool desktopEnvironment;
 };

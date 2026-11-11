@@ -1,4 +1,4 @@
-#include "streaming/session.h"
+#include "input.h"
 
 #include <Limelight.h>
 #include "SDL_compat.h"
@@ -43,7 +43,7 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
     case KeyComboToggleFullScreen:
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Detected full-screen toggle combo");
-        Session::s_ActiveSession->toggleFullscreen();
+        m_Host.toggleFullscreen();
 
         // Force raise all keys just be safe across this full-screen/windowed
         // transition just in case key events get lost.
@@ -55,8 +55,7 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
                     "Detected stats toggle combo");
 
         // Toggle the stats overlay
-        Session::get()->getOverlayManager().setOverlayState(Overlay::OverlayDebug,
-                                                            !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug));
+        m_Host.toggleStatisticsOverlay();
         break;
 
     case KeyComboToggleMouseMode:
@@ -93,7 +92,7 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
     case KeyComboToggleMinimize:
         SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                     "Detected minimize combo");
-        Session::s_ActiveSession->minimizeStreamingWindow();
+        m_Host.minimizeStreamingWindow();
         break;
 
     case KeyComboPasteText:
@@ -148,7 +147,7 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
                     "Detected quitAndExit key combo");
 
         // Indicate that we want to exit afterwards
-        Session::get()->setShouldExit(true);
+        m_Host.quitHostAndExit();
 
         // Push a quit event to the main loop
         SDL_Event quitExitEvent;
@@ -173,7 +172,8 @@ void SdlInputHandler::performSpecialKeyCombo(KeyCombo combo)
         break;
 
     default:
-        Q_UNREACHABLE();
+        SDL_assert(false);
+        break;
     }
 }
 
@@ -277,7 +277,7 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
                 break;
             case SDL_SCANCODE_KP_ENTER:
                 modifiers |= MODIFIER_EXTENDED;
-                Q_FALLTHROUGH();
+                [[fallthrough]];
             case SDL_SCANCODE_RETURN:
                 keyCode = 0x0D;
                 break;
@@ -476,7 +476,7 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
                 break;
             case SDL_SCANCODE_INTERNATIONAL3:
                 shouldNotConvertToScanCodeOnServer = true;
-                Q_FALLTHROUGH();
+                [[fallthrough]];
             case SDL_SCANCODE_BACKSLASH:
                 keyCode = 0xDC;
                 break;
@@ -488,7 +488,7 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
                 break;
             case SDL_SCANCODE_INTERNATIONAL1:
                 shouldNotConvertToScanCodeOnServer = true;
-                Q_FALLTHROUGH();
+                [[fallthrough]];
             case SDL_SCANCODE_NONUSBACKSLASH:
                 keyCode = 0xE2;
                 break;

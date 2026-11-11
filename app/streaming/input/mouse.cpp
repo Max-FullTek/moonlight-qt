@@ -2,10 +2,9 @@
 
 #include <Limelight.h>
 #include "SDL_compat.h"
-#include "streaming/session.h"
 #include "streaming/streamutils.h"
 
-#include <QGuiApplication>
+#include <algorithm>
 
 namespace {
 
@@ -185,8 +184,8 @@ void SdlInputHandler::handleMouseMotionEvent(SDL_MouseMotionEvent* event)
         mouseInVideoRegion = isMouseInVideoRegion(x, y, windowWidth, windowHeight);
 
         // Clamp motion to the video region
-        x = qMin(qMax(x - dst.x, 0), dst.w);
-        y = qMin(qMax(y - dst.y, 0), dst.h);
+        x = std::clamp(x - dst.x, 0, dst.w);
+        y = std::clamp(y - dst.y, 0, dst.h);
 
         // Send the mouse position update if one of the following is true:
         // a) it is in the video region now
@@ -273,7 +272,7 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
             event->preciseY = -event->preciseY;
         }
 
-#ifdef Q_OS_DARWIN
+#ifdef __APPLE__
         // HACK: Clamp the scroll values on macOS to prevent OS scroll acceleration
         // from generating wild scroll deltas when scrolling quickly.
         event->preciseY = SDL_clamp(event->preciseY, -1.0f, 1.0f);
@@ -288,7 +287,7 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
             event->preciseX = -event->preciseX;
         }
 
-#ifdef Q_OS_DARWIN
+#ifdef __APPLE__
         // HACK: Clamp the scroll values on macOS to prevent OS scroll acceleration
         // from generating wild scroll deltas when scrolling quickly.
         event->preciseX = SDL_clamp(event->preciseX, -1.0f, 1.0f);
@@ -303,7 +302,7 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
             event->y = -event->y;
         }
 
-#ifdef Q_OS_DARWIN
+#ifdef __APPLE__
         // See comment above
         event->y = SDL_clamp(event->y, -1, 1);
 #endif
@@ -317,7 +316,7 @@ void SdlInputHandler::handleMouseWheelEvent(SDL_MouseWheelEvent* event)
             event->x = -event->x;
         }
 
-#ifdef Q_OS_DARWIN
+#ifdef __APPLE__
         // See comment above
         event->x = SDL_clamp(event->x, -1, 1);
 #endif
@@ -362,19 +361,18 @@ void SdlInputHandler::updatePointerRegionLock()
     // have full control over it and we don't touch it anymore.
     if (!m_PointerRegionLockToggledByUser) {
         // Lock the pointer in true full-screen mode or in any fullscreen mode when only a single monitor is present
-        if (Session* session = Session::get();
-            session != nullptr && session->usesQtWaylandStreamWindow()) {
+        if (m_Host.usesCompositorWindow()) {
             // Native Wayland has only compositor-managed fullscreen. Preserve
             // the established borderless policy: confine on a single-display
             // desktop, but let the pointer cross outputs on multi-display
             // desktops.
             m_PointerRegionLockActive =
-                session->isStreamingWindowFullscreen() && QGuiApplication::screens().size() == 1;
+                m_Host.shouldConfinePointerForCompositor();
         } else {
             Uint32 fullscreenFlags = SDL_GetWindowFlags(m_Window) & SDL_WINDOW_FULLSCREEN_DESKTOP;
             m_PointerRegionLockActive = (fullscreenFlags == SDL_WINDOW_FULLSCREEN) ||
                                         (fullscreenFlags != 0 && SDL_GetNumVideoDisplays() == 1);
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
             // Borderless desktop sessions behave like a maximized desktop
             // window, including on a single monitor. Keep the pointer free to
             // cross the video edges; the explicit lock shortcut still wins.

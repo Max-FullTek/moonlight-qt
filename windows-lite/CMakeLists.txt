@@ -143,6 +143,17 @@ target_compile_definitions(lite-touch-input PUBLIC HAVE_WINDOWS_PEN_INPUT HAVE_W
     PRIVATE NOMINMAX)
 target_link_libraries(lite-touch-input PUBLIC lite-stream-utils moonlight-common-c comctl32 hid)
 
+add_library(lite-input-events STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/input/input.cpp"
+    "${LITE_SOURCE_ROOT}/app/streaming/input/gamepad.cpp"
+    "${LITE_SOURCE_ROOT}/app/streaming/input/keyboard.cpp"
+    "${LITE_SOURCE_ROOT}/app/streaming/input/mouse.cpp"
+    "${LITE_SOURCE_ROOT}/app/streaming/input/touchpad.cpp")
+target_compile_features(lite-input-events PUBLIC cxx_std_17)
+target_compile_options(lite-input-events PRIVATE /W3 /WX)
+target_compile_definitions(lite-input-events PRIVATE NOMINMAX HAVE_PHYSICAL_DS5_HAPTICS)
+target_link_libraries(lite-input-events PUBLIC lite-touch-input lite-cursor-shape)
+
 foreach(required IN ITEMS include/x64/libavutil/frame.h lib/x64/avutil.lib lib/x64/avutil-61.dll
                           include/x64/libavcodec/avcodec.h lib/x64/avcodec.lib lib/x64/avcodec-63.dll)
     if(NOT EXISTS "${LITE_DEPS_ROOT}/${required}")
@@ -390,6 +401,13 @@ if(BUILD_TESTING)
         add_test(NAME ${input_test} COMMAND ${input_test})
         set_tests_properties(${input_test} PROPERTIES TIMEOUT 15)
     endforeach()
+
+    add_executable(native_input_owner "${LITE_SOURCE_ROOT}/tests/native_input_owner/main.cpp")
+    target_compile_definitions(native_input_owner PRIVATE SDL_MAIN_HANDLED)
+    target_compile_options(native_input_owner PRIVATE /W3 /WX)
+    target_link_libraries(native_input_owner PRIVATE lite-input-events)
+    add_test(NAME native_input_owner COMMAND native_input_owner)
+    set_tests_properties(native_input_owner PROPERTIES TIMEOUT 15)
 
     add_executable(cursor_shape_classification
         "${LITE_SOURCE_ROOT}/tests/cursor_shape_classification/main.cpp")

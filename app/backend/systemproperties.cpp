@@ -1,5 +1,6 @@
 #include "systemproperties.h"
 #include "utils.h"
+#include "settings/mappingmanager.h"
 
 #include <QGuiApplication>
 #include <QLibraryInfo>
@@ -190,7 +191,10 @@ void SystemProperties::startAsyncLoad()
     // This isn't actually asynchronous (due to the need to synchronize with
     // SdlGamepadKeyNavigation), but we don't query it in the constructor
     // because it's expensive.
-    unmappedGamepads = QString::fromStdString(SdlInputHandler::getUnmappedGamepads());
+    unmappedGamepads = QString::fromStdString(SdlInputHandler::getUnmappedGamepads([] {
+        MappingManager mappings;
+        mappings.applyMappings();
+    }));
     if (!unmappedGamepads.isEmpty()) {
         emit unmappedGamepadsChanged();
     }

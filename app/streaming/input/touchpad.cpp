@@ -3,7 +3,6 @@
 #include <Limelight.h>
 #include <algorithm>
 #include <utility>
-#include "streaming/session.h"
 
 void SdlInputHandler::selectNativeTouchpadTransport()
 {
@@ -157,7 +156,7 @@ void SdlInputHandler::handleNativeTouchpadEvent(SDL_TouchFingerEvent* event)
     // Queue a single event behind the current batch to collect the remaining
     // contacts that belong to this multi-contact frame.
     if (!m_TouchpadFlushEventQueued) {
-        if (Session::queueTouchpadFrameFlush()) {
+        if (m_Host.queueTouchpadFlush()) {
             m_TouchpadFlushEventQueued = true;
         }
         else {

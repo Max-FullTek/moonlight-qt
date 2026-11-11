@@ -1,6 +1,8 @@
 #pragma once
 
 #include "inputoptions.h"
+#include "inputhost.h"
+#include <functional>
 #include "streaming/input/gamepadsensorrate.h"
 #include "streaming/input/keyboardstate.h"
 #include "streaming/input/touchpadcontacts.h"
@@ -155,7 +157,7 @@ struct RemoteCursorUpdate {
 class SdlInputHandler
 {
 public:
-    explicit SdlInputHandler(const InputOptions& prefs, int streamWidth, int streamHeight,
+    explicit SdlInputHandler(IInputHost& host, const InputOptions& prefs, int streamWidth, int streamHeight,
                              bool enablePhysicalDualSenseHaptics);
 
     ~SdlInputHandler();
@@ -263,7 +265,7 @@ public:
     int getLocalCursorMode() const;
 
     static
-    std::string getUnmappedGamepads();
+    std::string getUnmappedGamepads(const std::function<void()>& applyMappings);
 
     // KeyCombo 枚举（公开以便 OverlayMenu 等外部组件调用）
     enum KeyCombo {
@@ -309,6 +311,7 @@ public:
     void setGamepadMouse(bool enabled) { m_GamepadMouse = enabled; }
 
 private:
+    IInputHost& m_Host;
     bool m_LocalControlsActive = false;
     bool m_LocalKeysUntilRelease[SDL_NUM_SCANCODES] = {};
     Uint32 m_LocalMouseButtonsUntilRelease = 0;

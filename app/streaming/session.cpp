@@ -122,6 +122,7 @@ SessionFFmpegDecoderHost s_FFmpegDecoderHost;
 #include <QCursor>
 #include <QProcess>
 #include <QScreen>
+#include "settings/mappingmanager.h"
 #include <QtGlobal>
 #include <QMutexLocker>
 #include <QUuid>
@@ -1839,7 +1840,10 @@ bool Session::validateLaunch(SDL_Window* testWindow)
     }
 
     // Check for unmapped gamepads
-    if (!SdlInputHandler::getUnmappedGamepads().empty()) {
+    if (!SdlInputHandler::getUnmappedGamepads([] {
+            MappingManager mappings;
+            mappings.applyMappings();
+        }).empty()) {
         emitLaunchWarning(tr("An attached gamepad has no mapping and won't be usable. Visit the Moonlight help to resolve this."));
     }
 
@@ -2252,6 +2256,17 @@ void Session::toggleFullscreen()
 
     // Input handler might need stop/stop mouse grab after changing modes
     m_InputHandler->updatePointerRegionLock();
+}
+
+bool Session::shouldConfinePointerForCompositor() const
+{
+    return isStreamingWindowFullscreen() && QGuiApplication::screens().size() == 1;
+}
+
+void Session::toggleStatisticsOverlay()
+{
+    m_OverlayManager.setOverlayState(Overlay::OverlayDebug,
+                                     !m_OverlayManager.isOverlayEnabled(Overlay::OverlayDebug));
 }
 
 bool Session::isStreamingWindowFullscreen() const
@@ -3818,8 +3833,9 @@ void Session::start()
         m_Preferences->absoluteMouseMode,
         m_Preferences->absoluteTouchMode,
         m_Preferences->backgroundGamepad,
+        WMUtils::isRunningDesktopEnvironment(),
     };
-    m_InputHandler = new SdlInputHandler(inputOptions, m_StreamConfig.width,
+    m_InputHandler = new SdlInputHandler(*this, inputOptions, m_StreamConfig.width,
                                          m_StreamConfig.height, enablePhysicalDualSenseHaptics);
     updateDualSenseHapticsControllerTarget();
 
@@ -5382,3 +5398,18 @@ void Session::stopMicrophone()
     // Microphone not supported on Steam Link
 }
 #endif
+
+void Session::applyControllerMappings()
+{
+    MappingManager mappings;
+    mappings.applyMappings();
+}
+
+std::optional<uint16_t> Session::sensorReportRateLimit() const
+{
+    uint16_t limit;
+    if (Utils::getEnvironmentVariableOverride("SENSOR_REPORT_RATE_LIMIT_HZ", &limit)) {
+        return limit;
+    }
+    return std::nullopt;
+}

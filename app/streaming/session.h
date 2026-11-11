@@ -39,7 +39,7 @@ class MacQtEventPumpInputGuard;
 class StylusReplayTest;
 #endif
 
-class Session : public QObject
+class Session : public QObject, public IInputHost
 {
     Q_OBJECT
 
@@ -87,9 +87,11 @@ public:
 
     // These route window-state operations through Qt only for the native
     // Wayland stream window. All other platforms retain SDL's behavior.
-    bool isStreamingWindowFullscreen() const;
+    bool isStreamingWindowFullscreen() const override;
+    bool usesCompositorWindow() const override { return usesQtWaylandStreamWindow(); }
+    bool shouldConfinePointerForCompositor() const override;
     bool usesQtWaylandStreamWindow() const;
-    void minimizeStreamingWindow();
+    void minimizeStreamingWindow() override;
 
 signals:
     void gpuiControlsChanged(bool active, bool gamepadMouse, bool hasGamepad);
@@ -165,7 +167,14 @@ private:
     void getWindowDimensions(int& x, int& y,
                              int& width, int& height);
 
-    void toggleFullscreen();
+    void toggleFullscreen() override;
+    void toggleStatisticsOverlay() override;
+    void quitHostAndExit() override { setShouldExit(true); }
+    void showInputControls() override { showQtOverlayMenu(); }
+    bool queueTouchpadFlush() override { return queueTouchpadFrameFlush(); }
+    void applyControllerMappings() override;
+    std::optional<uint16_t> sensorReportRateLimit() const override;
+    bool queueCursorFlush() override { return queueCursorVisibilityFlush(); }
 
     // Qt-based overlay menu
     void showQtOverlayMenu(std::optional<QPoint> pointerGlobalPosition = std::nullopt,
@@ -196,7 +205,7 @@ private:
     float queryDisplaySdrWhiteNits(const QString& displayName, bool logFailures = true);
 #endif
 
-    void notifyMouseEmulationMode(bool enabled);
+    void notifyMouseEmulationMode(bool enabled) override;
 
     static
     bool queueTouchpadFrameFlush();

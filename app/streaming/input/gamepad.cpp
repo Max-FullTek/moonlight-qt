@@ -1,10 +1,8 @@
-#include "streaming/session.h"
+#include "input.h"
 #include "streaming/audio/dualsensehapticsrouting.h"
 
 #include <Limelight.h>
 #include "SDL_compat.h"
-#include "settings/mappingmanager.h"
-#include "utils.h"
 
 #include <algorithm>
 #include <cmath>
@@ -269,14 +267,14 @@ void SdlInputHandler::sendGamepadBatteryState(GamepadState* state, SDL_JoystickP
         return;
     }
 
-    LiSendControllerBatteryEvent(state->index, batteryState, batteryPercentage);
+    LiSendControllerBatteryEvent(static_cast<uint8_t>(state->index), batteryState, batteryPercentage);
 }
 
 void SdlInputHandler::sendGamepadArrival(GamepadState* state,
                                          SDL_JoystickPowerLevel powerLevel)
 {
 #if SDL_VERSION_ATLEAST(2, 0, 14)
-    LiSendControllerArrivalEvent(state->index, m_GamepadMask, state->type,
+    LiSendControllerArrivalEvent(static_cast<uint8_t>(state->index), m_GamepadMask, state->type,
                                  state->supportedButtonFlags, state->capabilities);
 #else
     sendGamepadState(state);
@@ -320,8 +318,8 @@ Uint32 SdlInputHandler::mouseEmulationTimerCallback(Uint32 interval, void *param
     float deltaY;
 
     // Produce a base vector for mouse movement with increased speed as we deviate further from center
-    deltaX = std::pow(rawX / 32766.0f * MOUSE_EMULATION_MOTION_MULTIPLIER, 3);
-    deltaY = std::pow(rawY / 32766.0f * MOUSE_EMULATION_MOTION_MULTIPLIER, 3);
+    deltaX = static_cast<float>(std::pow(rawX / 32766.0f * MOUSE_EMULATION_MOTION_MULTIPLIER, 3));
+    deltaY = static_cast<float>(std::pow(rawY / 32766.0f * MOUSE_EMULATION_MOTION_MULTIPLIER, 3));
 
     // Enforce deadzones
     deltaX = std::abs(deltaX) > MOUSE_EMULATION_DEADZONE ? deltaX - MOUSE_EMULATION_DEADZONE : 0;
@@ -498,7 +496,7 @@ void SdlInputHandler::handleControllerButtonEvent(SDL_ControllerButtonEvent* eve
 
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                                 "Mouse emulation deactivated");
-                    Session::get()->notifyMouseEmulationMode(false);
+                    m_Host.notifyMouseEmulationMode(false);
                 }
                 else if (m_GamepadMouse) {
                     // Send the start button up event to the host, since we won't do it below
@@ -509,11 +507,11 @@ void SdlInputHandler::handleControllerButtonEvent(SDL_ControllerButtonEvent* eve
 
                     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                                 "Mouse emulation active");
-                    Session::get()->notifyMouseEmulationMode(true);
+                    m_Host.notifyMouseEmulationMode(true);
                 }
                 else {
                     // Gamepad mouse disabled — long-press Start opens overlay menu
-                    Session::get()->showQtOverlayMenu();
+                    m_Host.showInputControls();
                 }
             }
         }
@@ -587,9 +585,7 @@ void SdlInputHandler::handleControllerButtonEvent(SDL_ControllerButtonEvent* eve
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Detected stats toggle gamepad combo");
 
             // Toggle the stats overlay
-            Session::get()->getOverlayManager().setOverlayState(
-                Overlay::OverlayDebug,
-                !Session::get()->getOverlayManager().isOverlayEnabled(Overlay::OverlayDebug));
+            m_Host.toggleStatisticsOverlay();
 
             // Clear buttons down on this gamepad
             LiSendMultiControllerEvent(state->index, m_GamepadMask, 0, 0, 0, 0, 0, 0, 0);
@@ -972,7 +968,7 @@ void SdlInputHandler::handleControllerDeviceEvent(SDL_ControllerDeviceEvent* eve
         state = findStateForGamepad(event->which);
         if (state != NULL) {
             if (state->mouseEmulationTimer != 0 || state->mouseEmulationSuspended) {
-                Session::get()->notifyMouseEmulationMode(false);
+                m_Host.notifyMouseEmulationMode(false);
                 if (state->mouseEmulationTimer != 0) SDL_RemoveTimer(state->mouseEmulationTimer);
                 state->mouseEmulationTimer = 0;
                 state->mouseEmulationSuspended = false;
@@ -1154,13 +1150,12 @@ void SdlInputHandler::setMotionEventState(uint16_t controllerNumber, uint8_t mot
         return;
     }
 
-    uint16_t reportRateHzLimit;
-    if (Utils::getEnvironmentVariableOverride("SENSOR_REPORT_RATE_LIMIT_HZ", &reportRateHzLimit) &&
-        reportRateHz > reportRateHzLimit) {
+    const auto reportRateHzLimit = m_Host.sensorReportRateLimit();
+    if (reportRateHzLimit && reportRateHz > *reportRateHzLimit) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Sensor report rate limited to %u Hz by environment variable",
-                    reportRateHzLimit);
-        reportRateHz = reportRateHzLimit;
+                    *reportRateHzLimit);
+        reportRateHz = *reportRateHzLimit;
     }
 
 #if SDL_VERSION_ATLEAST(2, 0, 14)
@@ -1226,7 +1221,7 @@ bool SdlInputHandler::isGamepadIgnored(const char* guid) const
     });
 }
 
-std::string SdlInputHandler::getUnmappedGamepads()
+std::string SdlInputHandler::getUnmappedGamepads(const std::function<void()>& applyMappings)
 {
     std::string ret;
 
@@ -1236,8 +1231,7 @@ std::string SdlInputHandler::getUnmappedGamepads()
                      SDL_GetError());
     }
 
-    MappingManager mappingManager;
-    mappingManager.applyMappings();
+    applyMappings();
 
     int numJoysticks = SDL_NumJoysticks();
     for (int i = 0; i < numJoysticks; i++) {
@@ -1364,7 +1358,7 @@ bool SdlInputHandler::toggleGamepadMouseEmulation()
                 releaseMouseEmulationButtons(state);
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "Mouse emulation deactivated (via menu)");
-                Session::get()->notifyMouseEmulationMode(false);
+                m_Host.notifyMouseEmulationMode(false);
                 return false;
             } else {
                 // Activate
@@ -1378,7 +1372,7 @@ bool SdlInputHandler::toggleGamepadMouseEmulation()
                 }
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                             "Mouse emulation active (via menu)");
-                Session::get()->notifyMouseEmulationMode(true);
+                m_Host.notifyMouseEmulationMode(true);
                 return true;
             }
         }

@@ -1,9 +1,6 @@
 #include <Limelight.h>
 #include "SDL_compat.h"
-#include "streaming/session.h"
-#include "settings/mappingmanager.h"
-#include "path.h"
-#include "utils.h"
+#include "input.h"
 
 #ifdef HAVE_WINDOWS_RAW_TOUCHPAD
 #include "wintouchpad.h"
@@ -12,15 +9,15 @@
 #include <algorithm>
 #include <sstream>
 #include <string_view>
+#ifdef __APPLE__
 #include <QtGlobal>
-#ifdef Q_OS_MACOS
 #include <QImage>
 #endif
 
 // Include SDL_syswm.h after Qt headers to avoid X11 macro conflicts on Linux
 #include <SDL_syswm.h>
 
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
 #include <Windows.h>
 #include <Imm.h>
 #pragma comment(lib, "imm32.lib")
@@ -36,14 +33,6 @@ bool nativeCursorSubstitutionEnabled()
         SDL_getenv("MOONLIGHT_NATIVE_CURSOR") == nullptr ||
         std::string_view(SDL_getenv("MOONLIGHT_NATIVE_CURSOR")) != "0";
     return enabled;
-}
-
-bool isStreamWindowFullscreen(SDL_Window* window)
-{
-    if (Session* session = Session::get()) {
-        return session->isStreamingWindowFullscreen();
-    }
-    return window != nullptr && (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
 }
 
 bool toSdlSystemCursor(NativeCursorShape shape, SDL_SystemCursor& systemCursor)
@@ -89,9 +78,9 @@ bool toSdlSystemCursor(NativeCursorShape shape, SDL_SystemCursor& systemCursor)
 
 } // namespace
 
-SdlInputHandler::SdlInputHandler(const InputOptions& prefs, int streamWidth, int streamHeight,
+SdlInputHandler::SdlInputHandler(IInputHost& host, const InputOptions& prefs, int streamWidth, int streamHeight,
                                  bool enablePhysicalDualSenseHaptics)
-    : m_MultiController(prefs.multiController), m_GamepadMouse(prefs.gamepadMouse),
+    : m_Host(host), m_MultiController(prefs.multiController), m_GamepadMouse(prefs.gamepadMouse),
       m_EnableDualSenseHaptics(enablePhysicalDualSenseHaptics),
       m_SwapMouseButtons(prefs.swapMouseButtons), m_SwapWinAltKeys(prefs.swapWinAltKeys),
       m_ReverseScrollDirection(prefs.reverseScrollDirection),
@@ -141,7 +130,7 @@ SdlInputHandler::SdlInputHandler(const InputOptions& prefs, int streamWidth, int
       m_NumFingersDown(0)
 {
     // System keys are always captured when running without a DE
-    if (!WMUtils::isRunningDesktopEnvironment()) {
+    if (!prefs.desktopEnvironment) {
         m_CaptureSystemKeysMode = InputOptions::CSK_ALWAYS;
     }
 
@@ -172,7 +161,7 @@ SdlInputHandler::SdlInputHandler(const InputOptions& prefs, int streamWidth, int
     // Opt-out of SDL's built-in Alt+Tab handling while keyboard grab is enabled
     SDL_SetHint(SDL_HINT_ALLOW_ALT_TAB_WHILE_GRABBED, "0");
 
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
     // Keep Alt+F4 in the keyboard input path for the entire streaming session,
     // including when the stream is running in a window.
     SDL_SetHint(SDL_HINT_WINDOWS_NO_CLOSE_ON_ALT_F4, "1");
@@ -200,12 +189,12 @@ SdlInputHandler::SdlInputHandler(const InputOptions& prefs, int streamWidth, int
     m_SpecialKeyCombos[KeyComboUngrabInput].keyCombo = KeyComboUngrabInput;
     m_SpecialKeyCombos[KeyComboUngrabInput].keyCode = SDLK_z;
     m_SpecialKeyCombos[KeyComboUngrabInput].scanCode = SDL_SCANCODE_Z;
-    m_SpecialKeyCombos[KeyComboUngrabInput].enabled = WMUtils::isRunningDesktopEnvironment();
+    m_SpecialKeyCombos[KeyComboUngrabInput].enabled = prefs.desktopEnvironment;
 
     m_SpecialKeyCombos[KeyComboToggleFullScreen].keyCombo = KeyComboToggleFullScreen;
     m_SpecialKeyCombos[KeyComboToggleFullScreen].keyCode = SDLK_x;
     m_SpecialKeyCombos[KeyComboToggleFullScreen].scanCode = SDL_SCANCODE_X;
-    m_SpecialKeyCombos[KeyComboToggleFullScreen].enabled = WMUtils::isRunningDesktopEnvironment();
+    m_SpecialKeyCombos[KeyComboToggleFullScreen].enabled = prefs.desktopEnvironment;
 
     m_SpecialKeyCombos[KeyComboToggleStatsOverlay].keyCombo = KeyComboToggleStatsOverlay;
     m_SpecialKeyCombos[KeyComboToggleStatsOverlay].keyCode = SDLK_s;
@@ -225,7 +214,7 @@ SdlInputHandler::SdlInputHandler(const InputOptions& prefs, int streamWidth, int
     m_SpecialKeyCombos[KeyComboToggleMinimize].keyCombo = KeyComboToggleMinimize;
     m_SpecialKeyCombos[KeyComboToggleMinimize].keyCode = SDLK_d;
     m_SpecialKeyCombos[KeyComboToggleMinimize].scanCode = SDL_SCANCODE_D;
-    m_SpecialKeyCombos[KeyComboToggleMinimize].enabled = WMUtils::isRunningDesktopEnvironment();
+    m_SpecialKeyCombos[KeyComboToggleMinimize].enabled = prefs.desktopEnvironment;
 
     m_SpecialKeyCombos[KeyComboPasteText].keyCombo = KeyComboPasteText;
     m_SpecialKeyCombos[KeyComboPasteText].keyCode = SDLK_v;
@@ -245,7 +234,7 @@ SdlInputHandler::SdlInputHandler(const InputOptions& prefs, int streamWidth, int
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].keyCombo = KeyComboToggleKeyboardGrab;
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].keyCode = SDLK_k;
     m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].scanCode = SDL_SCANCODE_K;
-    m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].enabled = WMUtils::isRunningDesktopEnvironment();
+    m_SpecialKeyCombos[KeyComboToggleKeyboardGrab].enabled = prefs.desktopEnvironment;
 
     m_OldIgnoreDevices = SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES) ?
         SDL_GetHint(SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES) : "";
@@ -294,8 +283,7 @@ SdlInputHandler::SdlInputHandler(const InputOptions& prefs, int streamWidth, int
                      SDL_GetError());
     }
 
-    MappingManager mappingManager;
-    mappingManager.applyMappings();
+    m_Host.applyControllerMappings();
 
     // Flush gamepad arrival and departure events which may be queued before
     // starting the gamecontroller subsystem again. This prevents us from
@@ -337,7 +325,7 @@ SdlInputHandler::~SdlInputHandler()
 #ifdef HAVE_WINDOWS_PEN_INPUT
     shutdownWindowsPenInput();
 #endif
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
     // Restore SDL's normal Alt+F4 handling outside the streaming session.
     SDL_SetHint(SDL_HINT_WINDOWS_NO_CLOSE_ON_ALT_F4, "0");
 #endif
@@ -351,7 +339,7 @@ SdlInputHandler::~SdlInputHandler()
 
     for (int i = 0; i < MAX_GAMEPADS; i++) {
         if (m_GamepadState[i].mouseEmulationTimer != 0 || m_GamepadState[i].mouseEmulationSuspended) {
-            Session::get()->notifyMouseEmulationMode(false);
+            m_Host.notifyMouseEmulationMode(false);
             if (m_GamepadState[i].mouseEmulationTimer != 0) SDL_RemoveTimer(m_GamepadState[i].mouseEmulationTimer);
             // 析构是模拟鼠标键释放的第四条路径:会话结束时按住的键同样要
             // 还给主机,否则主机侧鼠标键卡死
@@ -417,7 +405,7 @@ void SdlInputHandler::setWindow(SDL_Window *window)
     }
 #endif
 
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
     SDL_SysWMinfo info;
     SDL_VERSION(&info.version);
     if (SDL_GetWindowWMInfo(m_Window, &info) && info.subsystem == SDL_SYSWM_WINDOWS) {
@@ -478,10 +466,11 @@ void SdlInputHandler::applyCapturedCursorState()
     SDL_ShowCursor(getCapturedCursorVisibilityState());
 }
 
-Uint32 SdlInputHandler::remoteCursorHideTimerCallback(Uint32 interval, void*)
+Uint32 SdlInputHandler::remoteCursorHideTimerCallback(Uint32 interval, void* context)
 {
     // 定时器跑在 SDL 的定时器线程上，macOS 要求光标接口只在主线程调，绕回主循环去做
-    if (!Session::queueCursorVisibilityFlush()) {
+    auto* handler = static_cast<SdlInputHandler*>(context);
+    if (!handler->m_Host.queueCursorFlush()) {
         // 事件队列满了。这里必须重试而不是就此收工：定时器一停，
         // m_RemoteCursorHideTimer 就永远卡在一个已过期的 ID 上，
         // updateRemoteCursorVisibility() 之后每次隐藏请求都会被那道
@@ -658,7 +647,7 @@ void SdlInputHandler::synchronizeLocalCursorMode()
 
 double SdlInputHandler::getRemoteCursorScale() const
 {
-#ifdef Q_OS_MACOS
+#ifdef __APPLE__
     // SDL 的 Cocoa 后端把 surface 的像素宽高当成 NSImage 的逻辑 point 尺寸，所以
     // Retina 屏上要先按 backing 比例把光标缩回去。比例从窗口的 point / pixel 尺寸算，
     // 而不是问屏幕 —— 窗口横跨两块屏时它反映的是实际渲染用的那个 backing store。
@@ -686,7 +675,7 @@ double SdlInputHandler::getRemoteCursorScale() const
 
 void SdlInputHandler::refreshRemoteCursorScale()
 {
-#ifdef Q_OS_MACOS
+#ifdef __APPLE__
     // 缩放比例是创建光标那一刻算的，而 updateRemoteCursor() 只在主机推来新形状时才会
     // 被调用。窗口从 Retina 屏拖到 1x 屏（或反过来）时，光标会一直停在旧比例上 ——
     // 大一倍或小一倍 —— 直到主机下一次换形状。这里用缓存的那份形状重建一次。
@@ -729,7 +718,7 @@ void SdlInputHandler::updateRemoteCursor(const RemoteCursorUpdate& update)
             int cursorPitch = update.width * 4;
             const char* cursorPixels = update.bgra.data();
 
-#ifdef Q_OS_MACOS
+#ifdef __APPLE__
             QImage scaledCursor;
             const double scale = getRemoteCursorScale();
             if (scale > 1.0) {
@@ -819,7 +808,7 @@ void SdlInputHandler::notifyFocusLost()
     // This lets user to interact with our window's title bar and with the buttons in it.
     // Doing this while the window is full-screen breaks the transition out of FS
     // (desktop and exclusive), so we must check for that before releasing mouse capture.
-    if (!isStreamWindowFullscreen(m_Window) && !m_AbsoluteMouseMode) {
+    if (!m_Host.isStreamingWindowFullscreen() && !m_AbsoluteMouseMode) {
         setCaptureActive(false);
     }
 
@@ -830,7 +819,7 @@ void SdlInputHandler::notifyFocusLost()
 
 void SdlInputHandler::notifyFocusGained()
 {
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
     SDL_SysWMinfo info;
     SDL_VERSION(&info.version);
     if (SDL_GetWindowWMInfo(m_Window, &info) && info.subsystem == SDL_SYSWM_WINDOWS) {
@@ -854,7 +843,7 @@ void SdlInputHandler::updateKeyboardGrabState()
     bool shouldGrab = m_CaptureSystemKeysMode != InputOptions::CSK_OFF && isCaptureActive();
     if (shouldGrab) {
         if (m_CaptureSystemKeysMode == InputOptions::CSK_FULLSCREEN &&
-            !isStreamWindowFullscreen(m_Window)) {
+            !m_Host.isStreamingWindowFullscreen()) {
             // Ungrab if it's fullscreen only and we left fullscreen
             shouldGrab = false;
         }
@@ -889,7 +878,7 @@ bool SdlInputHandler::isSystemKeyCaptureActive()
     }
 
     if (m_CaptureSystemKeysMode == InputOptions::CSK_FULLSCREEN &&
-        !isStreamWindowFullscreen(m_Window)) {
+        !m_Host.isStreamingWindowFullscreen()) {
         return false;
     }
 
@@ -1000,7 +989,7 @@ void SdlInputHandler::handleTouchFingerEvent(SDL_TouchFingerEvent* event)
         // traditional mouse path. Ignore any other indirect touch callbacks.
         return;
     }
-#elif defined(Q_OS_DARWIN)
+#elif defined(__APPLE__)
     // SDL2 sends touch events from trackpads by default on
     // macOS. This totally screws our actual mouse handling,
     // so we must explicitly ignore touch events on macOS

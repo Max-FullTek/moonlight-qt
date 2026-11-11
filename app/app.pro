@@ -335,6 +335,7 @@ HEADERS += \
     streaming/input/penhistory.h \
     streaming/input/input.h \
     streaming/input/inputoptions.h \
+    streaming/input/inputhost.h \
     streaming/input/gamepadsensorrate.h \
     streaming/input/keyboardstate.h \
     streaming/input/touchpadcontacts.h \
