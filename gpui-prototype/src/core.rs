@@ -383,6 +383,56 @@ mod tests {
         result
     }
     #[test]
+    #[ignore = "requires an isolated host and Windows desktop; run check_bridge.py with launch-rejected"]
+    fn rust_rejected_launch_releases_real_worker_session() -> anyhow::Result<()> {
+        let client = Client::spawn_at(
+            std::env::var("RUST_HOST_API_WORKER")?.into(),
+            std::env::var("RUST_HOST_API_PROFILE")?.into(),
+        )?;
+        let wait = |mut accept: Box<dyn FnMut(Event) -> anyhow::Result<bool>>| {
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while Instant::now() < deadline {
+                for event in client.drain() {
+                    if accept(event)? {
+                        return Ok(());
+                    }
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            anyhow::bail!("Expected session event did not arrive")
+        };
+        wait(Box::new(|event| Ok(matches!(event, Event::Hosts { hosts }
+            if hosts.iter().any(|host| host.online && host.paired && host.apps.iter().any(|app| app.id == 1))))))?;
+        let mut settings = stream_settings(&crate::settings::Settings::default());
+        settings["auto_resolution"] = json!(false);
+        settings["codec"] = json!(1);
+        settings["display"]["decoder"] = json!(2);
+        for _ in 0..2 {
+            client.send(json!({"command":"start","host":"rust-display-host","app":1,"settings":settings}))?;
+            let mut launching = false;
+            let mut rejected = false;
+            wait(Box::new(move |event| {
+                match event {
+                    Event::Launching => launching = true,
+                    Event::Error { code, message } => {
+                        anyhow::ensure!(code == "launch_failed" && message.contains("fixture launch denied"),
+                            "Unexpected launch error: {code}: {message}");
+                        rejected = true;
+                    }
+                    Event::StreamFinished => {
+                        anyhow::ensure!(launching && rejected, "Session finished before reporting the host rejection");
+                        return Ok(true);
+                    }
+                    Event::StreamStarted => anyhow::bail!("Rejected launch started streaming"),
+                    _ => {}
+                }
+                Ok(false)
+            }))?;
+        }
+        client.send(json!({"command":"shutdown"}))?;
+        wait(Box::new(|event| Ok(matches!(event, Event::Error {code,..} if code=="core_exited"))))
+    }
+    #[test]
     #[ignore = "requires isolated loopback host and a real worker; run check_bridge.py with quit"]
     fn rust_quit_through_real_worker_context() -> anyhow::Result<()> {
         let client = Client::spawn_at(std::env::var("RUST_HOST_API_WORKER")?.into(),

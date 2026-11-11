@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <thread>
 
 #include <Limelight.h>
 #include <opus_multistream.h>
@@ -40,7 +41,6 @@ class Session : public QObject
 
     friend class SdlInputHandler;
     friend class DeferredSessionCleanupTask;
-    friend class AsyncConnectionStartThread;
 
 public:
     explicit Session(NvComputer* computer,
@@ -323,6 +323,7 @@ private:
     int m_LastTerminationErrorCode;      // stored to show final error if reconnect gives up
 
     bool m_AsyncConnectionSuccess;
+    std::thread m_ConnectionStartThread;
     float m_LastClientSdrWhiteNits;
     int m_PortTestResults;
 

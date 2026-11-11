@@ -25,6 +25,7 @@
 #include <QCoreApplication>
 #include <QHostInfo>
 #include <QThread>
+#include <future>
 
 #ifdef HAVE_FFMPEG
 #include "video/ffmpeg.h"
@@ -1236,6 +1237,10 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences* prefere
 
 Session::~Session()
 {
+    if (m_ConnectionStartThread.joinable()) {
+        m_ConnectionStartThread.join();
+    }
+
     // NB: This may not get destroyed for a long time! Don't put any non-trivial cleanup here.
     // Use Session::exec() or DeferredSessionCleanupTask instead.
 
@@ -3198,24 +3203,6 @@ void Session::handleSdlUserEvent(const SDL_UserEvent& event)
     }
 }
 
-class AsyncConnectionStartThread : public QThread
-{
-public:
-    AsyncConnectionStartThread(Session* session) :
-        QThread(nullptr),
-        m_Session(session)
-    {
-        setObjectName("Async Conn Start");
-    }
-
-    void run() override
-    {
-        m_Session->m_AsyncConnectionSuccess = m_Session->startConnectionAsync();
-    }
-
-    Session* m_Session;
-};
-
 bool Session::tryReconnect()
 {
 
@@ -3304,13 +3291,11 @@ bool Session::tryReconnect()
                            2500);
 
         // Run the connection start on a worker thread and pump events while we wait
-        m_AsyncConnectionSuccess = false;
         m_HasReceivedVideo = false;
         updateDualSenseHapticsControllerTarget();
-        AsyncConnectionStartThread thread(this);
-        thread.start();
+        auto result = std::async(std::launch::async, [this] { return startConnectionAsync(); });
 
-        while (thread.isRunning()) {
+        while (result.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
             SDL_Event ev;
             while (SDL_PollEvent(&ev)) {
                 if (handleReconnectEvent(ev)) {
@@ -3324,13 +3309,13 @@ bool Session::tryReconnect()
             processReconnectQtEvents();
             SDL_Delay(10);
         }
-        thread.wait();
+        const bool connectionSucceeded = result.get();
 
         if (cancelled) {
             break;
         }
 
-        if (m_AsyncConnectionSuccess) {
+        if (connectionSucceeded) {
             reconnected = true;
             if (m_ClipboardHelper != nullptr) {
                 m_ClipboardHelper->updateHostContext();
@@ -3826,10 +3811,10 @@ void Session::start()
     updateDualSenseHapticsControllerTarget();
 
     // Kick off the async connection thread then return to the caller to pump the event loop
-    auto thread = new AsyncConnectionStartThread(this);
-    QObject::connect(thread, &QThread::finished, this, &Session::exec);
-    QObject::connect(thread, &QThread::finished, thread, &QThread::deleteLater);
-    thread->start();
+    m_ConnectionStartThread = std::thread([this] {
+        m_AsyncConnectionSuccess = startConnectionAsync();
+        QMetaObject::invokeMethod(this, &Session::exec, Qt::QueuedConnection);
+    });
 }
 
 void Session::interrupt()
@@ -4037,6 +4022,7 @@ static const Uint32 k_FullScreenEntryTimeoutMs = 1200;
 
 void Session::exec()
 {
+    m_ConnectionStartThread.join();
 
     // If the connection failed, clean up and abort the connection.
     if (!m_AsyncConnectionSuccess) {

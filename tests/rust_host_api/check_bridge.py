@@ -1,6 +1,7 @@
 """Real Rust Client -> C++ profile context -> Rust HTTPS -> mapped UI event.
 
-Only loopback, public keys and a unique isolated profile. No visible UI/stream.
+Only loopback, fixture credentials and a unique isolated profile. The rejected
+launch probes the local decoder but never starts a stream.
 """
 import http.server
 import json
@@ -16,7 +17,8 @@ from urllib.parse import parse_qs, urlsplit
 
 def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode="ok"):
     quit_mode = peer_executable == "quit"
-    if quit_mode:
+    launch_mode = peer_executable == "launch-rejected"
+    if quit_mode or launch_mode:
         peer_executable = None
     root = Path(__file__).resolve().parents[2]
     worker = Path(worker).resolve()
@@ -81,6 +83,9 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
             elif url.path == "/displays":
                 body = json.dumps({"status_code": 200, "displays": [
                     {"friendly_name": "家中螢幕 🎮", "display_name": "screen", "device_id": "screen-1"}, {}]}, ensure_ascii=False).encode()
+            elif url.path == "/launch" and launch_mode:
+                assert isinstance(self.connection, ssl.SSLSocket), "Launch was not pinned TLS"
+                body = b'<root status_code="503" status_message="fixture launch denied"/>'
             elif url.path == "/cancel" and quit_mode:
                 assert isinstance(self.connection, ssl.SSLSocket), "Cancel was not pinned TLS"
                 phase = phase_file.read_text()
@@ -132,8 +137,12 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
                QT_QPA_PLATFORM_PLUGIN_PATH=str(Path(qt_plugins).resolve() / "platforms"),
                PATH=str(runtime) + ";" + os.environ["PATH"])
     try:
+        test = ("rust_rejected_launch_releases_real_worker_session" if launch_mode else
+                "rust_quit_through_real_worker_context" if quit_mode else
+                "rust_pairing_through_real_worker_context" if peer_executable else
+                "rust_displays_through_real_worker_context")
         subprocess.run(["cargo", "+1.99.1", "test", "--release", "--locked", "--manifest-path",
-                        str(root / "gpui-prototype/Cargo.toml"), "core::tests::rust_quit_through_real_worker_context" if quit_mode else "core::tests::rust_pairing_through_real_worker_context" if peer_executable else "core::tests::rust_displays_through_real_worker_context",
+                        str(root / "gpui-prototype/Cargo.toml"), f"core::tests::{test}",
                         "--", "--exact", "--ignored", "--nocapture"], env=env, check=True, timeout=90)
         if peer_executable:
             pairs = [entry for entry in seen if entry[0] == "/pair"]
@@ -146,7 +155,11 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
             assert "rust-display-host=測試主機" in saved, "Pair name was not saved"
             assert len([entry for entry in seen if entry[0] == "/unpair"]) == (0 if mode == "ok" else 1), seen
         displays = [entry for entry in seen if entry[0] == "/displays"]
-        if quit_mode:
+        if launch_mode:
+            launches = [query for endpoint, query in seen if endpoint == "/launch"]
+            assert len(launches) == 2, seen
+            assert all(query["uniqueid"] == ["fixture-client"] for query in launches), launches
+        elif quit_mode:
             cancellations = [entry for entry in seen if entry[0] == "/cancel"]
             assert len(cancellations) == 3, seen
             assert len({entry[1]["uuid"][0] for entry in cancellations}) == 3, "Cancel nonce reused"
@@ -164,7 +177,8 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
         assert b"pair stage" not in log, "C++ still performed pairing"
         if quit_mode:
             assert b"Quit response:" not in log, "C++ still performed cancellation"
-        print(f"Real worker context, Rust {'session quit' if quit_mode else 'pairing ' + mode if peer_executable else 'display query'}, persistence and shutdown: passed")
+        operation = "launch rejection and retry" if launch_mode else "session quit" if quit_mode else "pairing " + mode if peer_executable else "display query"
+        print(f"Real worker context, Rust {operation}, persistence and shutdown: passed")
     finally:
         for server in (tls, plain):
             server.shutdown()
