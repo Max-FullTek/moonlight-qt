@@ -429,8 +429,21 @@ void ClipboardSync::applyInboundText(const QByteArray& payload)
         return;
     }
 
-    rememberClipboard(QString::fromUtf8(payload).toUtf8(), QImage());
-    cb->setText(QString::fromUtf8(payload));
+    const QString text = QString::fromUtf8(payload);
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+    if (m_ClipboardListener) {
+        const auto result = m_ClipboardListener->writeText(text.toStdWString());
+        if (result == WindowsClipboardListener::TextWriteResult::FileClipboard) return;
+        if (result == WindowsClipboardListener::TextWriteResult::Written) {
+            QString canonical = text;
+            canonical.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+            rememberClipboard(canonical.toUtf8(), QImage());
+            return;
+        }
+    }
+#endif
+    rememberClipboard(text.toUtf8(), QImage());
+    cb->setText(text);
 }
 
 void ClipboardSync::applyInboundPng(const QByteArray& payload)
