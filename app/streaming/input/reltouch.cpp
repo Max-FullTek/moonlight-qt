@@ -3,7 +3,7 @@
 #include <Limelight.h>
 #include "SDL_compat.h"
 
-#include <QtMath>
+#include <cmath>
 
 // How long the mouse button will be pressed for a tap to click gesture
 #define TAP_BUTTON_RELEASE_DELAY 100
@@ -132,8 +132,8 @@ void SdlInputHandler::handleRelativeFingerEvent(SDL_TouchFingerEvent* event)
 
     if (event->type == SDL_FINGERMOTION) {
         // If it's outside the deadzone delta, cancel drags and taps
-        if (qSqrt(qPow(event->x - m_TouchDownEvent[fingerIndex].x, 2) +
-                  qPow(event->y - m_TouchDownEvent[fingerIndex].y, 2)) > DEAD_ZONE_DELTA) {
+        if (std::sqrt(std::pow(event->x - m_TouchDownEvent[fingerIndex].x, 2) +
+                  std::pow(event->y - m_TouchDownEvent[fingerIndex].y, 2)) > DEAD_ZONE_DELTA) {
             SDL_RemoveTimer(m_DragTimer);
             m_DragTimer = 0;
 

@@ -14,11 +14,11 @@
 #include "SDL_compat.h"
 
 #include <QByteArray>
-#include <QHash>
-#include <QSet>
 
 #include <atomic>
 #include <mutex>
+#include <unordered_map>
+#include <unordered_set>
 #ifdef HAS_QT_SDL_WAYLAND_BRIDGE
 #include <optional>
 #endif
@@ -536,8 +536,8 @@ private:
     int m_PendingTouchpadContactCount;
     NativeTouchpadContact m_PendingTouchpadContacts[MAX_TOUCHPAD_FRAME_CONTACTS];
     SDL_TouchID m_ActiveTouchpadId;
-    QHash<SDL_FingerID, NativeTouchpadContact> m_ActiveTouchpadContacts;
-    QSet<SDL_FingerID> m_IgnoredTouchpadContacts;
+    std::unordered_map<SDL_FingerID, NativeTouchpadContact> m_ActiveTouchpadContacts;
+    std::unordered_set<SDL_FingerID> m_IgnoredTouchpadContacts;
     Uint32 m_LastTouchpadScrollTimestamp;
 
 #ifdef HAVE_MACOS_NATIVE_TOUCHPAD
@@ -546,7 +546,7 @@ private:
     Uint32 m_MacTouchpadLastTapTimestamp;
     Uint32 m_MacTouchpadGestureStartTimestamp;
     SDL_FingerID m_MacTouchpadGesturePrimaryFinger;
-    QSet<SDL_FingerID> m_MacTouchpadGestureContacts;
+    std::unordered_set<SDL_FingerID> m_MacTouchpadGestureContacts;
     float m_MacTouchpadGestureStartX;
     float m_MacTouchpadGestureStartY;
     int m_MacTouchpadGestureMaxContacts;

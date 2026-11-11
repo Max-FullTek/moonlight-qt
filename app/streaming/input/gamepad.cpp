@@ -6,7 +6,8 @@
 #include "settings/mappingmanager.h"
 #include "utils.h"
 
-#include <QtMath>
+#include <algorithm>
+#include <cmath>
 
 // How long the Start button must be pressed to toggle mouse emulation
 #define MOUSE_EMULATION_LONG_PRESS_TIME 750
@@ -145,10 +146,10 @@ static void applyRadialDeadzone(short* x, short* y, int deadzonePercent)
         return;
     }
 
-    qint64 ix = *x;
-    qint64 iy = *y;
-    qint64 magnitude = (qint64)qSqrt((double)(ix * ix + iy * iy));
-    qint64 deadzone = 32767LL * deadzonePercent / 100;
+    int64_t ix = *x;
+    int64_t iy = *y;
+    int64_t magnitude = (int64_t)std::sqrt((double)(ix * ix + iy * iy));
+    int64_t deadzone = 32767LL * deadzonePercent / 100;
 
     if (magnitude <= deadzone) {
         *x = 0;
@@ -156,7 +157,7 @@ static void applyRadialDeadzone(short* x, short* y, int deadzonePercent)
         return;
     }
 
-    qint64 scaled = (magnitude - deadzone) * 32767LL / (32767LL - deadzone);
+    int64_t scaled = (magnitude - deadzone) * 32767LL / (32767LL - deadzone);
     if (scaled > 32767) {
         scaled = 32767;
     }
@@ -319,12 +320,12 @@ Uint32 SdlInputHandler::mouseEmulationTimerCallback(Uint32 interval, void *param
     float deltaY;
 
     // Produce a base vector for mouse movement with increased speed as we deviate further from center
-    deltaX = qPow(rawX / 32766.0f * MOUSE_EMULATION_MOTION_MULTIPLIER, 3);
-    deltaY = qPow(rawY / 32766.0f * MOUSE_EMULATION_MOTION_MULTIPLIER, 3);
+    deltaX = std::pow(rawX / 32766.0f * MOUSE_EMULATION_MOTION_MULTIPLIER, 3);
+    deltaY = std::pow(rawY / 32766.0f * MOUSE_EMULATION_MOTION_MULTIPLIER, 3);
 
     // Enforce deadzones
-    deltaX = qAbs(deltaX) > MOUSE_EMULATION_DEADZONE ? deltaX - MOUSE_EMULATION_DEADZONE : 0;
-    deltaY = qAbs(deltaY) > MOUSE_EMULATION_DEADZONE ? deltaY - MOUSE_EMULATION_DEADZONE : 0;
+    deltaX = std::abs(deltaX) > MOUSE_EMULATION_DEADZONE ? deltaX - MOUSE_EMULATION_DEADZONE : 0;
+    deltaY = std::abs(deltaY) > MOUSE_EMULATION_DEADZONE ? deltaY - MOUSE_EMULATION_DEADZONE : 0;
 
     if (deltaX != 0 || deltaY != 0) {
         LiSendMouseMoveEvent((short)deltaX, (short)deltaY);
@@ -377,13 +378,13 @@ void SdlInputHandler::handleControllerAxisEvent(SDL_ControllerAxisEvent* event)
                 // could actually cause the value to overflow and
                 // wrap around to be negative again. Avoid that by
                 // capping the value at 32767.
-                updateAnalogStickAxis(state->lsY, -qMax(event->value, (short)-32767), dirty);
+                updateAnalogStickAxis(state->lsY, -std::max(event->value, (short)-32767), dirty);
                 break;
             case SDL_CONTROLLER_AXIS_RIGHTX:
                 updateAnalogStickAxis(state->rsX, event->value, dirty);
                 break;
             case SDL_CONTROLLER_AXIS_RIGHTY:
-                updateAnalogStickAxis(state->rsY, -qMax(event->value, (short)-32767), dirty);
+                updateAnalogStickAxis(state->rsY, -std::max(event->value, (short)-32767), dirty);
                 break;
             case SDL_CONTROLLER_AXIS_TRIGGERLEFT:
                 updateTriggerAxis(state->lt, (unsigned char)(event->value * 255UL / 32767), dirty);

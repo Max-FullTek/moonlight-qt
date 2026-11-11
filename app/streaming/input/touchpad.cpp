@@ -1,6 +1,7 @@
 #include "input.h"
 
 #include <Limelight.h>
+#include <algorithm>
 #include <utility>
 #include "streaming/session.h"
 
@@ -56,7 +57,7 @@ void SdlInputHandler::handleNativeTouchpadEvent(SDL_TouchFingerEvent* event)
         return;
     }
 
-    if ((!m_ActiveTouchpadContacts.isEmpty() || !m_IgnoredTouchpadContacts.isEmpty()) &&
+    if ((!m_ActiveTouchpadContacts.empty() || !m_IgnoredTouchpadContacts.empty()) &&
             event->touchId != m_ActiveTouchpadId) {
         if (eventType != LI_TOUCH_EVENT_DOWN) {
             // Ignore delayed events from a touch surface that no longer owns
@@ -73,17 +74,17 @@ void SdlInputHandler::handleNativeTouchpadEvent(SDL_TouchFingerEvent* event)
     updateMacTouchpadGesture(event);
 #endif
 
-    if (m_IgnoredTouchpadContacts.contains(event->fingerId)) {
+    if (m_IgnoredTouchpadContacts.count(event->fingerId) != 0) {
         if (eventType == LI_TOUCH_EVENT_UP || eventType == LI_TOUCH_EVENT_CANCEL) {
-            m_IgnoredTouchpadContacts.remove(event->fingerId);
-            if (m_ActiveTouchpadContacts.isEmpty() && m_IgnoredTouchpadContacts.isEmpty()) {
+            m_IgnoredTouchpadContacts.erase(event->fingerId);
+            if (m_ActiveTouchpadContacts.empty() && m_IgnoredTouchpadContacts.empty()) {
                 m_ActiveTouchpadId = 0;
             }
         }
         return;
     }
 
-    bool contactIsActive = m_ActiveTouchpadContacts.contains(event->fingerId);
+    bool contactIsActive = m_ActiveTouchpadContacts.count(event->fingerId) != 0;
     bool hadMultipleContacts = m_ActiveTouchpadContacts.size() >= 2;
     if (eventType == LI_TOUCH_EVENT_DOWN && !contactIsActive &&
             m_ActiveTouchpadContacts.size() >= MAX_TOUCHPAD_FRAME_CONTACTS) {
@@ -132,16 +133,16 @@ void SdlInputHandler::handleNativeTouchpadEvent(SDL_TouchFingerEvent* event)
     m_PendingTouchpadContacts[m_PendingTouchpadContactCount++] = contact;
 
     if (eventType == LI_TOUCH_EVENT_UP || eventType == LI_TOUCH_EVENT_CANCEL) {
-        m_ActiveTouchpadContacts.remove(event->fingerId);
+        m_ActiveTouchpadContacts.erase(event->fingerId);
     }
     else {
-        m_ActiveTouchpadContacts.insert(event->fingerId, contact);
+        m_ActiveTouchpadContacts.insert_or_assign(event->fingerId, contact);
     }
     const bool isMultiContactFrame = hadMultipleContacts || m_ActiveTouchpadContacts.size() >= 2;
     if (isMultiContactFrame) {
         m_LastTouchpadScrollTimestamp = event->timestamp;
     }
-    if (m_ActiveTouchpadContacts.isEmpty() && m_IgnoredTouchpadContacts.isEmpty()) {
+    if (m_ActiveTouchpadContacts.empty() && m_IgnoredTouchpadContacts.empty()) {
         m_ActiveTouchpadId = 0;
     }
 
@@ -171,7 +172,7 @@ void SdlInputHandler::handleNativeTouchpadEvent(SDL_TouchFingerEvent* event)
 void SdlInputHandler::updateMacTouchpadGesture(const SDL_TouchFingerEvent* event)
 {
     if (event->type == SDL_FINGERDOWN &&
-            m_MacTouchpadGestureContacts.isEmpty()) {
+            m_MacTouchpadGestureContacts.empty()) {
         m_MacTouchpadGestureStartTimestamp = event->timestamp;
         m_MacTouchpadGesturePrimaryFinger = event->fingerId;
         m_MacTouchpadGestureStartX = event->x;
@@ -186,11 +187,11 @@ void SdlInputHandler::updateMacTouchpadGesture(const SDL_TouchFingerEvent* event
         m_MacTouchpadGestureContacts.insert(event->fingerId);
     }
     else if (event->type == SDL_FINGERUP) {
-        m_MacTouchpadGestureContacts.remove(event->fingerId);
+        m_MacTouchpadGestureContacts.erase(event->fingerId);
     }
 
     m_MacTouchpadGestureMaxContacts =
-            qMax(m_MacTouchpadGestureMaxContacts,
+            std::max(m_MacTouchpadGestureMaxContacts,
                  static_cast<int>(m_MacTouchpadGestureContacts.size()));
 
     if (event->fingerId == m_MacTouchpadGesturePrimaryFinger) {
@@ -202,7 +203,7 @@ void SdlInputHandler::updateMacTouchpadGesture(const SDL_TouchFingerEvent* event
         }
     }
 
-    if (!m_MacTouchpadGestureContacts.isEmpty()) {
+    if (!m_MacTouchpadGestureContacts.empty()) {
         return;
     }
 
@@ -255,7 +256,7 @@ bool SdlInputHandler::sendMacTouchpadButtonState(bool down)
          it != m_ActiveTouchpadContacts.cend() &&
          contactCount < MAX_TOUCHPAD_FRAME_CONTACTS;
          ++it) {
-        NativeTouchpadContact contact = it.value();
+        NativeTouchpadContact contact = it->second;
         contact.eventType = LI_TOUCH_EVENT_MOVE;
         contacts[contactCount++] = contact;
     }
@@ -307,7 +308,7 @@ bool SdlInputHandler::shouldSuppressMacTouchpadMouseButtonEvent(
         return false;
     }
 
-    const bool hasActiveContacts = !m_MacTouchpadGestureContacts.isEmpty();
+    const bool hasActiveContacts = !m_MacTouchpadGestureContacts.empty();
     const bool hasCorrelatedTap =
             (m_MacTouchpadPendingTapButtons & buttonMask) &&
             event->timestamp - m_MacTouchpadLastTapTimestamp <=
@@ -503,8 +504,8 @@ void SdlInputHandler::handleWindowsTouchpadFrame(uint64_t deviceId,
 
     const bool windowsSourceActive = currentFrameIsActive || currentDeviceOwnsWindowsState;
     if (windowsSourceActive &&
-            (m_PendingTouchpadContactCount > 0 || !m_ActiveTouchpadContacts.isEmpty() ||
-             !m_IgnoredTouchpadContacts.isEmpty())) {
+            (m_PendingTouchpadContactCount > 0 || !m_ActiveTouchpadContacts.empty() ||
+             !m_IgnoredTouchpadContacts.empty())) {
         // Windows Raw Input is now active. Cancel SDL touch-surface contacts
         // first because the native wire protocol cannot distinguish sources.
         cancelSdlTouchpadContacts();
@@ -705,7 +706,7 @@ void SdlInputHandler::transitionNativeTouchpadToSoftwarePointer()
     for (int i = 0; i < SDL_GetNumTouchFingers(m_ActiveTouchpadId) &&
                     relativeFingerCount < MAX_FINGERS; i++) {
         SDL_Finger* finger = SDL_GetTouchFinger(m_ActiveTouchpadId, i);
-        if (finger == nullptr || !m_ActiveTouchpadContacts.contains(finger->id)) {
+        if (finger == nullptr || m_ActiveTouchpadContacts.count(finger->id) == 0) {
             continue;
         }
 
@@ -732,7 +733,7 @@ void SdlInputHandler::sendPendingTouchpadFrame()
     // 最后一根手指抬起时强制带上「按钮已松开」。Mac 触控板的物理按压离不开手指，
     // 手指走了按钮必然是松的；而且这时候再收到 SDL 的鼠标释放也已经没有活动触点
     // 可挂，那条释放就发不出去 —— 主机会一直以为按着。
-    if (m_MacTouchpadButtonDown && m_ActiveTouchpadContacts.isEmpty()) {
+    if (m_MacTouchpadButtonDown && m_ActiveTouchpadContacts.empty()) {
         m_MacTouchpadButtonDown = false;
     }
     buttonState = m_MacTouchpadButtonDown ? LI_TOUCHPAD_BUTTON_PRIMARY : 0;
@@ -759,7 +760,7 @@ void SdlInputHandler::cancelSdlTouchpadContacts()
     resetMacTouchpadState();
 #endif
 
-    if (!m_ActiveTouchpadContacts.isEmpty()) {
+    if (!m_ActiveTouchpadContacts.empty()) {
         const NativeTouchpadContact cancelAll = {
             LI_TOUCH_EVENT_CANCEL_ALL, 0, 0.0f, 0.0f, 0.0f,
         };

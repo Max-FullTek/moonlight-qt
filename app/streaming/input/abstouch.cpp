@@ -5,7 +5,28 @@
 #include <SDL_syswm.h>
 #include "streaming/streamutils.h"
 
-#include <QtMath>
+#include <algorithm>
+#include <cmath>
+
+namespace {
+uint32_t touchPointerId(SDL_FingerID fingerId)
+{
+    if (static_cast<uint64_t>(fingerId) <= UINT32_MAX) {
+        return static_cast<uint32_t>(fingerId);
+    }
+
+    // Preserve the ISO 3309 checksum used for IDs wider than the wire field.
+    uint16_t crc = 0xFFFF;
+    const auto* bytes = reinterpret_cast<const unsigned char*>(&fingerId);
+    for (size_t index = 0; index < sizeof(fingerId); ++index) {
+        crc ^= bytes[index];
+        for (int bit = 0; bit < 8; ++bit) {
+            crc = (crc >> 1) ^ ((crc & 1) ? 0x8408 : 0);
+        }
+    }
+    return static_cast<uint16_t>(~crc);
+}
+}
 
 bool SdlInputHandler::isPenTouchDevice(SDL_TouchID touchId)
 {
@@ -100,8 +121,8 @@ void SdlInputHandler::handleAbsoluteFingerEvent(SDL_TouchFingerEvent* event)
 
     // Scale window-relative events to be video-relative and clamp to video region
     StreamUtils::scaleSourceToDestinationSurface(&src, &dst);
-    float vidrelx = qMin(qMax((int)(event->x * windowWidth), dst.x), dst.x + dst.w) - dst.x;
-    float vidrely = qMin(qMax((int)(event->y * windowHeight), dst.y), dst.y + dst.h) - dst.y;
+    float vidrelx = std::clamp(static_cast<int>(event->x * windowWidth), dst.x, dst.x + dst.w) - dst.x;
+    float vidrely = std::clamp(static_cast<int>(event->y * windowHeight), dst.y, dst.y + dst.h) - dst.y;
 
     uint8_t eventType;
     switch (event->type) {
@@ -118,20 +139,7 @@ void SdlInputHandler::handleAbsoluteFingerEvent(SDL_TouchFingerEvent* event)
         return;
     }
 
-    uint32_t pointerId;
-
-    // If the pointer ID is larger than we can fit, just CRC it and use that as the ID.
-    if ((uint64_t)event->fingerId > UINT32_MAX) {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-        QByteArrayView bav((char*)&event->fingerId, sizeof(event->fingerId));
-        pointerId = qChecksum(bav);
-#else
-        pointerId = qChecksum((char*)&event->fingerId, sizeof(event->fingerId));
-#endif
-    }
-    else {
-        pointerId = (uint32_t)event->fingerId;
-    }
+    const uint32_t pointerId = touchPointerId(event->fingerId);
 
     // Try to send it as a native pen/touch event, otherwise fall back to our touch emulation
     if (LiGetHostFeatureFlags() & LI_FF_PEN_TOUCH_EVENTS) {
@@ -190,8 +198,8 @@ void SdlInputHandler::emulateAbsoluteFingerEvent(SDL_TouchFingerEvent* event)
     // Use the stream and window sizes to determine the video region
     StreamUtils::scaleSourceToDestinationSurface(&src, &dst);
 
-    if (qSqrt(qPow(event->x - m_LastTouchDownEvent.x, 2) +
-              qPow(event->y - m_LastTouchDownEvent.y, 2)) > LONG_PRESS_ACTIVATION_DELTA) {
+    if (std::sqrt(std::pow(event->x - m_LastTouchDownEvent.x, 2) +
+              std::pow(event->y - m_LastTouchDownEvent.y, 2)) > LONG_PRESS_ACTIVATION_DELTA) {
         // Moved too far since touch down. Cancel the long press timer.
         SDL_RemoveTimer(m_LongPressTimer);
         m_LongPressTimer = 0;
@@ -200,11 +208,11 @@ void SdlInputHandler::emulateAbsoluteFingerEvent(SDL_TouchFingerEvent* event)
     // Don't reposition for finger down events within the deadzone. This makes double-clicking easier.
     if (event->type != SDL_FINGERDOWN ||
         event->timestamp - m_LastTouchUpEvent.timestamp > DOUBLE_TAP_DEAD_ZONE_DELAY ||
-        qSqrt(qPow(event->x - m_LastTouchUpEvent.x, 2) + qPow(event->y - m_LastTouchUpEvent.y, 2)) >
+        std::sqrt(std::pow(event->x - m_LastTouchUpEvent.x, 2) + std::pow(event->y - m_LastTouchUpEvent.y, 2)) >
             DOUBLE_TAP_DEAD_ZONE_DELTA) {
         // Scale window-relative events to be video-relative and clamp to video region
-        short x = qMin(qMax((int)(event->x * windowWidth), dst.x), dst.x + dst.w);
-        short y = qMin(qMax((int)(event->y * windowHeight), dst.y), dst.y + dst.h);
+        short x = std::clamp(static_cast<int>(event->x * windowWidth), dst.x, dst.x + dst.w);
+        short y = std::clamp(static_cast<int>(event->y * windowHeight), dst.y, dst.y + dst.h);
 
         // Update the cursor position relative to the video region
         LiSendMousePositionEvent(x - dst.x, y - dst.y, dst.w, dst.h);

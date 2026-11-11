@@ -10,16 +10,16 @@
 #include "penhistory.h"
 #include "streaming/streamutils.h"
 
-#include <QtMath>
-
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <mutex>
 #include <new>
 
 namespace {
 
+constexpr double RadiansPerDegree = 3.14159265358979323846 / 180.0;
 constexpr UINT_PTR WINDOWS_PEN_SUBCLASS_ID = 0x4D4C504E; // "MLPN"
 constexpr Uint32 PEN_HISTORY_REPORT_INTERVAL_MS = 5000;
 
@@ -473,15 +473,15 @@ bool SdlInputHandler::handleWindowsPenPointerMessage(unsigned int message, Uint6
             return false;
         }
 
-        const int x = qMin(qMax(static_cast<int>(point.x), dst.x), dst.x + dst.w) - dst.x;
-        const int y = qMin(qMax(static_cast<int>(point.y), dst.y), dst.y + dst.h) - dst.y;
+        const int x = std::clamp(static_cast<int>(point.x), dst.x, dst.x + dst.w) - dst.x;
+        const int y = std::clamp(static_cast<int>(point.y), dst.y, dst.y + dst.h) - dst.y;
         const float normalizedX = static_cast<float>(x) / dst.w;
         const float normalizedY = static_cast<float>(y) / dst.h;
 
         const bool inContact = (sample.pointerInfo.pointerFlags & POINTER_FLAG_INCONTACT) != 0;
         float pressure = 0.0f;
         if (inContact && (sample.penMask & PEN_MASK_PRESSURE)) {
-            pressure = qBound(0.0f, static_cast<float>(sample.pressure) / 1024.0f, 1.0f);
+            pressure = std::clamp(static_cast<float>(sample.pressure) / 1024.0f, 0.0f, 1.0f);
         }
 
         const uint8_t eventType = eventTypeForSample(sample);
@@ -500,24 +500,24 @@ bool SdlInputHandler::handleWindowsPenPointerMessage(unsigned int message, Uint6
         if (sample.penMask & (PEN_MASK_TILT_X | PEN_MASK_TILT_Y)) {
             const int tiltX = (sample.penMask & PEN_MASK_TILT_X) ? sample.tiltX : 0;
             const int tiltY = (sample.penMask & PEN_MASK_TILT_Y) ? sample.tiltY : 0;
-            const double tanX = qTan(qDegreesToRadians(static_cast<double>(tiltX)));
-            const double tanY = qTan(qDegreesToRadians(static_cast<double>(tiltY)));
-            const double tiltFromNormal = qAtan(qSqrt(tanX * tanX + tanY * tanY));
-            tilt = static_cast<uint8_t>(qBound(
-                    0, qRound(qRadiansToDegrees(tiltFromNormal)), 90));
+            const double tanX = std::tan(tiltX * RadiansPerDegree);
+            const double tanY = std::tan(tiltY * RadiansPerDegree);
+            const double tiltFromNormal = std::atan(std::sqrt(tanX * tanX + tanY * tanY));
+            tilt = static_cast<uint8_t>(std::clamp(
+                    std::lround(tiltFromNormal / RadiansPerDegree), 0L, 90L));
 
             if ((tiltX != 0 || tiltY != 0) &&
-                    qAbs(tiltX) != 90 && qAbs(tiltY) != 90) {
+                    std::abs(tiltX) != 90 && std::abs(tiltY) != 90) {
                 // Sunshine reconstructs Windows tilt axes as
                 // X=-sin(rotation)*tan(tilt), Y=cos(rotation)*tan(tilt).
                 // Use the inverse conversion so the remote axes match the
                 // local POINTER_PEN_INFO values instead of being flipped.
-                double rotationRad = qAtan2(-tanX, tanY);
+                double rotationRad = std::atan2(-tanX, tanY);
                 if (rotationRad < 0.0) {
-                    rotationRad += qDegreesToRadians(360.0);
+                    rotationRad += 360.0 * RadiansPerDegree;
                 }
                 rotation = static_cast<uint16_t>(
-                        qRound(qRadiansToDegrees(rotationRad)) % 360);
+                        std::lround(rotationRad / RadiansPerDegree) % 360);
             }
         }
 
