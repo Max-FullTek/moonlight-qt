@@ -20,7 +20,6 @@
 #include <QSslError>
 #include <QTimer>
 #include <QUrl>
-#include <QtEndian>
 
 #include <cstring>
 #include <memory>
@@ -229,7 +228,8 @@ void ClipboardSync::stop()
 
 void ClipboardSync::handleIncomingFrame(const char* data, int length)
 {
-    if (data == nullptr || length < 10 || length > MAX_PAYLOAD + 10) {
+    if (data == nullptr || length < ClipboardFrame::HeaderSize ||
+            length > MAX_PAYLOAD + ClipboardFrame::HeaderSize) {
         return;
     }
 
@@ -832,25 +832,12 @@ void ClipboardSync::onLocalClipboardChanged()
 
 bool ClipboardSync::encodeFrame(uint8_t kind, quint32 token, const QByteArray& payload, QByteArray& outFrame) const
 {
-    if (payload.size() > MAX_INLINE_PAYLOAD) {
-        return false;
-    }
+    const auto header = ClipboardFrame::encodeHeader(kind, token, static_cast<size_t>(payload.size()));
+    if (!header) return false;
 
     outFrame.clear();
-    outFrame.reserve(10 + payload.size());
-
-    // u8 version
-    outFrame.append(static_cast<char>(WIRE_VERSION));
-    // u8 kind
-    outFrame.append(static_cast<char>(kind));
-    // u32 token (LE) - 0 for standalone frames; frames of one compound burst
-    // share a non-zero token (see class comment).
-    quint32 tokenLE = qToLittleEndian<quint32>(token);
-    outFrame.append(reinterpret_cast<const char*>(&tokenLE), sizeof(tokenLE));
-    // u32 length (LE)
-    quint32 lenLE = qToLittleEndian<quint32>(static_cast<quint32>(payload.size()));
-    outFrame.append(reinterpret_cast<const char*>(&lenLE), sizeof(lenLE));
-    // bytes payload
+    outFrame.reserve(ClipboardFrame::HeaderSize + payload.size());
+    outFrame.append(header->data(), ClipboardFrame::HeaderSize);
     outFrame.append(payload);
     return true;
 }
@@ -860,33 +847,12 @@ bool ClipboardSync::decodeFrame(const QByteArray& frame,
                                 quint32& outToken,
                                 QByteArray& outPayload) const
 {
-    // 1 + 1 + 4 + 4 = 10 byte header minimum.
-    if (frame.size() < 10) {
-        return false;
-    }
+    const auto decoded = ClipboardFrame::decode({frame.constData(), static_cast<size_t>(frame.size())});
+    if (!decoded) return false;
 
-    const uint8_t* p = reinterpret_cast<const uint8_t*>(frame.constData());
-    uint8_t version = p[0];
-    if (version != WIRE_VERSION) {
-        return false;
-    }
-
-    outKind = p[1];
-
-    quint32 tokenLE = 0;
-    memcpy(&tokenLE, p + 2, sizeof(tokenLE));
-    outToken = qFromLittleEndian<quint32>(tokenLE);
-
-    quint32 lenLE = 0;
-    memcpy(&lenLE, p + 6, sizeof(lenLE));
-    quint32 length = qFromLittleEndian<quint32>(lenLE);
-
-    if (length > MAX_PAYLOAD || length != static_cast<quint32>(frame.size() - 10)) {
-        return false;
-    }
-
-    outPayload = QByteArray(reinterpret_cast<const char*>(p + 10),
-                            static_cast<int>(length));
+    outKind = decoded->kind;
+    outToken = decoded->token;
+    outPayload = QByteArray(decoded->payload.data(), static_cast<int>(decoded->payload.size()));
     return true;
 }
 

@@ -141,6 +141,11 @@ target_include_directories(lite-stream-assets PUBLIC "${LITE_SOURCE_ROOT}/app")
 # Attach the resource to the executable that consumes the static library.
 target_sources(lite-stream-assets INTERFACE "${LITE_SOURCE_ROOT}/app/streaming/windowsstreamassets.rc")
 
+add_library(lite-clipboard-frame STATIC "${LITE_SOURCE_ROOT}/app/streaming/clipboardframe.cpp")
+target_compile_features(lite-clipboard-frame PUBLIC cxx_std_17)
+target_compile_options(lite-clipboard-frame PRIVATE /W3 /WX)
+target_include_directories(lite-clipboard-frame PUBLIC "${LITE_SOURCE_ROOT}/app")
+
 add_library(lite-touch-input STATIC
     "${LITE_SOURCE_ROOT}/app/streaming/input/abstouch.cpp"
     "${LITE_SOURCE_ROOT}/app/streaming/input/reltouch.cpp"
@@ -309,6 +314,10 @@ target_compile_definitions(lite-decoder-factory PRIVATE HAVE_FFMPEG)
 target_link_libraries(lite-decoder-factory PUBLIC lite-ffmpeg-decoder)
 
 if(BUILD_TESTING)
+    add_executable(clipboard_frame "${LITE_SOURCE_ROOT}/tests/clipboard_frame/main.cpp")
+    target_compile_options(clipboard_frame PRIVATE /W3 /WX)
+    target_link_libraries(clipboard_frame PRIVATE lite-clipboard-frame)
+    add_test(NAME clipboard_frame COMMAND clipboard_frame)
     add_executable(reachability_policy "${LITE_SOURCE_ROOT}/tests/reachability_policy/main.cpp")
     target_compile_features(reachability_policy PRIVATE cxx_std_17)
     target_compile_options(reachability_policy PRIVATE /W3 /WX)

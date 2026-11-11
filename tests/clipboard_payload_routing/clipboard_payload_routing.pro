@@ -10,11 +10,13 @@ INCLUDEPATH += \
 
 SOURCES += \
     main.cpp \
+    ../../app/streaming/clipboardframe.cpp \
     ../../app/streaming/clipboardsync.cpp
 
 macx:SOURCES += ../../clipboard-helper/macos.mm
 
 HEADERS += \
+    ../../app/streaming/clipboardframe.h \
     ../../app/streaming/clipboardlogging.h \
     ../../app/streaming/clipboardsync.h
 

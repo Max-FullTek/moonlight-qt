@@ -1,4 +1,5 @@
 #pragma once
+#include "clipboardframe.h"
 
 #include <QObject>
 #include <QByteArray>
@@ -74,19 +75,17 @@ class ClipboardSync : public QObject
 
 public:
     enum Kind : uint8_t {
-        KIND_TEXT = 1,
-        KIND_PNG  = 2,
-        KIND_REF  = 3,
+        KIND_TEXT = ClipboardFrame::Text,
+        KIND_PNG  = ClipboardFrame::Png,
+        KIND_REF  = ClipboardFrame::Reference,
     };
 
-    static constexpr uint8_t WIRE_VERSION = 1;
-    static constexpr int     MAX_PAYLOAD  = 65535 - 10; // wire frame must fit u16 length
-    // Encrypted control length also includes seq (4), GCM tag (16) and the
-    // inner control header (4). Reserve those bytes for outbound inline frames.
-    static constexpr int MAX_INLINE_PAYLOAD = MAX_PAYLOAD - 24;
+    static constexpr uint8_t WIRE_VERSION = ClipboardFrame::Version;
+    static constexpr int MAX_PAYLOAD = ClipboardFrame::MaxPayload;
+    static constexpr int MAX_INLINE_PAYLOAD = ClipboardFrame::MaxInlinePayload;
     // Payload size at/above which we switch from inline KIND_TEXT/KIND_PNG to
     // out-of-band blob transfer (KIND_REF). Leaves headroom under the wire cap.
-    static constexpr int     INLINE_THRESHOLD = 60000;
+    static constexpr int INLINE_THRESHOLD = ClipboardFrame::InlineThreshold;
     // Mirrors the cross-client cap (64 MiB) shared with the Android and
     // HarmonyOS clients. The service-side blob store accepts up to this much.
     static constexpr qint64 MAX_BLOB_BYTES = 64LL * 1024 * 1024;
