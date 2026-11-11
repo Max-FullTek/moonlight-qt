@@ -1,10 +1,11 @@
 #pragma once
 
 #include <QByteArray>
-#include <QMutex>
 #include <QObject>
-#include <QQueue>
 #include <QString>
+#include <deque>
+#include <mutex>
+#include <string>
 
 class NvComputer;
 class QProcess;
@@ -55,8 +56,8 @@ private:
     NvComputer* m_Computer;
     QProcess* m_Process;
     QString m_HelperPath;
-    QMutex m_InboundMutex;
-    QQueue<QByteArray> m_InboundFrames;
+    std::mutex m_InboundMutex;
+    std::deque<std::string> m_InboundFrames;
     QByteArray m_StdoutBuffer;
     QByteArray m_StderrBuffer;
     QByteArray m_StdinBuffer;

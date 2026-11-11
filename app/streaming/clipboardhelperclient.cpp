@@ -7,7 +7,6 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
-#include <QMutexLocker>
 #include <QProcess>
 
 #include <SDL.h>
@@ -137,12 +136,12 @@ void ClipboardHelperClient::handleIncomingFrame(const char* data, int length)
         return;
     }
 
-    QMutexLocker locker(&m_InboundMutex);
+    std::lock_guard locker(m_InboundMutex);
     if (m_InboundFrames.size() >= MAX_QUEUED_HOST_FRAMES) {
-        m_InboundFrames.dequeue();
+        m_InboundFrames.pop_front();
         m_DroppedInboundFrames++;
     }
-    m_InboundFrames.enqueue(QByteArray(data, length));
+    m_InboundFrames.emplace_back(data, static_cast<size_t>(length));
 }
 
 void ClipboardHelperClient::processPendingMessages()
@@ -316,11 +315,11 @@ bool ClipboardHelperClient::sendCurrentConfig()
 
 void ClipboardHelperClient::flushQueuedHostFrames()
 {
-    QQueue<QByteArray> frames;
+    std::deque<std::string> frames;
     int droppedFrames = 0;
     {
-        QMutexLocker locker(&m_InboundMutex);
-        qSwap(frames, m_InboundFrames);
+        std::lock_guard locker(m_InboundMutex);
+        frames.swap(m_InboundFrames);
         droppedFrames = m_DroppedInboundFrames;
         m_DroppedInboundFrames = 0;
     }
@@ -331,8 +330,9 @@ void ClipboardHelperClient::flushQueuedHostFrames()
                     droppedFrames);
     }
 
-    while (!frames.isEmpty()) {
-        if (!writeLine(ClipboardIpc::encodeHostFrame(nextSequence(), frames.dequeue()))) {
+    for (const auto& frame : frames) {
+        const auto bytes = QByteArray::fromRawData(frame.data(), static_cast<int>(frame.size()));
+        if (!writeLine(ClipboardIpc::encodeHostFrame(nextSequence(), bytes))) {
             return;
         }
     }

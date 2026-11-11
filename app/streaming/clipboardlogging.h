@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QtGlobal>
+#include "environment.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -9,7 +9,7 @@ namespace ClipboardLog {
 
 inline bool debugEnabled()
 {
-    return qEnvironmentVariableIntValue("MOONLIGHT_CLIPBOARD_HELPER_DEBUG") != 0;
+    return StreamEnvironment::integer("MOONLIGHT_CLIPBOARD_HELPER_DEBUG") != 0;
 }
 
 inline void write(const char* level, const char* format, va_list args)
