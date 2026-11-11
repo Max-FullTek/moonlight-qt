@@ -20,7 +20,8 @@ public:
     WriteResult writeText(std::wstring_view text) const;
     WriteResult writePng(std::string_view png, const unsigned char* bgra,
                              int width, int height, size_t stride,
-                             int horizontalResolution, int verticalResolution) const;
+                             int horizontalResolution, int verticalResolution,
+                             std::wstring_view text = {}) const;
     // An empty value also covers file clipboards and invalid or oversized
     // Unicode data. nullopt allows the caller to try other formats.
     std::optional<std::wstring> readText(size_t maxCharacters) const;

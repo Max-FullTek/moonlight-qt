@@ -468,23 +468,7 @@ void ClipboardSync::applyInboundPng(const QByteArray& payload)
     }
 
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
-    // The native write publishes complete buffers eagerly. Use the existing
-    // delayed-rendering path for large images and non-sRGB color profiles.
-    constexpr qint64 nativeWriteLimit = 32LL * 1024 * 1024;
-    const qint64 writeBytes = qint64(image.width()) * image.height() * 4 + 2LL * payload.size();
-    if (m_ClipboardListener && writeBytes <= nativeWriteLimit &&
-        (!image.colorSpace().isValid() || image.colorSpace() == QColorSpace(QColorSpace::SRgb))) {
-        const auto bitmap = image.convertToFormat(QImage::Format_ARGB32);
-        const auto result = m_ClipboardListener->writePng(
-            {payload.constData(), static_cast<size_t>(payload.size())}, bitmap.constBits(),
-            bitmap.width(), bitmap.height(), static_cast<size_t>(bitmap.bytesPerLine()),
-            bitmap.dotsPerMeterX(), bitmap.dotsPerMeterY());
-        if (result == WindowsClipboardListener::WriteResult::FileClipboard) return;
-        if (result == WindowsClipboardListener::WriteResult::Written) {
-            rememberClipboard(QByteArray(), image);
-            return;
-        }
-    }
+    if (tryApplyWindowsClipboardImage(payload, image, QString())) return;
 #endif
 
     rememberClipboard(QByteArray(), image);
@@ -500,6 +484,34 @@ void ClipboardSync::applyInboundPng(const QByteArray& payload)
     mime->setData(QStringLiteral("image/png"), payload);
     cb->setMimeData(mime);
 }
+
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+bool ClipboardSync::tryApplyWindowsClipboardImage(const QByteArray& png, const QImage& image,
+                                                  const QString& text)
+{
+    // The native write publishes complete buffers eagerly. Use the existing
+    // delayed-rendering path for large images and non-sRGB color profiles.
+    constexpr qint64 nativeWriteLimit = 32LL * 1024 * 1024;
+    const qint64 writeBytes = qint64(image.width()) * image.height() * 4 +
+                              2LL * png.size() + (text.isEmpty() ? 0 : 4LL * text.size() + 2);
+    if (!m_ClipboardListener || writeBytes > nativeWriteLimit ||
+        (image.colorSpace().isValid() && image.colorSpace() != QColorSpace(QColorSpace::SRgb))) {
+        return false;
+    }
+
+    const auto bitmap = image.convertToFormat(QImage::Format_ARGB32);
+    const auto result = m_ClipboardListener->writePng(
+        {png.constData(), static_cast<size_t>(png.size())}, bitmap.constBits(),
+        bitmap.width(), bitmap.height(), static_cast<size_t>(bitmap.bytesPerLine()),
+        bitmap.dotsPerMeterX(), bitmap.dotsPerMeterY(), text.toStdWString());
+    if (result == WindowsClipboardListener::WriteResult::Written) {
+        QString canonical = text;
+        canonical.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+        rememberClipboard(canonical.toUtf8(), image);
+    }
+    return result != WindowsClipboardListener::WriteResult::Unavailable;
+}
+#endif
 
 bool ClipboardSync::encodeImageAsPng(const QImage& image,
                                      QByteArray& outPng,
@@ -1363,11 +1375,15 @@ void ClipboardSync::applyCompound(const QByteArray& text, const QByteArray& png)
     }
 
     if (textOk && !image.isNull()) {
+        const QString decodedText = QString::fromUtf8(text);
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+        if (tryApplyWindowsClipboardImage(png, image, decodedText)) return;
+#endif
 #ifdef Q_OS_MACOS
         // Qt's macOS clipboard backend drops the text flavor from a
         // QMimeData that also carries an image, so compound writes go
         // through the native pasteboard instead.
-        rememberClipboard(QString::fromUtf8(text).toUtf8(), image);
+        rememberClipboard(decodedText.toUtf8(), image);
         if (ClipboardHelperWritePasteboardCompound(
                 text.constData(), reinterpret_cast<const unsigned char*>(png.constData()),
                 png.size())) {
@@ -1379,10 +1395,10 @@ void ClipboardSync::applyCompound(const QByteArray& text, const QByteArray& png)
         ClipboardLog::warn("ClipboardSync: native compound pasteboard write failed; falling back to image only");
 #endif
 
-        rememberClipboard(QString::fromUtf8(text).toUtf8(), image);
+        rememberClipboard(decodedText.toUtf8(), image);
 
         QMimeData* mime = new QMimeData();
-        mime->setText(QString::fromUtf8(text));
+        mime->setText(decodedText);
         mime->setImageData(image);
         // Provide raw PNG bytes too so apps that prefer image/png over
         // CF_DIB get the lossless copy verbatim (mirrors applyInboundPng).

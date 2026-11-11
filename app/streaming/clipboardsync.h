@@ -228,6 +228,9 @@ private:
                    BlobCallback onFetched);
     void applyInboundText(const QByteArray& payload);
     void applyInboundPng(const QByteArray& payload);
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+    bool tryApplyWindowsClipboardImage(const QByteArray& png, const QImage& image, const QString& text);
+#endif
 
     // Compound burst aggregation (see class comment).
     quint32 nextToken();

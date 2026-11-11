@@ -37,6 +37,26 @@ bool copyToClipboardBuffer(HGLOBAL buffer, std::string_view bytes)
     return true;
 }
 
+HGLOBAL allocateClipboardText(std::wstring_view text)
+{
+    const auto buffer = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, (text.size() * 2 + 1) * sizeof(wchar_t));
+    if (!buffer) return nullptr;
+    auto* output = static_cast<wchar_t*>(GlobalLock(buffer));
+    if (!output) {
+        GlobalFree(buffer);
+        return nullptr;
+    }
+    wchar_t previous = 0;
+    for (const wchar_t character : text) {
+        if (character == L'\n' && previous != L'\r') *output++ = L'\r';
+        *output++ = character;
+        previous = character;
+    }
+    *output = 0;
+    GlobalUnlock(buffer);
+    return buffer;
+}
+
 bool hasFileFormats()
 {
     if (IsClipboardFormatAvailable(CF_HDROP)) return true;
@@ -127,24 +147,9 @@ WindowsClipboardListener::WriteResult WindowsClipboardListener::writeText(std::w
     // be overwritten between the format check and EmptyClipboard.
     if (hasFileFormats()) return WriteResult::FileClipboard;
 
-    const auto buffer = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, (text.size() * 2 + 1) * sizeof(wchar_t));
-    if (!buffer) return WriteResult::Unavailable;
-    auto* output = static_cast<wchar_t*>(GlobalLock(buffer));
-    if (!output) {
-        GlobalFree(buffer);
-        return WriteResult::Unavailable;
-    }
-    wchar_t previous = 0;
-    for (const wchar_t character : text) {
-        if (character == L'\n' && previous != L'\r') *output++ = L'\r';
-        *output++ = character;
-        previous = character;
-    }
-    *output = 0;
-    GlobalUnlock(buffer);
-    if (EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, buffer)) return WriteResult::Written;
-    GlobalFree(buffer);
-    return WriteResult::Unavailable;
+    ClipboardBuffer buffer{allocateClipboardText(text)};
+    return buffer.handle && EmptyClipboard() && buffer.publish(CF_UNICODETEXT)
+        ? WriteResult::Written : WriteResult::Unavailable;
 }
 
 std::optional<std::wstring> WindowsClipboardListener::readText(size_t maxCharacters) const
@@ -187,7 +192,7 @@ std::vector<char> WindowsClipboardListener::readPng(size_t maxBytes) const
 
 WindowsClipboardListener::WriteResult WindowsClipboardListener::writePng(
     std::string_view png, const unsigned char* bgra, int width, int height, size_t stride,
-    int horizontalResolution, int verticalResolution) const
+    int horizontalResolution, int verticalResolution, std::wstring_view text) const
 {
     if (!active() || png.empty() || !bgra || width <= 0 || height <= 0) return WriteResult::Unavailable;
     const auto rowBytes = static_cast<size_t>(width) * 4;
@@ -203,7 +208,8 @@ WindowsClipboardListener::WriteResult WindowsClipboardListener::writePng(
     ClipboardBuffer pngBuffer{GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, png.size())};
     ClipboardBuffer mimeBuffer{GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, png.size())};
     ClipboardBuffer bitmap{GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(BITMAPV5HEADER) + imageBytes)};
-    if (!bitmap.handle || !copyToClipboardBuffer(pngBuffer.handle, png) ||
+    ClipboardBuffer textBuffer{text.empty() ? nullptr : allocateClipboardText(text)};
+    if ((!text.empty() && !textBuffer.handle) || !bitmap.handle || !copyToClipboardBuffer(pngBuffer.handle, png) ||
         !copyToClipboardBuffer(mimeBuffer.handle, png)) return WriteResult::Unavailable;
 
     {
@@ -236,7 +242,8 @@ WindowsClipboardListener::WriteResult WindowsClipboardListener::writePng(
     const ClipboardLock lock;
     if (hasFileFormats()) return WriteResult::FileClipboard;
     if (!EmptyClipboard() || !pngBuffer.publish(pngFormat) ||
-        !mimeBuffer.publish(mimeFormat) || !bitmap.publish(CF_DIBV5)) {
+        !mimeBuffer.publish(mimeFormat) || !bitmap.publish(CF_DIBV5) ||
+        (textBuffer.handle && !textBuffer.publish(CF_UNICODETEXT))) {
         return WriteResult::Unavailable;
     }
     return WriteResult::Written;
