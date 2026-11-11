@@ -360,9 +360,11 @@ private:
     std::shared_ptr<std::atomic_int> m_AbrCurrentBitrateKbps;
     // Runtime bitrate requests coalesce here; a single background worker
     // applies the newest value so HTTP never blocks the stream loop.
-    std::atomic_int m_PendingRuntimeBitrateKbps { 0 };
-    int m_PendingRuntimeBitrateRequestId = 0; // Owner thread only, coalesces with bitrate.
-    std::atomic_bool m_RuntimeBitrateInFlight { false };
+    std::thread m_RuntimeBitrateThread;
+    // Pending request and closing state belong to the session owner thread.
+    int m_PendingRuntimeBitrateKbps = 0;
+    int m_PendingRuntimeBitrateRequestId = 0;
+    bool m_RuntimeBitrateClosing = false;
     OverlayMenuPanel* m_MenuPanel; // Qt-based overlay menu window
     OverlayMenuButton* m_MenuButton = nullptr; // Qt-based floating menu button
     OverlayToast* m_Toast;           // Qt-based toast notification

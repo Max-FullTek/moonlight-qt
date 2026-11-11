@@ -24,7 +24,6 @@
 #include "utils.h"
 #include <QCoreApplication>
 #include <QHostInfo>
-#include <QThread>
 #include <future>
 
 #ifdef HAVE_FFMPEG
@@ -1176,6 +1175,9 @@ Session::~Session()
     if (m_ConnectionThread.joinable()) {
         m_ConnectionThread.join();
     }
+    if (m_RuntimeBitrateThread.joinable()) {
+        m_RuntimeBitrateThread.join();
+    }
     if (m_AbrFeedback.valid()) {
         m_AbrFeedback.wait();
     }
@@ -1923,6 +1925,9 @@ void Session::finishConnectionCleanup()
     delete m_DualSenseHapticsRenderer;
     m_DualSenseHapticsRenderer = nullptr;
 
+    if (m_RuntimeBitrateThread.joinable()) {
+        m_RuntimeBitrateThread.join();
+    }
     if (m_AbrFeedback.valid()) {
         m_AbrFeedback.wait();
     }
@@ -1951,6 +1956,7 @@ void Session::releaseActiveSession()
 
 void Session::dispatchConnectionCleanup()
 {
+    m_RuntimeBitrateClosing = true;
     if (!usesGpuiControls()) {
         QThreadPool::globalInstance()->start(QRunnable::create([this] {
             finishConnectionCleanup();
@@ -2822,15 +2828,18 @@ void Session::requestRuntimeBitrateChange(int bitrateKbps, int requestId)
         return;
     }
 
+    if (m_RuntimeBitrateClosing) {
+        return;
+    }
+
     // Coalesce rapid slider commits. A worker applying earlier values picks
     // up the newest pending one via startRuntimeBitrateWorker() on finish,
     // so the synchronous HTTP request never runs on the stream loop.
     m_PendingRuntimeBitrateRequestId = requestId;
-    m_PendingRuntimeBitrateKbps.store(bitrateKbps, std::memory_order_release);
-    if (m_RuntimeBitrateInFlight.exchange(true, std::memory_order_acq_rel)) {
-        return;
+    m_PendingRuntimeBitrateKbps = bitrateKbps;
+    if (!m_RuntimeBitrateThread.joinable()) {
+        startRuntimeBitrateWorker();
     }
-    startRuntimeBitrateWorker();
 }
 
 void Session::startRuntimeBitrateWorker()
@@ -2857,63 +2866,57 @@ void Session::startRuntimeBitrateWorker()
         }
     }
 
-    auto bitrateToApply = std::make_shared<int>(
-        m_PendingRuntimeBitrateKbps.exchange(0, std::memory_order_acq_rel));
+    const int bitrateToApply = std::exchange(m_PendingRuntimeBitrateKbps, 0);
     const int requestId = m_PendingRuntimeBitrateRequestId;
-    auto appliedBitrate = std::make_shared<std::atomic_int>(-1);
-    auto applyError = std::make_shared<QString>();
-
-    auto worker = QThread::create([bitrateToApply, appliedBitrate, applyError, address, httpsPort,
-                                   uuid, certificate, clientname] {
+    m_RuntimeBitrateThread = std::thread([this, bitrateToApply, requestId, address, httpsPort,
+                                          uuid, certificate, clientname] {
+        bool success = false;
+        QString error;
         try {
             NvHTTP http(address, httpsPort, certificate, true, nullptr, uuid);
-            http.setRuntimeBitrate(*bitrateToApply,clientname);
+            http.setRuntimeBitrate(bitrateToApply, clientname);
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
-                        "Runtime bitrate change to %d kbps completed",
-                        *bitrateToApply);
-            appliedBitrate->store(*bitrateToApply);
+                        "Runtime bitrate change to %d kbps completed", bitrateToApply);
+            success = true;
         }
         catch (const GfeHttpResponseException& e) {
-            *applyError = e.toQString();
+            error = e.toQString();
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "Runtime bitrate change failed (HTTP): %s",
-                         e.toQString().toUtf8().constData());
+                         "Runtime bitrate change failed (HTTP): %s", error.toUtf8().constData());
         }
         catch (const QtNetworkReplyException& e) {
-            *applyError = e.toQString();
+            error = e.toQString();
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "Runtime bitrate change failed (Network): %s",
-                         e.toQString().toUtf8().constData());
+                         "Runtime bitrate change failed (Network): %s", error.toUtf8().constData());
         }
         catch (...) {
-            *applyError = tr("Runtime bitrate change failed: unknown error");
+            error = tr("Runtime bitrate change failed: unknown error");
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "Runtime bitrate change failed: unknown error");
         }
-    });
-    connect(worker, &QThread::finished, this, [this, requestId, bitrateToApply, appliedBitrate, applyError]() {
-        const int applied = appliedBitrate->load();
-        if (applied > 0) {
-            m_AbrCurrentBitrateKbps->store(applied);
-            if (!usesGpuiControls()) {
-                showStreamingToast(tr("Bitrate: %1").arg(
-                        OverlayMenuPanel::formatBitrateKbps(applied)));
+
+        QMetaObject::invokeMethod(this, [this, requestId, bitrateToApply, success, error] {
+            // Once cleanup owns the thread, ignore any queued completion.
+            if (m_RuntimeBitrateClosing) {
+                return;
             }
-        }
-        if (usesGpuiControls()) {
-            emit gpuiBitrateResult(requestId, *bitrateToApply, applied > 0, *applyError);
-        }
-        // Commits that landed mid-flight are still pending; apply the
-        // newest one before going idle.
-        if (m_PendingRuntimeBitrateKbps.load(std::memory_order_acquire) != 0) {
-            startRuntimeBitrateWorker();
-        }
-        else {
-            m_RuntimeBitrateInFlight.store(false, std::memory_order_release);
-        }
+            m_RuntimeBitrateThread.join();
+            if (success) {
+                m_AbrCurrentBitrateKbps->store(bitrateToApply);
+                if (!usesGpuiControls()) {
+                    showStreamingToast(tr("Bitrate: %1").arg(
+                            OverlayMenuPanel::formatBitrateKbps(bitrateToApply)));
+                }
+            }
+            if (usesGpuiControls()) {
+                emit gpuiBitrateResult(requestId, bitrateToApply, success, error);
+            }
+            if (!m_RuntimeBitrateClosing && m_PendingRuntimeBitrateKbps != 0 &&
+                    !m_RuntimeBitrateThread.joinable()) {
+                startRuntimeBitrateWorker();
+            }
+        }, Qt::QueuedConnection);
     });
-    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
-    worker->start();
 }
 
 void Session::startSunshineAbr()
