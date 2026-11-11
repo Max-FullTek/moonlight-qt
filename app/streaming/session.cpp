@@ -1805,6 +1805,15 @@ void Session::releaseActiveSession()
     s_ActiveSessionChanged.notify_one();
 }
 
+void Session::dispatchLifecycleCompletion(std::function<void()> completion)
+{
+    if (m_LifecycleDispatcher) {
+        m_LifecycleDispatcher(std::move(completion));
+    } else {
+        QMetaObject::invokeMethod(this, std::move(completion), Qt::QueuedConnection);
+    }
+}
+
 void Session::dispatchConnectionCleanup()
 {
     m_RuntimeBitrateClosing = true;
@@ -1824,14 +1833,14 @@ void Session::dispatchConnectionCleanup()
     m_ConnectionThread = std::thread([this] {
         finishConnectionCleanup();
         releaseActiveSession();
-        QMetaObject::invokeMethod(this, [this] {
+        dispatchLifecycleCompletion([this] {
             m_ConnectionThread.join();
             const bool shouldExit = m_ShouldExit;
             emit readyForDeletion();
             if (shouldExit) {
                 QCoreApplication::quit();
             }
-        }, Qt::QueuedConnection);
+        });
     });
 }
 
@@ -3689,7 +3698,7 @@ void Session::start()
     // Kick off the async connection thread then return to the caller to pump the event loop
     m_ConnectionThread = std::thread([this] {
         m_AsyncConnectionSuccess = startConnectionAsync();
-        QMetaObject::invokeMethod(this, &Session::exec, Qt::QueuedConnection);
+        dispatchLifecycleCompletion([this] { exec(); });
     });
 }
 

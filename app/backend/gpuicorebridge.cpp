@@ -186,9 +186,13 @@ bool applySettings(const QJsonObject& value, StreamingPreferences* prefs) {
 struct GpuiCoreBridge::InputWakeWindow {
     static constexpr wchar_t ClassName[] = L"MoonlightLiteCoreInputWake";
     static constexpr UINT WakeMessage = WM_APP;
+    static constexpr UINT LifecycleMessage = WM_APP + 1;
+    std::mutex lifecycleMutex;
+    std::function<void()> lifecycleCompletion;
     HWND window = nullptr;
 
     explicit InputWakeWindow(GpuiCoreBridge* bridge)
+        : bridge(bridge)
     {
         const HINSTANCE instance = GetModuleHandleW(nullptr);
         WNDCLASSW windowClass{};
@@ -199,7 +203,7 @@ struct GpuiCoreBridge::InputWakeWindow {
             return;
         }
         window = CreateWindowExW(0, ClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE,
-                                 nullptr, instance, bridge);
+                                 nullptr, instance, this);
     }
 
     ~InputWakeWindow()
@@ -209,6 +213,32 @@ struct GpuiCoreBridge::InputWakeWindow {
         }
     }
 
+    // The launch completion consumes its slot before entering the stream loop.
+    // Cleanup can then publish the next completion using the same slot.
+    void postLifecycle(std::function<void()> completion)
+    {
+        {
+            std::lock_guard lock(lifecycleMutex);
+            Q_ASSERT(!lifecycleCompletion);
+            lifecycleCompletion = std::move(completion);
+        }
+        if (!PostMessageW(window, LifecycleMessage, 0, 0)) {
+            QMetaObject::invokeMethod(bridge, [this] { finishLifecycle(); }, Qt::QueuedConnection);
+        }
+    }
+
+    void finishLifecycle()
+    {
+        std::function<void()> completion;
+        {
+            std::lock_guard lock(lifecycleMutex);
+            completion.swap(lifecycleCompletion);
+        }
+        if (completion) completion();
+    }
+
+    GpuiCoreBridge* const bridge;
+
     static LRESULT CALLBACK handleMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
     {
         if (message == WM_NCCREATE) {
@@ -216,10 +246,11 @@ struct GpuiCoreBridge::InputWakeWindow {
             SetWindowLongPtrW(window, GWLP_USERDATA,
                               reinterpret_cast<LONG_PTR>(creation->lpCreateParams));
         }
-        else if (message == WakeMessage) {
-            auto* bridge = reinterpret_cast<GpuiCoreBridge*>(GetWindowLongPtrW(window, GWLP_USERDATA));
-            if (bridge != nullptr) {
-                bridge->drainInput();
+        else if (message == WakeMessage || message == LifecycleMessage) {
+            auto* dispatcher = reinterpret_cast<InputWakeWindow*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+            if (dispatcher != nullptr) {
+                if (message == WakeMessage) dispatcher->bridge->drainInput();
+                else dispatcher->finishLifecycle();
             }
             return 0;
         }
@@ -799,6 +830,11 @@ void GpuiCoreBridge::command(const QByteArray& line) {
     session->setClientDisplay(clientDisplay);
     session->setGpuiControlsClient(static_cast<unsigned long>(request["client_pid"].toInt()));
     session->setCoreCommandHandler([this] { drainInput(); });
+#ifdef Q_OS_WIN32
+    session->setLifecycleDispatcher([this](std::function<void()> completion) {
+        m_InputWakeWindow->postLifecycle(std::move(completion));
+    });
+#endif
     m_Session = session;
     connect(session, &Session::hostQuitFailed, this, [this](const QString& message) {
         fail("host_quit_failed", message);

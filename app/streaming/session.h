@@ -62,6 +62,10 @@ public:
     bool handleGpuiControl(const QString& action, int value = 0, int requestId = 0);
     static void wakeForCoreCommands();
     void setCoreCommandHandler(std::function<void()> handler) { m_CoreCommandHandler = std::move(handler); }
+    void setLifecycleDispatcher(std::function<void(std::function<void()>)> dispatcher)
+    {
+        m_LifecycleDispatcher = std::move(dispatcher);
+    }
     Q_INVOKABLE bool initialize(QQuickWindow* qtWindow);
     Q_INVOKABLE void start();
     Q_INVOKABLE void interrupt();
@@ -120,6 +124,8 @@ private:
     int m_GpuiClientDisplay = -1;
     unsigned long m_GpuiControlsClient = 0;
     std::function<void()> m_CoreCommandHandler;
+    std::function<void(std::function<void()>)> m_LifecycleDispatcher;
+    void dispatchLifecycleCompletion(std::function<void()> completion);
     bool m_GpuiControlsActive = false;
     bool m_GpuiRestoreCapture = false;
     struct WaylandWindowSnapshot
