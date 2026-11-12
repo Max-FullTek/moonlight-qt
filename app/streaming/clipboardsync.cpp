@@ -99,7 +99,6 @@ ClipboardSync::ClipboardSync(const ClipboardSyncHostContext& hostContext, QObjec
       m_HostContext(hostContext)
 {
     qRegisterMetaType<QByteArray>("QByteArray");
-    m_Clock.start();
     // Tokens are shared with peers. Avoid every helper restart beginning at 1.
     m_NextToken = QRandomGenerator::global()->generate();
     if (m_NextToken == 0) {
@@ -363,12 +362,14 @@ void ClipboardSync::onIncomingFrame(QByteArray frame)
     if (kind == KIND_REF && !m_LastOutboundRef.isEmpty() && payload == m_LastOutboundRef) {
         return;
     }
-    while (!m_RetiredTokens.isEmpty() &&
-           m_Clock.elapsed() - m_RetiredTokens.head().second > 30000) {
-        m_RetiredTokens.dequeue();
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - m_ClockStart);
+    while (!m_RetiredTokens.empty() &&
+           now - m_RetiredTokens.front().retiredAt > std::chrono::seconds(30)) {
+        m_RetiredTokens.pop_front();
     }
     for (const auto& retired : m_RetiredTokens) {
-        if (token != 0 && token == retired.first) {
+        if (token != 0 && token == retired.token) {
             return;
         }
     }
@@ -1070,9 +1071,11 @@ void ClipboardSync::beginClipboardChange(quint32 token)
 {
     ++m_Revision;
     if (m_CurrentToken != 0) {
-        m_RetiredTokens.enqueue(qMakePair(m_CurrentToken, m_Clock.elapsed()));
+        const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - m_ClockStart);
+        m_RetiredTokens.push_back({m_CurrentToken, now});
         while (m_RetiredTokens.size() > MAX_PENDING_BURSTS) {
-            m_RetiredTokens.dequeue();
+            m_RetiredTokens.pop_front();
         }
     }
     m_CurrentToken = token;

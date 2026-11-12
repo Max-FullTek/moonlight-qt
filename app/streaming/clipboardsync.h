@@ -5,10 +5,7 @@
 #include <QObject>
 #include <QByteArray>
 #include <QHash>
-#include <QElapsedTimer>
-#include <QPair>
 #include <QSet>
-#include <QQueue>
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
 #include "backend/nativehttptransport.h"
 #else
@@ -17,7 +14,9 @@
 #endif
 #include <QString>
 #include <QStringList>
+#include <chrono>
 #include <cstdint>
+#include <deque>
 #include <functional>
 
 class QImage;
@@ -253,8 +252,12 @@ private:
     quint32 m_CurrentToken = 0;
     quint32 m_OutgoingToken = 0;
     QByteArray m_LastOutboundRef;
-    QElapsedTimer m_Clock;
-    QQueue<QPair<quint32, qint64>> m_RetiredTokens;
+    struct RetiredToken {
+        uint32_t token;
+        std::chrono::milliseconds retiredAt;
+    };
+    const std::chrono::steady_clock::time_point m_ClockStart = std::chrono::steady_clock::now();
+    std::deque<RetiredToken> m_RetiredTokens;
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
     std::unique_ptr<WindowsClipboardListener> m_ClipboardListener;
     QSet<QtClipboardTransfer*> m_BlobReplies;
