@@ -126,6 +126,14 @@ target_compile_features(lite-audio-pipeline PUBLIC cxx_std_17)
 target_compile_options(lite-audio-pipeline PRIVATE /W3 /WX)
 target_link_libraries(lite-audio-pipeline PUBLIC lite-sdl-audio lite-opus)
 
+add_library(lite-dualsense-haptics STATIC
+    "${LITE_SOURCE_ROOT}/app/streaming/audio/dualsensehaptics.cpp")
+target_compile_features(lite-dualsense-haptics PUBLIC cxx_std_17)
+target_compile_options(lite-dualsense-haptics PRIVATE /W3 /WX)
+target_compile_definitions(lite-dualsense-haptics PRIVATE HAVE_PHYSICAL_DS5_HAPTICS)
+target_include_directories(lite-dualsense-haptics PRIVATE "${LITE_SOURCE_ROOT}/app")
+target_link_libraries(lite-dualsense-haptics PUBLIC lite-sdl2 moonlight-common-c ole32 uuid)
+
 add_library(lite-stream-utils STATIC "${LITE_SOURCE_ROOT}/app/streaming/streamutils.cpp")
 target_compile_features(lite-stream-utils PUBLIC cxx_std_17)
 target_compile_options(lite-stream-utils PRIVATE /W3 /WX)
@@ -200,7 +208,7 @@ add_library(lite-input-events STATIC
 target_compile_features(lite-input-events PUBLIC cxx_std_17)
 target_compile_options(lite-input-events PRIVATE /W3 /WX)
 target_compile_definitions(lite-input-events PRIVATE NOMINMAX HAVE_PHYSICAL_DS5_HAPTICS)
-target_link_libraries(lite-input-events PUBLIC lite-touch-input lite-cursor-shape)
+target_link_libraries(lite-input-events PUBLIC lite-touch-input lite-cursor-shape lite-dualsense-haptics)
 
 foreach(required IN ITEMS include/x64/libavutil/frame.h lib/x64/avutil.lib lib/x64/avutil-61.dll
                           include/x64/libavcodec/avcodec.h lib/x64/avcodec.lib lib/x64/avcodec-63.dll)

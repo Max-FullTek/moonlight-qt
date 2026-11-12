@@ -12,15 +12,20 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
+#if defined(__APPLE__)
 #include <QtGlobal>
 #include <QString>
+#endif
 
-#ifdef Q_OS_WIN32
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #include <audioclient.h>
 #include <propkey.h>
@@ -69,12 +74,35 @@ enum class WriteResult
 
 // A DualShock 4 also calls itself "Wireless Controller", but it exposes a
 // two-channel endpoint, so the channel count check rules it out.
+#ifdef _WIN32
+bool isDualSenseName(const std::wstring& name)
+{
+    return FindStringOrdinal(FIND_FROMSTART, name.c_str(), -1, L"dualsense", -1, TRUE) >= 0 ||
+           FindStringOrdinal(FIND_FROMSTART, name.c_str(), -1, L"wireless controller", -1, TRUE) >= 0 ||
+           FindStringOrdinal(FIND_FROMSTART, name.c_str(), -1, L"hidmaestro", -1, TRUE) >= 0;
+}
+
+std::string endpointNameUtf8(const std::wstring& name)
+{
+    const int size = WideCharToMultiByte(CP_UTF8, 0, name.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (size == 0) {
+        return {};
+    }
+    std::string utf8(size, '\0');
+    if (!WideCharToMultiByte(CP_UTF8, 0, name.c_str(), -1, utf8.data(), size, nullptr, nullptr)) {
+        return {};
+    }
+    utf8.pop_back();
+    return utf8;
+}
+#else
 bool isDualSenseName(const QString& name)
 {
     return name.contains(QLatin1String("dualsense"), Qt::CaseInsensitive) ||
            name.contains(QLatin1String("wireless controller"), Qt::CaseInsensitive) ||
            name.contains(QLatin1String("hidmaestro"), Qt::CaseInsensitive);
 }
+#endif
 
 using dualsense_haptics::EndpointChannelCount;
 using dualsense_haptics::spreadToHapticsChannels;
@@ -91,13 +119,17 @@ constexpr double framesToMs(std::uint32_t frames)
     return frames / 48.0;
 }
 
-// A delay for the endpoint-ready log, or "unknown" if the device did not report it.
-QString describeDelay(bool known, double ms)
+#ifdef _WIN32
+std::string describeDelay(bool known, double ms)
 {
-    return known ? QStringLiteral("%1 ms").arg(ms, 0, 'f', 1) : QStringLiteral("unknown");
+    if (!known) {
+        return "unknown";
+    }
+    char formatted[32];
+    SDL_snprintf(formatted, sizeof(formatted), "%.1f ms", ms);
+    return formatted;
 }
 
-#ifdef Q_OS_WIN32
 // Call visit() with an audio client for each active render endpoint named like
 // a DualSense, until it accepts one.
 template <typename Visit> bool findDualSenseAudioClient(Visit visit)
@@ -128,8 +160,7 @@ template <typename Visit> bool findDualSenseAudioClient(Visit visit)
             }
             PropVariantClear(&value);
         }
-        const QString name = QString::fromStdWString(friendlyName);
-        if (!isDualSenseName(name))
+        if (!isDualSenseName(friendlyName))
             continue;
 
         ComPtr<IAudioClient> client;
@@ -137,7 +168,7 @@ template <typename Visit> bool findDualSenseAudioClient(Visit visit)
                                     reinterpret_cast<void**>(client.GetAddressOf())))) {
             continue;
         }
-        if (visit(client, name)) {
+        if (visit(client, friendlyName)) {
             return true;
         }
     }
@@ -189,7 +220,7 @@ public:
     bool open()
     {
         const bool found = findDualSenseAudioClient([this](const ComPtr<IAudioClient>& candidate,
-                                                           const QString& name) {
+                                                           const std::wstring& name) {
             WAVEFORMATEX* mix = nullptr;
             if (FAILED(candidate->GetMixFormat(&mix)) || mix == nullptr) {
                 CoTaskMemFree(mix);
@@ -229,12 +260,13 @@ public:
             SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                         "DualSense haptics endpoint ready: %s (48 kHz, 4 ch, %u-bit%s; "
                         "latency <= %s: queue <= %.1f ms, stream latency %s, device period %s)",
-                        qUtf8Printable(name), m_BitsPerSample, m_FloatSamples ? " float" : " PCM",
-                        qPrintable(describeDelay(streamLatencyKnown,
-                                                 framesToMs(m_BufferFrames) + streamLatencyMs)),
+                        endpointNameUtf8(name).c_str(), m_BitsPerSample,
+                        m_FloatSamples ? " float" : " PCM",
+                        describeDelay(streamLatencyKnown,
+                                      framesToMs(m_BufferFrames) + streamLatencyMs).c_str(),
                         framesToMs(m_BufferFrames),
-                        qPrintable(describeDelay(streamLatencyKnown, streamLatencyMs)),
-                        qPrintable(describeDelay(devicePeriodKnown, devicePeriod / 10000.0)));
+                        describeDelay(streamLatencyKnown, streamLatencyMs).c_str(),
+                        describeDelay(devicePeriodKnown, devicePeriod / 10000.0).c_str());
             return true;
         });
 
@@ -330,7 +362,7 @@ bool probeHapticsEndpoint()
     }
 
     const bool found =
-        findDualSenseAudioClient([](const ComPtr<IAudioClient>& candidate, const QString&) {
+        findDualSenseAudioClient([](const ComPtr<IAudioClient>& candidate, const std::wstring&) {
             WAVEFORMATEX* mix = nullptr;
             bool supported = false;
             if (SUCCEEDED(candidate->GetMixFormat(&mix)) && mix != nullptr) {
@@ -349,6 +381,12 @@ bool probeHapticsEndpoint()
 }
 
 #elif defined(Q_OS_MACOS)
+
+// A delay for the endpoint-ready log, or "unknown" if the device did not report it.
+QString describeDelay(bool known, double ms)
+{
+    return known ? QStringLiteral("%1 ms").arg(ms, 0, 'f', 1) : QStringLiteral("unknown");
+}
 
 constexpr UInt32 EndpointBytesPerFrame = EndpointChannelCount * sizeof(float);
 
@@ -746,7 +784,7 @@ struct DualSenseHapticsRenderer::Impl
 
     explicit Impl(Mode mode)
     {
-        Q_UNUSED(mode);
+        (void)mode;
 #ifdef Q_OS_MACOS
         if (mode == Mode::Emulated) {
             macRenderer = std::make_unique<MacDualSenseHapticsRenderer>();
@@ -990,7 +1028,7 @@ void DualSenseHapticsRenderer::submit(const LI_DS5_HAPTICS_PCM_FRAME& frame)
 
 void DualSenseHapticsRenderer::setControllerTarget(int controllerNumber)
 {
-    Q_UNUSED(controllerNumber);
+    (void)controllerNumber;
 #ifdef HAVE_PHYSICAL_DS5_HAPTICS
     if (m_Impl->controllerTarget.exchange(controllerNumber) != controllerNumber) {
         m_Impl->requestReset();
