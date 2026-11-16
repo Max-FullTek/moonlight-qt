@@ -4,6 +4,9 @@
 #include "pairedcertificate.h"
 #include "sessionapirpc.h"
 #include "workercommandpipe.h"
+#ifdef LITE_NATIVE_WORKER_JSON
+#include "workercommandrouting.h"
+#endif
 #include "streaming/streamutils.h"
 #include "SDL_compat.h"
 #include <cmath>
@@ -318,6 +321,14 @@ void GpuiCoreBridge::start() {
             const auto status = WorkerCommandPipe::read(stdin, line);
             if (status == WorkerCommandPipe::ReadStatus::EndOfInput) break;
             const bool oversized = status == WorkerCommandPipe::ReadStatus::Oversized;
+#ifdef LITE_NATIVE_WORKER_JSON
+            auto route = oversized ? WorkerCommandRouting::Route{} : WorkerCommandRouting::inspect(line);
+            if (route.kind == WorkerCommandRouting::Kind::SessionApiResult) {
+                if (route.requestId) SessionApiRpc::broker().complete(route.requestId, std::move(route.result));
+                continue;
+            }
+            const bool shutdownRequested = route.kind == WorkerCommandRouting::Kind::Shutdown;
+#else
             const auto bytes = QByteArray::fromRawData(line.data(), static_cast<int>(line.size()));
             const auto object = oversized ? QJsonObject() : QJsonDocument::fromJson(bytes).object();
             if (object["command"] == "session_api_result") {
@@ -330,6 +341,7 @@ void GpuiCoreBridge::start() {
                 continue;
             }
             const bool shutdownRequested = object["command"] == "shutdown";
+#endif
             if (shutdownRequested) SessionApiRpc::broker().close();
             enqueueInput(oversized ? Input{InputKind::Oversized, {}} :
                                      Input{InputKind::Command, std::move(line)});

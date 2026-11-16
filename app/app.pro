@@ -16,6 +16,15 @@ HEADERS += backend/nativepairing.h
 SOURCES += backend/nativeidentity.cpp
 HEADERS += backend/nativeidentity.h
 
+win32:lite-native-worker-json {
+    WORKER_JSON_SOURCE = $$(LITE_CLIPBOARD_JSON_SOURCE)
+    !exists("$$WORKER_JSON_SOURCE/include/nlohmann/json.hpp"): error("Native worker JSON source is required")
+    INCLUDEPATH += "$$WORKER_JSON_SOURCE/include"
+    DEFINES += LITE_NATIVE_WORKER_JSON
+    SOURCES += backend/workercommandrouting.cpp
+    HEADERS += backend/workercommandrouting.h
+}
+
 # Transitional Windows Lite owner: native HTTP, existing Qt event dispatcher.
 # The build entry prepares verified static libraries; never fetch from qmake.
 lite-native-http {
