@@ -21,6 +21,10 @@ public:
     WindowsClipboardListener& operator=(const WindowsClipboardListener&) = delete;
 
     bool active() const;
+    bool ownsClipboard() const;
+    bool hasFiles() const;
+    bool hasShellItems() const;
+    bool hasImage() const;
     enum class WriteResult { Written, FileClipboard, Unavailable };
     WriteResult writeText(std::wstring_view text) const;
     WriteResult writePng(std::string_view png, const unsigned char* bgra,

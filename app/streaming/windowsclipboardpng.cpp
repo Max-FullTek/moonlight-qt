@@ -52,20 +52,26 @@ bool readChunks(std::string_view png, WindowsClipboardPng::Metadata metadata,
         if ((crc ^ 0xffffffffu) != readBigEndian(png.data() + 8 + dataSize)) return false;
         if (type == "IDAT") seenImageData = true;
         if (type == "IEND") return dataSize == 0;
-        if (metadata == WindowsClipboardPng::Metadata::PreserveForPaste) {
+        if (metadata != WindowsClipboardPng::Metadata::PixelsOnly) {
+            const bool strict = metadata == WindowsClipboardPng::Metadata::PreserveForPaste;
             if (type == "pHYs") {
-                if (seenImageData || image.dotsPerMeterX || dataSize != 9 || png[16] != 1) return false;
+                if (seenImageData || image.dotsPerMeterX || dataSize != 9 || png[16] != 1) {
+                    if (strict) return false;
+                    png.remove_prefix(12 + dataSize);
+                    continue;
+                }
                 const auto x = readBigEndian(png.data() + 8);
                 const auto y = readBigEndian(png.data() + 12);
                 constexpr auto maxResolution = static_cast<uint32_t>((std::numeric_limits<int>::max)());
-                if (!x || !y || x > maxResolution || y > maxResolution) return false;
-                image.dotsPerMeterX = static_cast<int>(x);
-                image.dotsPerMeterY = static_cast<int>(y);
+                if (x && y && x <= maxResolution && y <= maxResolution) {
+                    image.dotsPerMeterX = static_cast<int>(x);
+                    image.dotsPerMeterY = static_cast<int>(y);
+                } else if (strict) return false;
             } else if (type == "sRGB") {
                 if (seenImageData || image.srgb || dataSize != 1 ||
                     static_cast<unsigned char>(png[8]) > 3) return false;
                 image.srgb = true;
-            } else if (type != "IHDR" && type != "PLTE" && type != "tRNS" && type != "IDAT") {
+            } else if (strict && type != "IHDR" && type != "PLTE" && type != "tRNS" && type != "IDAT") {
                 return false;
             }
         }
@@ -133,7 +139,8 @@ WindowsClipboardPng::Image WindowsClipboardPng::decode(std::string_view png, siz
     Image image;
     if (png.size() < 33 || png.size() > MaxWicBuffer ||
         png.substr(12, 4) != "IHDR" ||
-        !supportedPixelFormat(static_cast<unsigned char>(png[24]), static_cast<unsigned char>(png[25])) ||
+        (!(metadata == Metadata::NativeClipboard && static_cast<unsigned char>(png[24]) == 16) &&
+         !supportedPixelFormat(static_cast<unsigned char>(png[24]), static_cast<unsigned char>(png[25]))) ||
         !readChunks(png, metadata, image)) return {};
 
     const Apartment apartment;

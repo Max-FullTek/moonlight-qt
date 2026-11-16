@@ -14,7 +14,7 @@ struct Image {
     bool srgb = false;
 };
 
-enum class Metadata { PixelsOnly, PreserveForPaste };
+enum class Metadata { PixelsOnly, PreserveForPaste, NativeClipboard };
 Image decode(std::string_view png, size_t maxPixels, Metadata metadata = Metadata::PixelsOnly);
 
 struct BitmapConversion {

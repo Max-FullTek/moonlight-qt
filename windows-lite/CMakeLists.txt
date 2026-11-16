@@ -181,6 +181,14 @@ target_compile_options(lite-clipboard-png PRIVATE /W3 /WX)
 target_include_directories(lite-clipboard-png PUBLIC "${LITE_SOURCE_ROOT}/app")
 target_link_libraries(lite-clipboard-png PUBLIC windowscodecs ole32)
 
+if(LITE_ENABLE_NATIVE_HTTP AND TARGET lite-clipboard-ipc)
+    add_executable(moonlight-clipboard-helper WIN32 "${LITE_SOURCE_ROOT}/clipboard-helper/windowsmain.cpp")
+    target_compile_features(moonlight-clipboard-helper PRIVATE cxx_std_17)
+    target_compile_options(moonlight-clipboard-helper PRIVATE /W3 /WX)
+    target_link_libraries(moonlight-clipboard-helper PRIVATE lite-clipboard-ipc lite-clipboard-frame
+        lite-clipboard-listener lite-clipboard-png lite-windows-http-transfer)
+endif()
+
 add_library(lite-worker-dispatch STATIC "${LITE_SOURCE_ROOT}/app/backend/windowsworkerdispatch.cpp")
 target_compile_features(lite-worker-dispatch PUBLIC cxx_std_17)
 target_compile_options(lite-worker-dispatch PRIVATE /W3 /WX)

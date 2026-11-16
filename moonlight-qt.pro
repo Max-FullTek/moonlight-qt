@@ -7,7 +7,7 @@ SUBDIRS = \
 
 # Build the dependencies in parallel before the final app
 app.depends = qmdnsengine moonlight-common-c h264bitstream
-!config_SL {
+!config_SL:!lite-native-clipboard-helper {
     SUBDIRS += clipboard-helper
     app.depends += clipboard-helper
 }

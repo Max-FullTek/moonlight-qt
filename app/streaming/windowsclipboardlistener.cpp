@@ -1,6 +1,7 @@
 #include "windowsclipboardlistener.h"
 
 #include <windows.h>
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -137,6 +138,55 @@ WindowsClipboardListener::~WindowsClipboardListener() = default;
 bool WindowsClipboardListener::active() const
 {
     return m_Window->handle != nullptr;
+}
+
+bool WindowsClipboardListener::ownsClipboard() const
+{
+    return active() && GetClipboardOwner() == m_Window->handle;
+}
+
+bool WindowsClipboardListener::hasFiles() const
+{
+    return hasFileFormats();
+}
+
+bool WindowsClipboardListener::hasShellItems() const
+{
+    for (const auto* name : {L"FileGroupDescriptor", L"FileGroupDescriptorW", L"Shell IDList Array"}) {
+        const auto format = RegisterClipboardFormatW(name);
+        if (format && IsClipboardFormatAvailable(format)) return true;
+    }
+    return false;
+}
+
+bool WindowsClipboardListener::hasImage() const
+{
+    if (!active() || !OpenClipboard(m_Window->handle)) return false;
+    const ClipboardLock lock;
+    for (UINT format = 0; (format = EnumClipboardFormats(format)) != 0;) {
+        if (format == CF_BITMAP || format == CF_DIB || format == CF_DIBV5) return true;
+        wchar_t name[256]{};
+        if (!GetClipboardFormatNameW(format, name, ARRAYSIZE(name))) continue;
+        if (_wcsnicmp(name, L"image/", 6) == 0 || _wcsicmp(name, L"PNG") == 0 ||
+            _wcsicmp(name, L"JFIF") == 0 || _wcsicmp(name, L"GIF") == 0 ||
+            _wcsicmp(name, L"WebP") == 0) return true;
+        if (_wcsicmp(name, L"HTML Format") == 0) {
+            const auto buffer = GetClipboardData(format);
+            if (!buffer) continue;
+            const auto size = GlobalSize(buffer);
+            if (!size || size > 64 * 1024 * 1024) continue;
+            const GlobalMemoryLock html{buffer};
+            if (!html.data) continue;
+            const std::string_view contents(static_cast<const char*>(html.data), size);
+            constexpr std::string_view marker = "data:image/";
+            if (std::search(contents.begin(), contents.end(), marker.begin(), marker.end(),
+                    [](char left, char right) {
+                        if (left >= 'A' && left <= 'Z') left += 'a' - 'A';
+                        return left == right;
+                    }) != contents.end()) return true;
+        }
+    }
+    return false;
 }
 
 WindowsClipboardListener::WriteResult WindowsClipboardListener::writeText(std::wstring_view text) const

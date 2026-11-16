@@ -71,10 +71,18 @@ $parserSources = & python (Join-Path $SourceRoot 'tests/native_parsers/prepare.p
     (Join-Path $SourceRoot 'build/native-parsers-source') --json-only
 if ($LASTEXITCODE -ne 0) { throw 'Verified clipboard JSON source preparation failed.' }
 $env:LITE_CLIPBOARD_JSON_SOURCE = ($parserSources | ConvertFrom-Json).json
+$cmake = @(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find '**/cmake.exe')[0]
+if (!$cmake) { throw 'Installed VS CMake is required for the native clipboard helper.' }
+$clipboardBuild = Join-Path $root 'clipboard-native'
+Invoke-Checked $cmake @('-S', (Join-Path $SourceRoot 'windows-lite'), '-B', $clipboardBuild,
+    '-G', 'Visual Studio 17 2022', '-A', 'x64', '-DBUILD_TESTING=OFF', '-DLITE_ENABLE_NATIVE_HTTP=ON',
+    "-DLITE_CLIPBOARD_JSON_SOURCE=$env:LITE_CLIPBOARD_JSON_SOURCE",
+    "-DCURL_SOURCE_DIRECTORY=$(Join-Path $SourceRoot 'build/curl-capability-source/curl-8.23.0')")
+Invoke-Checked $cmake @('--build', $clipboardBuild, '--config', 'Release', '--target', 'moonlight-clipboard-helper', '--parallel', '2')
 
 Push-Location -LiteralPath $build
 try {
-    Invoke-Checked $qmake @((Join-Path $SourceRoot 'moonlight-qt.pro'), 'CONFIG+=lite-native-http')
+    Invoke-Checked $qmake @((Join-Path $SourceRoot 'moonlight-qt.pro'), 'CONFIG+=lite-native-http lite-native-clipboard-helper')
     Invoke-Checked 'nmake.exe' @('/NOLOGO', 'release')
 } finally { Pop-Location }
 
@@ -84,7 +92,11 @@ Get-ChildItem -LiteralPath $deps -Filter '*.dll' |
     Copy-Item -Destination $deploy
 Copy-Item -LiteralPath (Join-Path $build 'app/release/Moonlight.exe') -Destination $deploy
 Copy-Item -LiteralPath (Join-Path $build 'AntiHooking/release/AntiHooking.dll') -Destination $deploy
-Copy-Item -LiteralPath (Join-Path $build 'clipboard-helper/release/moonlight-clipboard-helper.exe') -Destination $deploy
+Copy-Item -LiteralPath (Join-Path $clipboardBuild 'Release/moonlight-clipboard-helper.exe') -Destination $deploy
+$helperImports = & dumpbin.exe /dependents (Join-Path $deploy 'moonlight-clipboard-helper.exe')
+if ($LASTEXITCODE -ne 0 -or ($helperImports -match '^\s+Qt\S*\.dll\s*$')) {
+    throw 'The clipboard helper must have a readable import table without Qt dependencies.'
+}
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'app/SDL_GameControllerDB/gamecontrollerdb.txt') -Destination $deploy
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'LICENSE') -Destination $deploy
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'build/curl-capability-source/curl-8.23.0/COPYING') -Destination (Join-Path $deploy 'CURL-COPYING.txt')
@@ -119,6 +131,7 @@ $env:PATH = "$deploy;$env:PATH"
 # test platform, which windeployqt does not ship in the user-facing package.
 $env:QT_PLUGIN_PATH = "$deploy;$(& $qmake -query QT_INSTALL_PLUGINS)"
 $testResults = @()
+$testResults += @{ name = 'clipboard-helper-imports'; result = 'passed-no-qt' }
 $testResults += @{ name = 'native-host-http-and-nvhttp'; result = 'passed-loopback-native-and-legacy' }
 $env:QT_QPA_PLATFORM = 'offscreen'
 $env:QT_QUICK_BACKEND = 'software'
