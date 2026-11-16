@@ -1081,16 +1081,15 @@ void ClipboardSync::beginClipboardChange(quint32 token)
     m_CurrentToken = token;
     m_OutgoingToken = 0;
     m_LastOutboundRef.clear();
-    const auto replies = m_BlobReplies.values();
+    const auto replies = m_BlobReplies;
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
     m_BlobReplies.clear();
     for (auto* reply : replies) reply->cancel();
 #else
     for (auto* reply : replies) reply->abort();
 #endif
-    const auto tokens = m_PendingBursts.keys();
-    for (quint32 oldToken : tokens) {
-        removeBurst(oldToken);
+    while (!m_PendingBursts.empty()) {
+        removeBurst(m_PendingBursts.begin()->first);
     }
 }
 
@@ -1164,7 +1163,7 @@ void ClipboardSync::readBlobReply(
         reply, &QNetworkReply::finished, this,
         [this, reply, bytes, revision, pinned, timeout, onFetched, limit]() {
             timeout->stop();
-            m_BlobReplies.remove(reply);
+            m_BlobReplies.erase(reply);
             reply->deleteLater();
             if (!m_Active || revision != m_Revision) {
                 return;
@@ -1214,7 +1213,7 @@ void ClipboardSync::requestBlob(const QUrl& url, const QByteArray& payload, cons
     const quint64 revision = m_Revision;
     auto* transfer = new QtClipboardTransfer(std::move(request),
         [this, revision, upload, onFetched = std::move(onFetched)](QtClipboardTransfer* completed, NativeHttp::Response response) {
-            m_BlobReplies.remove(completed);
+            m_BlobReplies.erase(completed);
             if (!m_Active || revision != m_Revision) return;
             if (response.error != NativeHttp::Error::None || !response.certificateVerified ||
                 response.httpStatus < 200 || response.httpStatus >= 300) {
@@ -1316,29 +1315,32 @@ quint32 ClipboardSync::nextToken()
 
 void ClipboardSync::handleBurstFrame(uint8_t kind, quint32 token, const QByteArray& payload)
 {
-    if (!m_PendingBursts.contains(token)) {
+    auto it = m_PendingBursts.find(token);
+    if (it == m_PendingBursts.end()) {
         if (m_PendingBursts.size() >= MAX_PENDING_BURSTS) {
             // Defensive bound: a pathological sender must not grow the map
-            // without limit; drop the oldest (already-applied) burst.
-            ClipboardLog::warn("ClipboardSync: burst backlog exceeded; dropping oldest burst");
-            removeBurst(m_PendingBursts.constBegin().key());
+            // without limit. Evict an existing entry as with the previous hash map.
+            ClipboardLog::warn("ClipboardSync: burst backlog exceeded; dropping pending burst");
+            removeBurst(m_PendingBursts.begin()->first);
         }
 
         BurstState state;
         state.timer = new QTimer(this);
         state.timer->setSingleShot(true);
         connect(state.timer, &QTimer::timeout, this, [this, token]() {
-            if (token == m_CurrentToken && !m_BlobReplies.isEmpty()) {
-                m_PendingBursts[token].timer->start(BURST_RETENTION_MS);
+            const auto pending = m_PendingBursts.find(token);
+            if (pending == m_PendingBursts.end()) return;
+            if (token == m_CurrentToken && !m_BlobReplies.empty()) {
+                pending->second.timer->start(BURST_RETENTION_MS);
                 return;
             }
             removeBurst(token);
         });
         state.timer->start(BURST_RETENTION_MS);
-        m_PendingBursts.insert(token, state);
+        it = m_PendingBursts.emplace(token, std::move(state)).first;
     }
 
-    BurstState& state = m_PendingBursts[token];
+    BurstState& state = it->second;
     if (kind == KIND_TEXT && !state.haveText) {
         state.haveText = true;
         state.textPayload = payload;
@@ -1380,7 +1382,7 @@ void ClipboardSync::removeBurst(quint32 token)
         return;
     }
 
-    QTimer* timer = it.value().timer;
+    QTimer* timer = it->second.timer;
     m_PendingBursts.erase(it);
     if (timer != nullptr) {
         timer->stop();

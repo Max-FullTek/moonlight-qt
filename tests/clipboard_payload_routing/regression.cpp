@@ -314,13 +314,13 @@ public:
             incoming(sync, 1, 0, "newer text");
             server.answer(1, "old");
             QCoreApplication::processEvents();
-            ok &= check(sync.m_BlobReplies.isEmpty() && cb->text() == "newer text",
+            ok &= check(sync.m_BlobReplies.empty() && cb->text() == "newer text",
                         "new frame cancels stale download", err);
             incoming(sync, 3, 0, ref("oversize", 4));
             ok &= check(waitFor([&] { return server.requests.size() == 3; }), "limit GET started",
                         err);
             server.answer(2, "", 100000);
-            ok &= check(waitFor([&] { return sync.m_BlobReplies.isEmpty(); }) &&
+            ok &= check(waitFor([&] { return sync.m_BlobReplies.empty(); }) &&
                             cb->text() == "newer text",
                         "oversize response aborted at headers", err);
             incoming(sync, 3, 0, ref("stop", 3));
@@ -329,7 +329,7 @@ public:
             sync.stop();
             server.answer(3, "old");
             QCoreApplication::processEvents();
-            ok &= check(sync.m_BlobReplies.isEmpty() && cb->text() == "newer text",
+            ok &= check(sync.m_BlobReplies.empty() && cb->text() == "newer text",
                         "stop cancels pending network callbacks", err);
         }
         {
@@ -346,7 +346,7 @@ public:
             cb->setText("new upload");
             server.answer(index, "{\"id\":\"late\"}");
             QCoreApplication::processEvents();
-            ok &= check(sent.size() == 1 && sent[0][1] == 1 && sync.m_BlobReplies.isEmpty(),
+            ok &= check(sent.size() == 1 && sent[0][1] == 1 && sync.m_BlobReplies.empty(),
                         "new clipboard cancels stale upload REF", err);
         }
         {
@@ -358,11 +358,11 @@ public:
             ok &= check(waitFor([&] { return server.requests.size() > index; }),
                         "chunked GET started", err);
             incoming(sync, 3, 0, "invalid JSON");
-            ok &= check(!sync.m_BlobReplies.isEmpty(),
+            ok &= check(!sync.m_BlobReplies.empty(),
                         "malformed REF does not cancel valid transfer", err);
             server.answerChunked(index, "12345678");
             ok &=
-                check(waitFor([&] { return sync.m_BlobReplies.isEmpty(); }) && cb->text() == "keep",
+                check(waitFor([&] { return sync.m_BlobReplies.empty(); }) && cb->text() == "keep",
                       "streamed body is bounded without Content-Length", err);
             index = server.requests.size();
             incoming(sync, 3, 0, ref("reconfigure", 3));
@@ -371,7 +371,7 @@ public:
             sync.setHostContext(host);
             server.answer(index, "old");
             QCoreApplication::processEvents();
-            ok &= check(sync.m_BlobReplies.isEmpty() && cb->text() == "keep",
+            ok &= check(sync.m_BlobReplies.empty() && cb->text() == "keep",
                         "reconfigure same host cancels prior generation", err);
         }
         {
@@ -388,7 +388,7 @@ public:
             for (int i = ClipboardBlob::MaxPendingTransfers - 1; i >= 0; --i) {
                 server.answer(index + i, "x");
             }
-            ok &= check(waitFor([&] { return sync.m_BlobReplies.isEmpty(); }) &&
+            ok &= check(waitFor([&] { return sync.m_BlobReplies.empty(); }) &&
                         completed.size() == ClipboardBlob::MaxPendingTransfers &&
                         server.requests.size() == index + ClipboardBlob::MaxPendingTransfers,
                         "concurrent clipboard completions respect the four-request cap", err);
@@ -417,7 +417,7 @@ public:
 #endif
             const int count = server.requests.size();
             cb->setText(QString(60000, 'z'));
-            ok &= check(waitFor([&] { return sync.m_BlobReplies.isEmpty(); }),
+            ok &= check(waitFor([&] { return sync.m_BlobReplies.empty(); }),
                         "wrong paired certificate rejected", err);
 #ifndef LITE_NATIVE_CLIPBOARD_HTTP
             ok &= check(sslErrors == 0 && encrypted == 1,

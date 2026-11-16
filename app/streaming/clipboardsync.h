@@ -4,8 +4,6 @@
 
 #include <QObject>
 #include <QByteArray>
-#include <QHash>
-#include <QSet>
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
 #include "backend/nativehttptransport.h"
 #else
@@ -18,6 +16,8 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <unordered_map>
+#include <unordered_set>
 
 class QImage;
 class QMimeData;
@@ -260,11 +260,11 @@ private:
     std::deque<RetiredToken> m_RetiredTokens;
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
     std::unique_ptr<WindowsClipboardListener> m_ClipboardListener;
-    QSet<QtClipboardTransfer*> m_BlobReplies;
+    std::unordered_set<QtClipboardTransfer*> m_BlobReplies;
 #else
-    QSet<QNetworkReply*> m_BlobReplies;
+    std::unordered_set<QNetworkReply*> m_BlobReplies;
 #endif
-    QHash<quint32, BurstState> m_PendingBursts;
+    std::unordered_map<uint32_t, BurstState> m_PendingBursts;
     quint32 m_NextToken = 1;
 
 #ifdef Q_OS_MACOS
