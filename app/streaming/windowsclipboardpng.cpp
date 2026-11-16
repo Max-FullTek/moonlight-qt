@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <utility>
 
 using Microsoft::WRL::ComPtr;
 
@@ -79,51 +80,116 @@ bool supportedPixelFormat(unsigned depth, unsigned color)
     if (depth == 1 || depth == 2 || depth == 4) return color == 0 || color == 3;
     return depth == 8 && (color == 0 || color == 2 || color == 3 || color == 4 || color == 6);
 }
+
+struct Apartment {
+    HRESULT result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    ~Apartment() { if (SUCCEEDED(result)) CoUninitialize(); }
+    bool ready() const { return SUCCEEDED(result) || result == RPC_E_CHANGED_MODE; }
+};
+
+constexpr auto MaxWicBuffer = (std::numeric_limits<UINT>::max)();
+
+struct BitmapDecoder {
+    ComPtr<IWICImagingFactory> factory;
+    ComPtr<IWICStream> stream;
+    ComPtr<IWICBitmapDecoder> decoder;
+    ComPtr<IWICBitmapFrameDecode> frame;
+
+    bool open(std::string_view bytes, const CLSID& codec)
+    {
+        return !bytes.empty() && bytes.size() <= MaxWicBuffer &&
+            SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                                       IID_PPV_ARGS(factory.GetAddressOf()))) &&
+            SUCCEEDED(factory->CreateStream(stream.GetAddressOf())) &&
+            SUCCEEDED(stream->InitializeFromMemory(
+                reinterpret_cast<BYTE*>(const_cast<char*>(bytes.data())), static_cast<DWORD>(bytes.size()))) &&
+            SUCCEEDED(CoCreateInstance(codec, nullptr, CLSCTX_INPROC_SERVER,
+                                       IID_PPV_ARGS(decoder.GetAddressOf()))) &&
+            SUCCEEDED(decoder->Initialize(stream.Get(), WICDecodeMetadataCacheOnDemand)) &&
+            SUCCEEDED(decoder->GetFrame(0, frame.GetAddressOf()));
+    }
+
+    bool readPixels(WindowsClipboardPng::Image& image, size_t maxPixels, const WICPixelFormatGUID& format)
+    {
+        if (FAILED(frame->GetSize(&image.width, &image.height)) || !image.width || !image.height) return false;
+        const auto pixels = static_cast<size_t>(image.width) * image.height;
+        if (pixels > maxPixels || pixels > MaxWicBuffer / 4) return false;
+
+        ComPtr<IWICFormatConverter> converter;
+        if (FAILED(factory->CreateFormatConverter(converter.GetAddressOf())) ||
+            FAILED(converter->Initialize(frame.Get(), format,
+                                         WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom))) return false;
+
+        image.rgba.resize(pixels * 4);
+        return SUCCEEDED(converter->CopyPixels(nullptr, image.width * 4,
+            static_cast<UINT>(image.rgba.size()), image.rgba.data()));
+    }
+};
 }
 
 WindowsClipboardPng::Image WindowsClipboardPng::decode(std::string_view png, size_t maxPixels,
                                                        Metadata metadata)
 {
-    constexpr auto maxBuffer = (std::numeric_limits<UINT>::max)();
     Image image;
-    if (png.size() < 33 || png.size() > maxBuffer ||
+    if (png.size() < 33 || png.size() > MaxWicBuffer ||
         png.substr(12, 4) != "IHDR" ||
         !supportedPixelFormat(static_cast<unsigned char>(png[24]), static_cast<unsigned char>(png[25])) ||
         !readChunks(png, metadata, image)) return {};
 
-    const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE) return {};
-    const struct Apartment {
-        HRESULT result;
-        ~Apartment() { if (SUCCEEDED(result)) CoUninitialize(); }
-    } apartment{initialized};
-
-    ComPtr<IWICImagingFactory> factory;
-    ComPtr<IWICStream> stream;
-    ComPtr<IWICBitmapDecoder> decoder;
-    ComPtr<IWICBitmapFrameDecode> frame;
-    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                                IID_PPV_ARGS(factory.GetAddressOf()))) ||
-        FAILED(factory->CreateStream(stream.GetAddressOf())) ||
-        FAILED(stream->InitializeFromMemory(
-            reinterpret_cast<BYTE*>(const_cast<char*>(png.data())), static_cast<DWORD>(png.size()))) ||
-        FAILED(CoCreateInstance(CLSID_WICPngDecoder, nullptr, CLSCTX_INPROC_SERVER,
-                                IID_PPV_ARGS(decoder.GetAddressOf()))) ||
-        FAILED(decoder->Initialize(stream.Get(), WICDecodeMetadataCacheOnDemand)) ||
-        FAILED(decoder->GetFrame(0, frame.GetAddressOf()))) return {};
-
-    if (FAILED(frame->GetSize(&image.width, &image.height)) ||
-        !image.width || !image.height) return {};
-    const auto pixels = static_cast<size_t>(image.width) * image.height;
-    if (pixels > maxPixels || pixels > maxBuffer / 4) return {};
-
-    ComPtr<IWICFormatConverter> converter;
-    if (FAILED(factory->CreateFormatConverter(converter.GetAddressOf())) ||
-        FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppRGBA,
-                                     WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom))) return {};
-
-    image.rgba.resize(pixels * 4);
-    if (FAILED(converter->CopyPixels(nullptr, image.width * 4,
-                                     static_cast<UINT>(image.rgba.size()), image.rgba.data()))) return {};
+    const Apartment apartment;
+    BitmapDecoder decoder;
+    if (!apartment.ready() || !decoder.open(png, CLSID_WICPngDecoder) ||
+        !decoder.readPixels(image, maxPixels, GUID_WICPixelFormat32bppRGBA)) return {};
     return image;
+}
+
+WindowsClipboardPng::BitmapConversion WindowsClipboardPng::convertBitmap(
+    std::string_view bmp, size_t maxPixels, size_t maxPngBytes)
+{
+    const Apartment apartment;
+    BitmapDecoder decoder;
+    BitmapConversion result;
+    if (!apartment.ready() || !decoder.open(bmp, CLSID_WICBmpDecoder)) return {};
+    UINT colorContexts = 0;
+    if (SUCCEEDED(decoder.frame->GetColorContexts(0, nullptr, &colorContexts)) && colorContexts != 0) {
+        // Leave profile-bearing bitmaps to the current compatibility path.
+        return {};
+    }
+    if (!decoder.readPixels(result.image, maxPixels, GUID_WICPixelFormat32bppBGRA)) return {};
+
+    ComPtr<IStream> output;
+    ComPtr<IWICBitmapEncoder> encoder;
+    ComPtr<IWICBitmapFrameEncode> frame;
+    if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, output.GetAddressOf())) ||
+        FAILED(decoder.factory->CreateEncoder(GUID_ContainerFormatPng, &GUID_VendorMicrosoft, encoder.GetAddressOf())) ||
+        FAILED(encoder->Initialize(output.Get(), WICBitmapEncoderNoCache)) ||
+        FAILED(encoder->CreateNewFrame(frame.GetAddressOf(), nullptr)) ||
+        FAILED(frame->Initialize(nullptr)) ||
+        FAILED(frame->SetSize(result.image.width, result.image.height))) return {};
+
+    WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+    if (FAILED(frame->SetPixelFormat(&format)) || format != GUID_WICPixelFormat32bppBGRA) return {};
+    double dpiX = 0, dpiY = 0;
+    if (SUCCEEDED(decoder.frame->GetResolution(&dpiX, &dpiY)) && dpiX > 0 && dpiY > 0 &&
+        FAILED(frame->SetResolution(dpiX, dpiY))) return {};
+    auto& pixels = result.image.rgba;
+    if (FAILED(frame->WritePixels(result.image.height, result.image.width * 4,
+                                  static_cast<UINT>(pixels.size()), pixels.data())) ||
+        FAILED(frame->Commit()) ||
+        FAILED(encoder->Commit())) return {};
+
+    STATSTG stats{};
+    if (FAILED(output->Stat(&stats, STATFLAG_NONAME)) || !stats.cbSize.QuadPart ||
+        stats.cbSize.QuadPart > maxPngBytes || stats.cbSize.QuadPart > MaxWicBuffer ||
+        FAILED(output->Seek({}, STREAM_SEEK_SET, nullptr))) return {};
+    result.png.resize(static_cast<size_t>(stats.cbSize.QuadPart));
+    ULONG read = 0;
+    if (FAILED(output->Read(result.png.data(), static_cast<ULONG>(result.png.size()), &read)) ||
+        read != result.png.size()) return {};
+    // The encoder accepts BGRA. Keep the returned pixels in the same channel
+    // order as the PNG decoder for clipboard echo comparison.
+    for (size_t index = 0; index < pixels.size(); index += 4) {
+        std::swap(pixels[index], pixels[index + 2]);
+    }
+    return result;
 }

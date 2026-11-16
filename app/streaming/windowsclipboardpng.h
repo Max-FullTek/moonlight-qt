@@ -16,4 +16,10 @@ struct Image {
 
 enum class Metadata { PixelsOnly, PreserveForPaste };
 Image decode(std::string_view png, size_t maxPixels, Metadata metadata = Metadata::PixelsOnly);
+
+struct BitmapConversion {
+    Image image;
+    std::vector<char> png;
+};
+BitmapConversion convertBitmap(std::string_view bmp, size_t maxPixels, size_t maxPngBytes);
 }

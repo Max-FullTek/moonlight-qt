@@ -870,6 +870,18 @@ void ClipboardSync::onLocalClipboardChanged()
             for (const auto format : {BitmapFormat::DibV5, BitmapFormat::Dib}) {
                 const auto bytes = m_ClipboardListener->readBitmap(format, MAX_BITMAP_BYTES);
                 if (bytes.empty()) continue;
+                auto converted = WindowsClipboardPng::convertBitmap(
+                    {bytes.data(), bytes.size()}, MAX_IMAGE_PIXELS, MAX_BLOB_BYTES);
+                if (!converted.png.empty()) {
+                    nativeImage = std::move(converted.image);
+                    image = QImage(static_cast<const uchar*>(nativeImage.rgba.data()),
+                                   static_cast<int>(nativeImage.width), static_cast<int>(nativeImage.height),
+                                   static_cast<qsizetype>(nativeImage.width) * 4, QImage::Format_RGBA8888);
+                    png = QByteArray(converted.png.data(), static_cast<qsizetype>(converted.png.size()));
+                    imageSourceDescription = QStringLiteral("Windows bitmap");
+                    havePng = true;
+                    break;
+                }
                 const auto bmp = QByteArray::fromRawData(bytes.data(), static_cast<qsizetype>(bytes.size()));
                 if (decodeImage(bmp, image, "BMP", MAX_BITMAP_BYTES) &&
                     encodeImageAsPng(image, png, "Windows bitmap")) {

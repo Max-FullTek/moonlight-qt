@@ -23,6 +23,7 @@
 
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
 #include "streaming/windowsclipboardlistener.h"
+#include "streaming/windowsclipboardpng.h"
 #include <windows.h>
 #include <cstring>
 #endif
@@ -198,6 +199,22 @@ public:
             const auto transparent = decodeBitmap(dibV5);
             ok &= check(transparent.size() == QSize(1, 1) && transparent.pixel(0, 0) == qRgba(0x11, 0x22, 0x33, 0x40),
                         "packed DIBV5 preserves explicit alpha", err);
+
+            for (const auto& sample : {std::pair{&dib, 0xff}, std::pair{&indexed, 0xff},
+                                       std::pair{&dibV5, 0x40}}) {
+                const auto bmp = WindowsClipboardBitmap::toBmp(*sample.first, 4096);
+                const std::string_view bytes(bmp.data(), bmp.size());
+                const auto converted = WindowsClipboardPng::convertBitmap(bytes, 1, 4096);
+                const auto decoded = WindowsClipboardPng::decode(
+                    {converted.png.data(), converted.png.size()}, 1);
+                const std::vector<unsigned char> expected{0x11, 0x22, 0x33,
+                                                          static_cast<unsigned char>(sample.second)};
+                ok &= check(converted.image.rgba == expected && decoded.rgba == expected,
+                            "WIC converts packed DIB to PNG without changing pixels or alpha", err);
+                ok &= check(WindowsClipboardPng::convertBitmap(bytes, 0, 4096).png.empty() &&
+                            WindowsClipboardPng::convertBitmap(bytes, 1, 16).png.empty(),
+                            "WIC conversion respects pixel and output limits", err);
+            }
 
             v5.bV5CSType = PROFILE_LINKED;
             v5.bV5ProfileData = static_cast<DWORD>(dibV5.size());
