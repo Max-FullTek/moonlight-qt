@@ -392,6 +392,15 @@ if(BUILD_TESTING)
         add_executable(worker_command_routing "${LITE_SOURCE_ROOT}/tests/windows_worker_dispatch/routing.cpp")
         target_link_libraries(worker_command_routing PRIVATE lite-worker-command-routing)
         add_test(NAME worker_command_routing COMMAND worker_command_routing)
+        find_package(Python3 QUIET COMPONENTS Interpreter)
+        if(Python3_Interpreter_FOUND)
+            add_executable(worker_pipe_lifecycle "${LITE_SOURCE_ROOT}/tests/windows_worker_dispatch/lifecycle.cpp")
+            target_link_libraries(worker_pipe_lifecycle PRIVATE lite-worker-command-routing)
+            add_test(NAME worker_pipe_lifecycle COMMAND Python3::Interpreter
+                "${LITE_SOURCE_ROOT}/tests/windows_worker_dispatch/lifecycle.py"
+                "$<TARGET_FILE:worker_pipe_lifecycle>")
+            set_tests_properties(worker_pipe_lifecycle PROPERTIES TIMEOUT 20)
+        endif()
     endif()
 
     add_executable(windows_worker_dispatch "${LITE_SOURCE_ROOT}/tests/windows_worker_dispatch/main.cpp")

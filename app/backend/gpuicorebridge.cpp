@@ -35,13 +35,11 @@
 
 namespace {
 bool writeProtocol(QJsonObject event) {
-    static std::mutex outputMutex;
     event.insert("protocol",1);
-    const auto line=QJsonDocument(event).toJson(QJsonDocument::Compact)+'\n';
-    std::lock_guard<std::mutex> lock(outputMutex);
-    return fwrite(line.constData(),1,size_t(line.size()),stdout)==size_t(line.size()) && fflush(stdout)==0;
+    const auto line=QJsonDocument(event).toJson(QJsonDocument::Compact);
+    return WorkerCommandPipe::write({line.constData(), static_cast<size_t>(line.size())});
 }
-constexpr int MaxControlLine = 64 * 1024;
+constexpr int MaxControlLine = WorkerCommandPipe::MaxControlLineBytes;
 bool integer(const QJsonObject& object, const char* key, int low, int high) {
     const auto value = object.value(QLatin1String(key));
     return value.isDouble() && value.toDouble() == value.toInt(-999999) &&
@@ -310,25 +308,25 @@ void GpuiCoreBridge::start() {
             {"private_key", QString::fromLatin1(identity->getPrivateKey())}
         }}});
     }
-    send({{"event", "ready"}, {"qml_loaded", false}});
+    WorkerCommandPipe::write(WorkerCommandPipe::Ready);
     publishHosts();
     m_Manager->startPolling();
     // The reader owns no Qt/network state and exits on shutdown or pipe EOF.
     // The process owns this thread; the parent closes stdin during teardown.
     std::thread([this] {
+#ifdef LITE_NATIVE_WORKER_JSON
+        WorkerCommandRouting::run(stdin, [this](WorkerCommandPipe::ReadStatus status, std::string line) {
+            using WorkerCommandPipe::ReadStatus;
+            if (status == ReadStatus::Command) enqueueInput({InputKind::Command, std::move(line)});
+            else if (status == ReadStatus::Oversized) enqueueInput({InputKind::Oversized, {}});
+            else enqueueInput({InputKind::EndOfInput, {}});
+        });
+#else
         std::string line;
         for (;;) {
             const auto status = WorkerCommandPipe::read(stdin, line);
             if (status == WorkerCommandPipe::ReadStatus::EndOfInput) break;
             const bool oversized = status == WorkerCommandPipe::ReadStatus::Oversized;
-#ifdef LITE_NATIVE_WORKER_JSON
-            auto route = oversized ? WorkerCommandRouting::Route{} : WorkerCommandRouting::inspect(line);
-            if (route.kind == WorkerCommandRouting::Kind::SessionApiResult) {
-                if (route.requestId) SessionApiRpc::broker().complete(route.requestId, std::move(route.result));
-                continue;
-            }
-            const bool shutdownRequested = route.kind == WorkerCommandRouting::Kind::Shutdown;
-#else
             const auto bytes = QByteArray::fromRawData(line.data(), static_cast<int>(line.size()));
             const auto object = oversized ? QJsonObject() : QJsonDocument::fromJson(bytes).object();
             if (object["command"] == "session_api_result") {
@@ -340,8 +338,7 @@ void GpuiCoreBridge::start() {
                 }
                 continue;
             }
-            const bool shutdownRequested = object["command"] == "shutdown";
-#endif
+            const bool shutdownRequested = object["command"] == "shutdown" && line.size() <= WorkerCommandPipe::MaxControlLineBytes;
             if (shutdownRequested) SessionApiRpc::broker().close();
             enqueueInput(oversized ? Input{InputKind::Oversized, {}} :
                                      Input{InputKind::Command, std::move(line)});
@@ -349,6 +346,7 @@ void GpuiCoreBridge::start() {
         }
         SessionApiRpc::broker().close();
         enqueueInput({InputKind::EndOfInput, {}});
+#endif
     }).detach();
 }
 void GpuiCoreBridge::publishHosts() {

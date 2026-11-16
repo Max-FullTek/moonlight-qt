@@ -1,4 +1,5 @@
 #include "workercommandrouting.h"
+#include "sessionapirpc.h"
 
 #include <cmath>
 #include <nlohmann/json.hpp>
@@ -30,4 +31,31 @@ WorkerCommandRouting::Route WorkerCommandRouting::inspect(std::string_view line)
         route.result = result->dump();
     }
     return route;
+}
+
+void WorkerCommandRouting::run(
+    std::FILE* input, const std::function<void(WorkerCommandPipe::ReadStatus, std::string)>& enqueue)
+{
+    using WorkerCommandPipe::ReadStatus;
+    std::string line;
+    for (;;) {
+        const auto status = WorkerCommandPipe::read(input, line);
+        if (status != ReadStatus::Command) {
+            if (status == ReadStatus::EndOfInput) SessionApiRpc::broker().close();
+            enqueue(status, {});
+            if (status == ReadStatus::EndOfInput) return;
+            continue;
+        }
+        auto route = inspect(line);
+        if (route.kind == Kind::SessionApiResult) {
+            if (route.requestId) SessionApiRpc::broker().complete(route.requestId, std::move(route.result));
+            continue;
+        }
+        // The owner rejects oversized control commands, so they cannot close
+        // the reader or broker before the owner has a chance to continue.
+        const bool shutdown = route.kind == Kind::Shutdown && line.size() <= WorkerCommandPipe::MaxControlLineBytes;
+        if (shutdown) SessionApiRpc::broker().close();
+        enqueue(status, std::move(line));
+        if (shutdown) return;
+    }
 }
