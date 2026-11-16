@@ -67,6 +67,11 @@ $qtDirectory = Split-Path $qtBins -Parent
 & (Join-Path $PSScriptRoot 'test-native-host-http.ps1') -BuildDirectory $nativeHttpBuild -QtDirectory $qtDirectory
 $env:LITE_NATIVE_HTTP_BUILD = $nativeHttpBuild
 
+$parserSources = & python (Join-Path $SourceRoot 'tests/native_parsers/prepare.py') `
+    (Join-Path $SourceRoot 'build/native-parsers-source') --json-only
+if ($LASTEXITCODE -ne 0) { throw 'Verified clipboard JSON source preparation failed.' }
+$env:LITE_CLIPBOARD_JSON_SOURCE = ($parserSources | ConvertFrom-Json).json
+
 Push-Location -LiteralPath $build
 try {
     Invoke-Checked $qmake @((Join-Path $SourceRoot 'moonlight-qt.pro'), 'CONFIG+=lite-native-http')
@@ -83,6 +88,7 @@ Copy-Item -LiteralPath (Join-Path $build 'clipboard-helper/release/moonlight-cli
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'app/SDL_GameControllerDB/gamecontrollerdb.txt') -Destination $deploy
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'LICENSE') -Destination $deploy
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'build/curl-capability-source/curl-8.23.0/COPYING') -Destination (Join-Path $deploy 'CURL-COPYING.txt')
+Copy-Item -LiteralPath (Join-Path $env:LITE_CLIPBOARD_JSON_SOURCE 'LICENSE.MIT') -Destination (Join-Path $deploy 'NLOHMANN-JSON-LICENSE.txt')
 
 # Bundle the matching Rust frontend; hashes cover both executables and notices.
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'build/gpui-package/moonlight-lite-gpui-prototype.exe') -Destination $deploy
@@ -129,7 +135,11 @@ foreach ($test in @('keyboard_state', 'cursor_shape_classification', 'shared_hel
         if ($test -eq 'clipboard_payload_routing') { $testQmakeArgs += 'CONFIG+=lite-native-http' }
         Invoke-Checked $qmake $testQmakeArgs
         Invoke-Checked 'nmake.exe' @('/NOLOGO', 'release')
-        Invoke-Checked (Join-Path $testBuild "release/$test.exe") @()
+        $testArgs = if ($test -eq 'clipboard_helper_lifecycle') {
+            @((Join-Path $deploy 'moonlight-clipboard-helper.exe'),
+              (Join-Path $SourceRoot 'tests/clipboard_payload_routing/fixtures'))
+        } else { @() }
+        Invoke-Checked (Join-Path $testBuild "release/$test.exe") $testArgs
         $testResults += @{ name = $test; result = 'passed' }
     } finally { Pop-Location }
 }
@@ -158,6 +168,11 @@ $provenance = [ordered]@{
     runnerImage = if ($githubActions) { "$env:ImageOS/$env:ImageVersion" } else { 'local-windows-x64' }
     qt = @{ version = $qtVersion; qmakeSha256 = (Get-FileHash $qmake -Algorithm SHA256).Hash; origin = 'Qt official prebuilt SDK, installer hash verification enabled' }
     gpui = @{ version = '0.2.2'; rust = '1.99.1'; protocol = 1; qmlInWorker = $false }
+    clipboardJson = @{
+        version = '3.12.0'
+        source = 'https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz'
+        sourceSha256 = (Get-FileHash (Join-Path $SourceRoot 'build/native-parsers-source/json-3.12.0.tar.xz') -Algorithm SHA256).Hash
+    }
     hostHttp = @{
         transport = 'libcurl'; version = '8.23.0'; tls = 'existing OpenSSL 3.6.5'
         source = 'https://github.com/curl/curl/releases/download/curl-8_23_0/curl-8.23.0.zip'

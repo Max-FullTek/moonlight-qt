@@ -1,5 +1,6 @@
 #pragma once
 #include "clipboardpipelines.h"
+#include "nativeclipboardipc.h"
 
 #include <QByteArray>
 #include <QString>
@@ -9,18 +10,7 @@ namespace ClipboardIpc {
 static constexpr int PROTOCOL_VERSION = 1;
 static constexpr int MAX_LINE_BYTES = ClipboardPipe::MaxLineBytes;
 
-enum class MessageType
-{
-    Unknown,
-    Configure,
-    HostFrame,
-    LocalFrame,
-    Ready,
-    Error,
-    Stop,
-    Ping,
-    Pong,
-};
+using MessageType = NativeClipboardIpc::Type;
 
 struct HostConfig {
     QString address;

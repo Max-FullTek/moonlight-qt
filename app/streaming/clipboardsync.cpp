@@ -1,6 +1,7 @@
 #include "clipboardsync.h"
 #include "clipboardlogging.h"
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
+#include "nativeclipboardipc.h"
 #include "qtclipboardtransfer.h"
 #include "windowsclipboardlistener.h"
 #include "windowsclipboardpng.h"
@@ -14,11 +15,11 @@
 #include <QGuiApplication>
 #include <QImage>
 #include <QImageReader>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QMetaObject>
 #include <QMimeData>
 #ifndef LITE_NATIVE_CLIPBOARD_HTTP
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -323,6 +324,17 @@ void ClipboardSync::onIncomingFrame(QByteArray frame)
     qint64 size = 0;
     if (kind == KIND_REF) {
         // Payload is a small UTF-8 JSON descriptor: {"id":"...","mime":"...","size":N}.
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+        const auto reference = NativeClipboardIpc::decodeReference(
+            {payload.constData(), static_cast<size_t>(payload.size())});
+        if (!reference) {
+            ClipboardLog::warn("ClipboardSync: dropping invalid inbound REF");
+            return;
+        }
+        id = QString::fromStdString(reference->id);
+        mime = QString::fromStdString(reference->mime);
+        size = reference->size;
+#else
         QJsonParseError jerr{};
         QJsonDocument doc = QJsonDocument::fromJson(payload, &jerr);
         if (jerr.error != QJsonParseError::NoError || !doc.isObject()) {
@@ -343,6 +355,7 @@ void ClipboardSync::onIncomingFrame(QByteArray frame)
             ClipboardLog::warn("ClipboardSync: dropping inbound REF with invalid blob id");
             return;
         }
+#endif
         if (mime != QStringLiteral("image/png") && !mime.startsWith(QStringLiteral("text/"))) {
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
             emit unsupportedFormat();
@@ -1295,6 +1308,16 @@ void ClipboardSync::uploadAndSendRef(const QByteArray& payload, const QString& m
     }
     requestBlob(url, payload, mime, ClipboardBlob::MaxUploadReplyBytes,
                 [this, mime, token, payloadSize = payload.size()](const QByteArray& response) {
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+                      auto id = NativeClipboardIpc::decodeUploadId(
+                          {response.constData(), static_cast<size_t>(response.size())});
+                      if (!id) {
+                          m_HaveClipboardSnapshot = false;
+                          return;
+                      }
+                      m_LastOutboundRef = QByteArray::fromStdString(NativeClipboardIpc::encodeReference(
+                          {*id, mime.toStdString(), payloadSize}));
+#else
                       const QJsonDocument doc = QJsonDocument::fromJson(response);
                       const QString id = doc.object().value(QStringLiteral("id")).toString();
                       if (!QRegularExpression(QStringLiteral("^[A-Za-z0-9_-]{1,128}$"))
@@ -1307,8 +1330,9 @@ void ClipboardSync::uploadAndSendRef(const QByteArray& payload, const QString& m
                       meta.insert(QStringLiteral("id"), id);
                       meta.insert(QStringLiteral("mime"), mime);
                       meta.insert(QStringLiteral("size"), static_cast<double>(payloadSize));
-                      QByteArray frame;
                       m_LastOutboundRef = QJsonDocument(meta).toJson(QJsonDocument::Compact);
+#endif
+                      QByteArray frame;
                       if (encodeFrame(KIND_REF, token, m_LastOutboundRef, frame)) {
                           emit outboundFrame(frame);
                       }
@@ -1336,7 +1360,11 @@ void ClipboardSync::fetchBlob(const QString& id,
 {
     QUrl url;
     if (!m_Active || m_BlobReplies.size() >= ClipboardBlob::MaxPendingTransfers ||
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+        !NativeClipboardIpc::validBlobId(id.toStdString()) ||
+#else
         !QRegularExpression(QStringLiteral("^[A-Za-z0-9_-]{1,128}$")).match(id).hasMatch() ||
+#endif
         !buildBlobUrl(QStringLiteral("/blob/") + id, url)) {
         return;
     }

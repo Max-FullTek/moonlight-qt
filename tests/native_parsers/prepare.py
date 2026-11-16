@@ -14,11 +14,11 @@ RELEASES = (
 )
 
 
-def prepare(root):
+def prepare(root, releases=RELEASES):
     root = root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     result = {}
-    for name, url, digest in RELEASES:
+    for name, url, digest in releases:
         archive = root / (name + (".tar.gz" if url.endswith(".gz") else ".tar.xz"))
         if not archive.exists():
             with urllib.request.urlopen(url, timeout=60) as response, archive.open("xb") as target:
@@ -58,4 +58,4 @@ def prepare(root):
 
 
 if __name__ == "__main__":
-    prepare(Path(sys.argv[1]))
+    prepare(Path(sys.argv[1]), RELEASES[1:] if sys.argv[2:] == ["--json-only"] else RELEASES)

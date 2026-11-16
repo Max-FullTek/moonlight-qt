@@ -148,6 +148,22 @@ public:
         image.save(&buffer, "PNG");
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
         {
+            ClipboardIpc::Message message;
+            QString error;
+            const QByteArray bytes("a\x00\xff", 3);
+            ok &= check(ClipboardIpc::decodeLine(ClipboardIpc::encodeHostFrame(0xffffffff, bytes), message, error) &&
+                            message.type == ClipboardIpc::MessageType::HostFrame &&
+                            message.sequence == 0xffffffff && message.frame == bytes,
+                        "native clipboard IPC preserves binary payload and uint32 sequence", err);
+            ok &= check(!ClipboardIpc::decodeLine(
+                            R"({"version":1,"type":"hostFrame","sequence":1,"payload":"!!!"})", message, error),
+                        "native clipboard IPC rejects malformed base64", err);
+            const QByteArray deeplyNested = R"({"version":1,"type":"ping","sequence":1,"extra":)" +
+                QByteArray(130, '[') + "0" + QByteArray(130, ']') + "}";
+            ok &= check(!ClipboardIpc::decodeLine(deeplyNested, message, error),
+                        "native clipboard IPC bounds JSON depth", err);
+        }
+        {
             BITMAPINFOHEADER header{};
             header.biSize = sizeof(header);
             header.biWidth = 1;

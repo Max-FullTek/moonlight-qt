@@ -6,7 +6,11 @@ else: NATIVE_HTTP_CONFIG = Debug
 NATIVE_HTTP_LIB = $$NATIVE_HTTP_BUILD/host-http/$$NATIVE_HTTP_CONFIG/lite-native-host-http.lib
 CURL_LIB = $$NATIVE_HTTP_BUILD/host-http/curl/lib/$$NATIVE_HTTP_CONFIG/libcurl.lib
 OPENSSL_LIBS = $$PWD/../libs/windows/lib/x64
+CLIPBOARD_JSON_SOURCE = $$(LITE_CLIPBOARD_JSON_SOURCE)
+!exists($$CLIPBOARD_JSON_SOURCE/include/nlohmann/json.hpp): error("Set LITE_CLIPBOARD_JSON_SOURCE to the verified nlohmann/json 3.12.0 source")
+INCLUDEPATH += $$quote($$CLIPBOARD_JSON_SOURCE/include)
 DEFINES += LITE_NATIVE_CLIPBOARD_HTTP
+SOURCES += $$PWD/../app/streaming/nativeclipboardipc.cpp
 SOURCES += $$PWD/../app/streaming/qtclipboardtransfer.cpp
 SOURCES += $$PWD/../app/backend/windowshttptransfer.cpp
 SOURCES += $$PWD/../app/streaming/windowsclipboardlistener.cpp

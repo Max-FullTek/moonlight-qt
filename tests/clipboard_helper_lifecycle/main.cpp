@@ -75,6 +75,49 @@ extern "C" int LiSendClipboardData(const void* data, int length)
     return 0;
 }
 
+static bool checkPackagedHelper(const QString& helper, const QDir& fixtures, QTextStream& err)
+{
+    QFile cert(fixtures.filePath(QStringLiteral("server.pem")));
+    QFile key(fixtures.filePath(QStringLiteral("server-key.pem")));
+    if (!cert.open(QIODevice::ReadOnly) || !key.open(QIODevice::ReadOnly)) {
+        err << "FAIL: cannot read the public helper IPC fixtures\n";
+        return false;
+    }
+    const auto certificate = cert.readAll();
+    const ClipboardIpc::HostConfig host{QStringLiteral("127.0.0.1"), 47984,
+                                        certificate, certificate, key.readAll()};
+    const auto input = ClipboardIpc::encodeHostFrame(1, QByteArray("a\x00\xff", 3)) + '\n' +
+        ClipboardIpc::encodeConfigure(2, host) + '\n' + ClipboardIpc::encodePing(3) + '\n' +
+        ClipboardIpc::encodeStop(4) + '\n';
+    QProcess process;
+    process.start(helper, QStringList{});
+    if (!process.waitForStarted(3000) || process.write(input) != input.size()) {
+        err << "FAIL: cannot start or write to the packaged clipboard helper\n";
+        return false;
+    }
+    process.closeWriteChannel();
+    if (!process.waitForFinished(5000) || process.exitStatus() != QProcess::NormalExit ||
+            process.exitCode() != 0) {
+        err << "FAIL: packaged clipboard helper did not exit normally\n";
+        return false;
+    }
+    auto output = process.readAllStandardOutput();
+    QByteArray line;
+    QString error;
+    ClipboardIpc::Message message;
+    const auto next = [&](ClipboardIpc::MessageType type, quint32 sequence) {
+        return ClipboardIpc::takeLine(output, line, error) && ClipboardIpc::decodeLine(line, message, error) &&
+            message.type == type && message.sequence == sequence;
+    };
+    using Type = ClipboardIpc::MessageType;
+    if (!next(Type::Error, 1) || message.code != QStringLiteral("not-ready") ||
+        !next(Type::Ready, 2) || !next(Type::Pong, 3) || !output.isEmpty()) {
+        err << "FAIL: packaged helper messages did not match the Qt worker's IPC contract\n";
+        return false;
+    }
+    return true;
+}
+
 class ClipboardHelperClientTest
 {
 public:
@@ -259,6 +302,9 @@ int main(int argc, char** argv)
     QCoreApplication app(argc, argv);
     QTextStream err(stderr), out(stdout);
     if (!ClipboardHelperClientTest::run(err))
+        return 1;
+    const auto args = app.arguments();
+    if (args.size() == 3 && !checkPackagedHelper(args[1], QDir(args[2]), err))
         return 1;
     out << "clipboard_helper_lifecycle=passed\n";
     return 0;

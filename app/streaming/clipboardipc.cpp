@@ -1,5 +1,69 @@
 #include "clipboardipc.h"
 
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+#include "nativeclipboardipc.h"
+
+namespace ClipboardIpc {
+namespace {
+using NativeClipboardIpc::Type;
+
+QByteArray encode(Type type, quint32 sequence, const QByteArray& frame = {},
+                  const QString& code = {}, const QString& text = {})
+{
+    NativeClipboardIpc::Message message;
+    message.type = type;
+    message.sequence = sequence;
+    message.frame = frame.toStdString();
+    message.code = code.toUtf8().toStdString();
+    message.text = text.toUtf8().toStdString();
+    return QByteArray::fromStdString(NativeClipboardIpc::encode(message));
+}
+}
+
+QByteArray encodeConfigure(quint32 sequence, const HostConfig& config)
+{
+    NativeClipboardIpc::Message message;
+    message.type = Type::Configure;
+    message.sequence = sequence;
+    message.host = {config.address.toUtf8().toStdString(), config.httpsPort, config.serverCertPem.toStdString(),
+                    config.clientCertPem.toStdString(), config.clientKeyPem.toStdString()};
+    return QByteArray::fromStdString(NativeClipboardIpc::encode(message));
+}
+
+QByteArray encodeHostFrame(quint32 sequence, const QByteArray& frame) { return encode(Type::HostFrame, sequence, frame); }
+QByteArray encodeLocalFrame(quint32 sequence, const QByteArray& frame) { return encode(Type::LocalFrame, sequence, frame); }
+QByteArray encodeReady(quint32 sequence) { return encode(Type::Ready, sequence); }
+QByteArray encodeStop(quint32 sequence) { return encode(Type::Stop, sequence); }
+QByteArray encodePing(quint32 sequence) { return encode(Type::Ping, sequence); }
+QByteArray encodePong(quint32 sequence) { return encode(Type::Pong, sequence); }
+QByteArray encodeError(quint32 sequence, const QString& code, const QString& text)
+{
+    return encode(Type::Error, sequence, {}, code, text);
+}
+
+bool decodeLine(const QByteArray& line, Message& out, QString& error)
+{
+    NativeClipboardIpc::Message message;
+    std::string reason;
+    out = {};
+    if (!NativeClipboardIpc::decode({line.constData(), static_cast<size_t>(line.size())}, message, reason)) {
+        error = QString::fromStdString(reason);
+        return false;
+    }
+    error.clear();
+    out.type = message.type;
+    out.sequence = message.sequence;
+    out.config = {QString::fromStdString(message.host.address), message.host.httpsPort,
+                  QByteArray::fromStdString(message.host.serverCertPem),
+                  QByteArray::fromStdString(message.host.clientCertPem),
+                  QByteArray::fromStdString(message.host.clientKeyPem)};
+    out.frame = QByteArray::fromStdString(message.frame);
+    out.code = QString::fromStdString(message.code);
+    out.text = QString::fromStdString(message.text);
+    return true;
+}
+}
+#else
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
@@ -148,26 +212,6 @@ QByteArray encodePong(quint32 sequence)
     return encodeObject(baseMessage(MessageType::Pong, sequence));
 }
 
-bool takeLine(QByteArray& buffer, QByteArray& line, QString& error)
-{
-    error.clear();
-    const auto boundary = ClipboardPipe::findLine({buffer.constData(), static_cast<size_t>(buffer.size())});
-    if (boundary.status == ClipboardPipe::LineStatus::Oversized) {
-        error = QStringLiteral("helper stdout line exceeded protocol limit");
-        return false;
-    }
-    if (boundary.status == ClipboardPipe::LineStatus::Incomplete) {
-        return false;
-    }
-    const auto end = static_cast<int>(boundary.length);
-    line = buffer.left(end);
-    buffer.remove(0, end + 1);
-    while (line.endsWith('\r')) {
-        line.chop(1);
-    }
-    return true;
-}
-
 bool decodeLine(const QByteArray& line, Message& outMessage, QString& outError)
 {
     outMessage = Message();
@@ -241,5 +285,25 @@ bool decodeLine(const QByteArray& line, Message& outMessage, QString& outError)
     outError = QStringLiteral("unhandled message type");
     return false;
 }
+}
+#endif
 
+bool ClipboardIpc::takeLine(QByteArray& buffer, QByteArray& line, QString& error)
+{
+    error.clear();
+    const auto boundary = ClipboardPipe::findLine({buffer.constData(), static_cast<size_t>(buffer.size())});
+    if (boundary.status == ClipboardPipe::LineStatus::Oversized) {
+        error = QStringLiteral("helper stdout line exceeded protocol limit");
+        return false;
+    }
+    if (boundary.status == ClipboardPipe::LineStatus::Incomplete) {
+        return false;
+    }
+    const auto end = static_cast<int>(boundary.length);
+    line = buffer.left(end);
+    buffer.remove(0, end + 1);
+    while (line.endsWith('\r')) {
+        line.chop(1);
+    }
+    return true;
 }
