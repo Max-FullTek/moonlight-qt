@@ -190,6 +190,11 @@ std::vector<char> WindowsClipboardListener::readPng(size_t maxBytes) const
     return {};
 }
 
+bool WindowsClipboardListener::hasBitmap() const
+{
+    return IsClipboardFormatAvailable(CF_DIBV5) || IsClipboardFormatAvailable(CF_DIB);
+}
+
 WindowsClipboardListener::WriteResult WindowsClipboardListener::writePng(
     std::string_view png, const unsigned char* bgra, int width, int height, size_t stride,
     int horizontalResolution, int verticalResolution, std::wstring_view text) const

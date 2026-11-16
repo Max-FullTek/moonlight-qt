@@ -101,6 +101,22 @@ public:
         };
         {
             ClipboardHelperClient client(nullptr);
+            int notices = 0;
+            QObject::connect(&client, &ClipboardHelperClient::unsupportedFormat,
+                             [&] { ++notices; });
+            const auto unsupported = ClipboardIpc::encodeError(
+                0, QStringLiteral("unsupported-format"), QString());
+            client.processProtocolLine(unsupported);
+            check(notices == 0, "unconfigured helper cannot raise a format notice");
+            client.m_HelperReady = true;
+            client.processProtocolLine(ClipboardIpc::encodeError(
+                0, QStringLiteral("bad-message"), QString()));
+            client.processProtocolLine(unsupported);
+            check(notices == 1, "only unsupported format raises a format notice");
+            check(client.m_HelperReady, "unsupported format does not reset the helper");
+        }
+        {
+            ClipboardHelperClient client(nullptr);
             // The receive buffer belongs to the producer and may be reused as
             // soon as handleIncomingFrame returns. Include NUL and non-UTF-8.
             std::vector<std::string> expected;

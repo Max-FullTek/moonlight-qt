@@ -3151,6 +3151,10 @@
         <translation>连接中断，正在重连…（%1 秒）</translation>
     </message>
     <message>
+        <source>Unsupported clipboard format</source>
+        <translation>不支持此剪贴板格式</translation>
+    </message>
+    <message>
         <source>Reconnected</source>
         <translation>已重连</translation>
     </message>

@@ -26,6 +26,7 @@ public:
     // Unicode data. nullopt allows the caller to try other formats.
     std::optional<std::wstring> readText(size_t maxCharacters) const;
     std::vector<char> readPng(size_t maxBytes) const;
+    bool hasBitmap() const;
 
 private:
     struct Window;

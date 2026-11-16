@@ -30,6 +30,9 @@ public:
 
     bool isRunning() const;
 
+signals:
+    void unsupportedFormat();
+
 private:
     friend class ClipboardHelperClientTest;
     static constexpr int MAX_QUEUED_HOST_FRAMES = 32;

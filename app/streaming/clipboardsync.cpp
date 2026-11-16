@@ -32,6 +32,7 @@
 #include <QTimer>
 #include <QUrl>
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <cmath>
@@ -343,6 +344,9 @@ void ClipboardSync::onIncomingFrame(QByteArray frame)
             return;
         }
         if (mime != QStringLiteral("image/png") && !mime.startsWith(QStringLiteral("text/"))) {
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+            emit unsupportedFormat();
+#endif
             return;
         }
     }
@@ -455,6 +459,9 @@ void ClipboardSync::applyInboundPng(const QByteArray& payload)
     if (!decodeInboundPng(payload, image)) {
         ClipboardLog::warn("ClipboardSync: dropping inbound PNG payload (decode failed, %d bytes)",
                     static_cast<int>(payload.size()));
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+        emit unsupportedFormat();
+#endif
         return;
     }
 
@@ -855,6 +862,24 @@ void ClipboardSync::onLocalClipboardChanged()
             }
         }
     }
+#endif
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+    if (m_ClipboardListener) {
+        if (!havePng && mime != nullptr && m_ClipboardListener->hasBitmap()) {
+            image = qvariant_cast<QImage>(mime->imageData());
+            havePng = encodeImageAsPng(image, png, "Windows bitmap");
+            if (havePng) imageSourceDescription = QStringLiteral("Windows bitmap");
+            else image = QImage();
+        }
+        if (!havePng && mime != nullptr && !hasFileReferences(mime)) {
+            const auto formats = mime->formats();
+            if (mime->hasImage() ||
+                std::any_of(formats.begin(), formats.end(), isImageLikeMimeFormat) ||
+                (mime->hasHtml() && mime->html().contains(QStringLiteral("data:image/"), Qt::CaseInsensitive))) {
+                emit unsupportedFormat();
+            }
+        }
+    } else
 #endif
     if (!havePng) havePng = extractClipboardPng(mime, png, &imageSourceDescription);
     if (hasFileReferences(mime) && !havePng) {
@@ -1406,6 +1431,9 @@ void ClipboardSync::applyCompound(const QByteArray& text, const QByteArray& png)
     QImage image;
     if (!decodeInboundPng(png, image)) {
         image = QImage();
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+        emit unsupportedFormat();
+#endif
     }
 
     if (textOk && !image.isNull()) {

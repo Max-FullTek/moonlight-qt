@@ -139,6 +139,19 @@ public:
         QBuffer buffer(&png);
         buffer.open(QIODevice::WriteOnly);
         image.save(&buffer, "PNG");
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+        {
+            cb->setText("keep clipboard");
+            ClipboardSync sync;
+            int notices = 0;
+            QObject::connect(&sync, &ClipboardSync::unsupportedFormat, [&] { ++notices; });
+            sync.start();
+            incoming(sync, 2, 0, "invalid PNG");
+            incoming(sync, 3, 0, R"({"id":"unsupported","mime":"image/jpeg","size":4})");
+            ok &= check(notices == 2 && cb->text() == "keep clipboard",
+                        "unsupported inbound images raise a notice and preserve the clipboard", err);
+        }
+#endif
 #ifndef Q_OS_MACOS
         {
             cb->setText("baseline");

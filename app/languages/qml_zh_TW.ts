@@ -2809,6 +2809,10 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Unsupported clipboard format</source>
+        <translation>不支援此剪貼簿格式</translation>
+    </message>
+    <message>
         <location filename="../streaming/session.cpp" line="2963"/>
         <source>Reconnected</source>
         <translation type="unfinished"></translation>

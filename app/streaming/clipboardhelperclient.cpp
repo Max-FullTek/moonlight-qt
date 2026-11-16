@@ -446,6 +446,11 @@ void ClipboardHelperClient::processProtocolLine(const QByteArray& line)
     }
 
     if (message.type == ClipboardIpc::MessageType::Error) {
+        if (m_HelperReady && message.sequence == 0 &&
+                message.code == QStringLiteral("unsupported-format")) {
+            emit unsupportedFormat();
+            return;
+        }
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Clipboard helper error [%s]: %s",
                     message.code.toUtf8().constData(),

@@ -3641,6 +3641,9 @@ void Session::start()
     // ClipboardHelperClient and flushed from the SDL loop.
     if (m_ClipboardHelper == nullptr) {
         m_ClipboardHelper = new ClipboardHelperClient(m_Computer, this);
+        connect(m_ClipboardHelper, &ClipboardHelperClient::unsupportedFormat, this, [this] {
+            showStreamingToast(tr("Unsupported clipboard format"));
+        });
         m_ClipboardHelper->start();
     }
 #endif

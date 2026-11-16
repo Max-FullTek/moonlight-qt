@@ -140,6 +140,10 @@ private:
             m_ClipboardEngine = new ClipboardSync(context, this);
             connect(m_ClipboardEngine, &ClipboardSync::outboundFrame,
                     this, &ClipboardHelperController::sendLocalFrame);
+            connect(m_ClipboardEngine, &ClipboardSync::unsupportedFormat, this, [this] {
+                writeProtocolLine(ClipboardIpc::encodeError(0, QStringLiteral("unsupported-format"),
+                                                            QStringLiteral("Unsupported clipboard format")));
+            });
             m_ClipboardEngine->start();
         }
         else {
