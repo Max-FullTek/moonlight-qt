@@ -315,10 +315,11 @@ void GpuiCoreBridge::start() {
     // The process owns this thread; the parent closes stdin during teardown.
     std::thread([this] {
 #ifdef LITE_NATIVE_WORKER_JSON
-        WorkerCommandRouting::run(stdin, [this](WorkerCommandPipe::ReadStatus status, std::string line) {
-            using WorkerCommandPipe::ReadStatus;
-            if (status == ReadStatus::Command) enqueueInput({InputKind::Command, std::move(line)});
-            else if (status == ReadStatus::Oversized) enqueueInput({InputKind::Oversized, {}});
+        WorkerCommandRouting::run(stdin, [this](WorkerCommandRouting::Input status, std::string line) {
+            using PipeInput = WorkerCommandRouting::Input;
+            if (status == PipeInput::Command || status == PipeInput::Shutdown) {
+                enqueueInput({InputKind::Command, std::move(line)});
+            } else if (status == PipeInput::Oversized) enqueueInput({InputKind::Oversized, {}});
             else enqueueInput({InputKind::EndOfInput, {}});
         });
 #else

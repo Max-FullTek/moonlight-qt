@@ -171,6 +171,9 @@ if(LITE_CLIPBOARD_JSON_SOURCE)
     target_compile_options(lite-worker-command-routing PRIVATE /W3 /WX)
     target_include_directories(lite-worker-command-routing PUBLIC "${LITE_SOURCE_ROOT}/app")
     target_include_directories(lite-worker-command-routing SYSTEM PRIVATE "${LITE_CLIPBOARD_JSON_SOURCE}/include")
+    add_library(lite-worker-loop STATIC "${LITE_SOURCE_ROOT}/app/backend/windowsworkerloop.cpp")
+    target_compile_options(lite-worker-loop PRIVATE /W3 /WX)
+    target_link_libraries(lite-worker-loop PUBLIC lite-worker-command-routing PRIVATE user32)
     target_link_libraries(lite-clipboard-ipc PUBLIC crypt32)
 endif()
 
@@ -395,7 +398,7 @@ if(BUILD_TESTING)
         find_package(Python3 QUIET COMPONENTS Interpreter)
         if(Python3_Interpreter_FOUND)
             add_executable(worker_pipe_lifecycle "${LITE_SOURCE_ROOT}/tests/windows_worker_dispatch/lifecycle.cpp")
-            target_link_libraries(worker_pipe_lifecycle PRIVATE lite-worker-command-routing)
+            target_link_libraries(worker_pipe_lifecycle PRIVATE lite-worker-loop)
             add_test(NAME worker_pipe_lifecycle COMMAND Python3::Interpreter
                 "${LITE_SOURCE_ROOT}/tests/windows_worker_dispatch/lifecycle.py"
                 "$<TARGET_FILE:worker_pipe_lifecycle>")

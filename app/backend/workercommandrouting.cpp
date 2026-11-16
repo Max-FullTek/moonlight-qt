@@ -34,16 +34,19 @@ WorkerCommandRouting::Route WorkerCommandRouting::inspect(std::string_view line)
 }
 
 void WorkerCommandRouting::run(
-    std::FILE* input, const std::function<void(WorkerCommandPipe::ReadStatus, std::string)>& enqueue)
+    std::FILE* input, const std::function<void(Input, std::string)>& enqueue)
 {
     using WorkerCommandPipe::ReadStatus;
     std::string line;
     for (;;) {
         const auto status = WorkerCommandPipe::read(input, line);
         if (status != ReadStatus::Command) {
-            if (status == ReadStatus::EndOfInput) SessionApiRpc::broker().close();
-            enqueue(status, {});
-            if (status == ReadStatus::EndOfInput) return;
+            if (status == ReadStatus::EndOfInput) {
+                SessionApiRpc::broker().close();
+                enqueue(Input::EndOfInput, {});
+                return;
+            }
+            enqueue(Input::Oversized, {});
             continue;
         }
         auto route = inspect(line);
@@ -55,7 +58,7 @@ void WorkerCommandRouting::run(
         // the reader or broker before the owner has a chance to continue.
         const bool shutdown = route.kind == Kind::Shutdown && line.size() <= WorkerCommandPipe::MaxControlLineBytes;
         if (shutdown) SessionApiRpc::broker().close();
-        enqueue(status, std::move(line));
+        enqueue(shutdown ? Input::Shutdown : Input::Command, std::move(line));
         if (shutdown) return;
     }
 }

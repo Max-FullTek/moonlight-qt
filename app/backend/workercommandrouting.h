@@ -8,6 +8,7 @@
 
 namespace WorkerCommandRouting {
 enum class Kind { Command, Shutdown, SessionApiResult };
+enum class Input { Command, Oversized, Shutdown, EndOfInput };
 
 struct Route {
     Kind kind = Kind::Command;
@@ -17,5 +18,5 @@ struct Route {
 
 Route inspect(std::string_view line);
 // Commands are delivered on the reader thread. The caller schedules owner work.
-void run(std::FILE* input, const std::function<void(WorkerCommandPipe::ReadStatus, std::string)>& enqueue);
+void run(std::FILE* input, const std::function<void(Input, std::string)>& enqueue);
 }

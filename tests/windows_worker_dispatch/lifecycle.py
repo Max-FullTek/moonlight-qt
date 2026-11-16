@@ -14,7 +14,9 @@ def check(executable):
     oversize_error = {"event": "error", "protocol": 1, "code": "request_too_large"}
     shutdown = b'{"command":"shutdown"}\n'
     oversize = b" " * 65536 + shutdown
-    for records, expected in ((None, []), (shutdown, []), (oversize + shutdown, [oversize_error])):
+    owner_exit = b'{"command":"test_owner_exit"}\n'
+    for records, expected in ((None, []), (shutdown, []), (oversize + shutdown, [oversize_error]),
+                              (owner_exit, [])):
         with subprocess.Popen([executable, "--gpui-core"], stdin=subprocess.PIPE,
                               stdout=subprocess.PIPE, env=env) as worker:
             if records is None:
