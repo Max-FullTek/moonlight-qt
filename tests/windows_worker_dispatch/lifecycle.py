@@ -15,8 +15,12 @@ def check(executable):
     shutdown = b'{"command":"shutdown"}\n'
     oversize = b" " * 65536 + shutdown
     owner_exit = b'{"command":"test_owner_exit"}\n'
+    invalid = b"[]\n"
+    monitor = b" " * 65536 + b'{"command":"monitor_update"}\n'
+    monitor_event = {"event": "test_monitor_received", "protocol": 1}
+    invalid_error = {"event": "error", "protocol": 1, "code": "invalid_json"}
     for records, expected in ((None, []), (shutdown, []), (oversize + shutdown, [oversize_error]),
-                              (owner_exit, [])):
+                              (owner_exit, []), (invalid + monitor + shutdown, [invalid_error, monitor_event])):
         with subprocess.Popen([executable, "--gpui-core"], stdin=subprocess.PIPE,
                               stdout=subprocess.PIPE, env=env) as worker:
             if records is None:

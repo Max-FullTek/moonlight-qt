@@ -7,15 +7,17 @@
 WorkerCommandRouting::Route WorkerCommandRouting::inspect(std::string_view line)
 {
     using Json = nlohmann::json;
+    if (line.find('\0') != std::string_view::npos) return {Kind::InvalidJson, 0, {}};
     bool tooDeep = false;
     const auto object = Json::parse(line.begin(), line.end(),
         [&tooDeep](int depth, Json::parse_event_t, Json&) {
             if (depth >= 1024) tooDeep = true;
             return !tooDeep;
         }, false);
-    if (tooDeep || !object.is_object()) return {};
+    if (tooDeep || !object.is_object()) return {Kind::InvalidJson, 0, {}};
     const auto command = object.find("command");
     if (command == object.end()) return {};
+    if (*command == "monitor_update") return {Kind::MonitorUpdate, 0, {}};
     if (*command == "shutdown") return {Kind::Shutdown, 0, {}};
     if (*command != "session_api_result") return {};
 
@@ -54,9 +56,15 @@ void WorkerCommandRouting::run(
             if (route.requestId) SessionApiRpc::broker().complete(route.requestId, std::move(route.result));
             continue;
         }
-        // The owner rejects oversized control commands, so they cannot close
-        // the reader or broker before the owner has a chance to continue.
-        const bool shutdown = route.kind == Kind::Shutdown && line.size() <= WorkerCommandPipe::MaxControlLineBytes;
+        if (line.size() > WorkerCommandPipe::MaxControlLineBytes && route.kind != Kind::MonitorUpdate) {
+            enqueue(Input::Oversized, {});
+            continue;
+        }
+        if (route.kind == Kind::InvalidJson) {
+            enqueue(Input::InvalidJson, {});
+            continue;
+        }
+        const bool shutdown = route.kind == Kind::Shutdown;
         if (shutdown) SessionApiRpc::broker().close();
         enqueue(shutdown ? Input::Shutdown : Input::Command, std::move(line));
         if (shutdown) return;

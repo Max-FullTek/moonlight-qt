@@ -5,7 +5,7 @@ int main()
     using WorkerCommandRouting::inspect;
     using WorkerCommandRouting::Kind;
     if (inspect(R"({"command":"shutdown"})" "\r").kind != Kind::Shutdown) return 1;
-    if (inspect(R"({"command":"shutdown"} trailing)").kind != Kind::Command) return 2;
+    if (inspect(R"({"command":"shutdown"} trailing)").kind != Kind::InvalidJson) return 2;
     if (inspect(R"({"command":"shutdown","command":"hosts"})").kind != Kind::Command) return 3;
     const auto response = inspect(R"({"command":"session_api_result","request_id":9007199254740991,"result":{"ok":true}})");
     if (response.kind != Kind::SessionApiResult || response.requestId != 9007199254740991ULL ||
@@ -21,6 +21,6 @@ int main()
     }
     const std::string nested = R"({"command":"shutdown","extra":)" + std::string(2048, '[') +
         "0" + std::string(2048, ']') + "}";
-    if (inspect(nested).kind != Kind::Command) return 6;
+    if (inspect(nested).kind != Kind::InvalidJson) return 6;
     return 0;
 }

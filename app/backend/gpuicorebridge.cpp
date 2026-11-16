@@ -275,6 +275,9 @@ void GpuiCoreBridge::drainInput()
         case InputKind::Command:
             command(QByteArray::fromRawData(input.line.data(), static_cast<int>(input.line.size())));
             break;
+        case InputKind::InvalidJson:
+            fail("invalid_json", tr("Expected a JSON object."));
+            break;
         case InputKind::Oversized:
             fail("request_too_large", tr("Request exceeds 64 KiB."));
             break;
@@ -319,6 +322,8 @@ void GpuiCoreBridge::start() {
             using PipeInput = WorkerCommandRouting::Input;
             if (status == PipeInput::Command || status == PipeInput::Shutdown) {
                 enqueueInput({InputKind::Command, std::move(line)});
+            } else if (status == PipeInput::InvalidJson) {
+                enqueueInput({InputKind::InvalidJson, {}});
             } else if (status == PipeInput::Oversized) enqueueInput({InputKind::Oversized, {}});
             else enqueueInput({InputKind::EndOfInput, {}});
         });

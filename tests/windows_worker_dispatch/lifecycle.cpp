@@ -13,8 +13,12 @@ int main(int argc, char** argv)
             outputOk = false;
             return;
         }
-        if (status == WorkerCommandRouting::Input::Command && line.size() > MaxControlLineBytes) {
+        if (status == WorkerCommandRouting::Input::Oversized) {
             outputOk = write(R"({"event":"error","protocol":1,"code":"request_too_large"})");
+        } else if (status == WorkerCommandRouting::Input::InvalidJson) {
+            outputOk = write(R"({"event":"error","protocol":1,"code":"invalid_json"})");
+        } else if (line.size() > MaxControlLineBytes && line.find("monitor_update") != std::string_view::npos) {
+            outputOk = write(R"({"event":"test_monitor_received","protocol":1})");
         } else if (line == R"({"command":"test_owner_exit"})") {
             PostQuitMessage(0);
         }

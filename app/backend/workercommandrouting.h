@@ -7,8 +7,8 @@
 #include <string_view>
 
 namespace WorkerCommandRouting {
-enum class Kind { Command, Shutdown, SessionApiResult };
-enum class Input { Command, Oversized, Shutdown, EndOfInput };
+enum class Kind { Command, InvalidJson, MonitorUpdate, Shutdown, SessionApiResult };
+enum class Input { Command, InvalidJson, Oversized, Shutdown, EndOfInput };
 
 struct Route {
     Kind kind = Kind::Command;

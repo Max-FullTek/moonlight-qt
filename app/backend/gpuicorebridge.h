@@ -33,7 +33,7 @@ public:
     ~GpuiCoreBridge() override;
     void start();
 private:
-    enum class InputKind { Command, Oversized, EndOfInput };
+    enum class InputKind { Command, InvalidJson, Oversized, EndOfInput };
     struct Input {
         InputKind kind;
         std::string line;
