@@ -1,6 +1,7 @@
 #include "windowsclipboardlistener.h"
 
 #include <windows.h>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <utility>
@@ -190,9 +191,82 @@ std::vector<char> WindowsClipboardListener::readPng(size_t maxBytes) const
     return {};
 }
 
-bool WindowsClipboardListener::hasBitmap() const
+std::vector<char> WindowsClipboardBitmap::toBmp(std::string_view dib, size_t maxBytes)
 {
-    return IsClipboardFormatAvailable(CF_DIBV5) || IsClipboardFormatAvailable(CF_DIB);
+    constexpr auto fileHeaderSize = sizeof(BITMAPFILEHEADER);
+    constexpr auto maxFileSize = (std::numeric_limits<DWORD>::max)();
+    if (maxBytes < fileHeaderSize || dib.size() < sizeof(BITMAPINFOHEADER) ||
+        dib.size() > maxBytes - fileHeaderSize || dib.size() > maxFileSize - fileHeaderSize) {
+        return {};
+    }
+
+    BITMAPINFOHEADER info{};
+    std::memcpy(&info, dib.data(), sizeof(info));
+    if ((info.biSize != sizeof(info) && info.biSize != sizeof(BITMAPV4HEADER) &&
+         info.biSize != sizeof(BITMAPV5HEADER)) || info.biSize > dib.size() ||
+        info.biWidth <= 0 || info.biHeight == 0 || info.biPlanes != 1) {
+        return {};
+    }
+
+    const auto depth = info.biBitCount;
+    if (depth != 1 && depth != 4 && depth != 8 && depth != 16 && depth != 24 && depth != 32) return {};
+    const bool bitfields = info.biCompression == BI_BITFIELDS && (depth == 16 || depth == 32);
+    const bool uncompressed = info.biCompression == BI_RGB || bitfields;
+    const bool rle = info.biHeight > 0 && ((info.biCompression == BI_RLE4 && depth == 4) ||
+                                          (info.biCompression == BI_RLE8 && depth == 8));
+    if (!uncompressed && !rle) return {};
+
+    const size_t paletteLimit = depth <= 8 ? size_t{1} << depth : 0;
+    const size_t paletteSize = info.biClrUsed ? info.biClrUsed : paletteLimit;
+    if (paletteLimit && paletteSize > paletteLimit) return {};
+    const size_t masks = bitfields && info.biSize == sizeof(info) ? 3 * sizeof(DWORD) : 0;
+    const size_t pixelOffset = info.biSize + masks + paletteSize * sizeof(RGBQUAD);
+    if (pixelOffset >= dib.size()) return {};
+
+    const size_t height = info.biHeight < 0
+        ? static_cast<size_t>(-static_cast<int64_t>(info.biHeight)) : static_cast<size_t>(info.biHeight);
+    const size_t stride = (static_cast<size_t>(info.biWidth) * depth + 31) / 32 * 4;
+    const size_t available = dib.size() - pixelOffset;
+    if ((uncompressed && height > available / stride) ||
+        (rle && (info.biSizeImage == 0 || info.biSizeImage > available))) return {};
+    const size_t pixelEnd = pixelOffset + (uncompressed ? height * stride : info.biSizeImage);
+
+    BITMAPV5HEADER extended{};
+    if (info.biSize == sizeof(extended)) {
+        std::memcpy(&extended, dib.data(), sizeof(extended));
+        if (extended.bV5CSType == PROFILE_EMBEDDED &&
+            (extended.bV5ProfileData < pixelEnd || extended.bV5ProfileData > dib.size() ||
+             extended.bV5ProfileSize > dib.size() - extended.bV5ProfileData)) return {};
+    }
+
+    BITMAPFILEHEADER file{};
+    file.bfType = 0x4d42; // "BM" in little endian.
+    file.bfSize = static_cast<DWORD>(fileHeaderSize + dib.size());
+    file.bfOffBits = static_cast<DWORD>(fileHeaderSize + pixelOffset);
+    std::vector<char> bmp(file.bfSize);
+    std::memcpy(bmp.data(), &file, fileHeaderSize);
+    std::memcpy(bmp.data() + fileHeaderSize, dib.data(), dib.size());
+    if (info.biSize == sizeof(extended) && extended.bV5CSType == PROFILE_LINKED) {
+        // A linked profile is an external path supplied by the clipboard provider.
+        extended.bV5CSType = LCS_sRGB;
+        extended.bV5ProfileData = 0;
+        extended.bV5ProfileSize = 0;
+        std::memcpy(bmp.data() + fileHeaderSize, &extended, sizeof(extended));
+    }
+    return bmp;
+}
+
+std::vector<char> WindowsClipboardListener::readBitmap(BitmapFormat format, size_t maxBytes) const
+{
+    if (!active() || !OpenClipboard(m_Window->handle)) return {};
+    const ClipboardLock lock;
+    const auto buffer = GetClipboardData(format == BitmapFormat::DibV5 ? CF_DIBV5 : CF_DIB);
+    if (!buffer) return {};
+    const size_t size = GlobalSize(buffer);
+    if (!size || size > maxBytes) return {};
+    const GlobalMemoryLock memory{buffer};
+    if (!memory.data) return {};
+    return WindowsClipboardBitmap::toBmp({static_cast<const char*>(memory.data), size}, maxBytes);
 }
 
 WindowsClipboardListener::WriteResult WindowsClipboardListener::writePng(

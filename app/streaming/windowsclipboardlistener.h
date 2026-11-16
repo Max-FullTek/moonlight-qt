@@ -7,6 +7,11 @@
 #include <string_view>
 #include <vector>
 
+namespace WindowsClipboardBitmap {
+// Add the file header expected by BMP decoders to a packed clipboard DIB.
+std::vector<char> toBmp(std::string_view dib, size_t maxBytes);
+}
+
 // Create and destroy on the thread that dispatches Win32 window messages.
 class WindowsClipboardListener {
 public:
@@ -26,7 +31,8 @@ public:
     // Unicode data. nullopt allows the caller to try other formats.
     std::optional<std::wstring> readText(size_t maxCharacters) const;
     std::vector<char> readPng(size_t maxBytes) const;
-    bool hasBitmap() const;
+    enum class BitmapFormat { DibV5, Dib };
+    std::vector<char> readBitmap(BitmapFormat format, size_t maxBytes) const;
 
 private:
     struct Window;

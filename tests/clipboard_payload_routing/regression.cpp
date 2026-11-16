@@ -21,6 +21,12 @@
 #include <QThread>
 #include <QtEndian>
 
+#ifdef LITE_NATIVE_CLIPBOARD_HTTP
+#include "streaming/windowsclipboardlistener.h"
+#include <windows.h>
+#include <cstring>
+#endif
+
 namespace {
 bool check(bool value, const char* name, QTextStream& err)
 {
@@ -140,6 +146,74 @@ public:
         buffer.open(QIODevice::WriteOnly);
         image.save(&buffer, "PNG");
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
+        {
+            BITMAPINFOHEADER header{};
+            header.biSize = sizeof(header);
+            header.biWidth = 1;
+            header.biHeight = 1;
+            header.biPlanes = 1;
+            header.biBitCount = 24;
+            header.biCompression = BI_RGB;
+            const char pixels[] = { 0x33, 0x22, 0x11, 0 };
+            std::string dib(reinterpret_cast<const char*>(&header), sizeof(header));
+            dib.append(pixels, sizeof(pixels));
+            const auto decodeBitmap = [](std::string_view input) {
+                const auto bmp = WindowsClipboardBitmap::toBmp(input, 4096);
+                return QImage::fromData(
+                    QByteArray::fromRawData(bmp.data(), static_cast<qsizetype>(bmp.size())), "BMP");
+            };
+            const auto opaque = decodeBitmap(dib);
+            ok &= check(opaque.size() == QSize(1, 1) && opaque.pixel(0, 0) == qRgb(0x11, 0x22, 0x33),
+                        "packed DIB decodes as an opaque bitmap", err);
+            ok &= check(WindowsClipboardBitmap::toBmp(dib, dib.size()).empty() &&
+                        WindowsClipboardBitmap::toBmp(std::string_view(dib).substr(0, dib.size() - 1), 4096).empty(),
+                        "packed DIB must fit the transfer and contain a complete row", err);
+
+            header.biBitCount = 8;
+            header.biClrUsed = 2;
+            const RGBQUAD palette[] = { {}, { 0x33, 0x22, 0x11, 0 } };
+            std::string indexed(reinterpret_cast<const char*>(&header), sizeof(header));
+            indexed.append(reinterpret_cast<const char*>(palette), sizeof(palette));
+            indexed.append("\x01\x00\x00\x00", 4);
+            const auto indexedBitmap = decodeBitmap(indexed);
+            ok &= check(indexedBitmap.size() == QSize(1, 1) &&
+                            indexedBitmap.pixel(0, 0) == qRgb(0x11, 0x22, 0x33),
+                        "packed indexed DIB reads pixels after the color table", err);
+
+            BITMAPV5HEADER v5{};
+            v5.bV5Size = sizeof(v5);
+            v5.bV5Width = 1;
+            v5.bV5Height = -1;
+            v5.bV5Planes = 1;
+            v5.bV5BitCount = 32;
+            v5.bV5Compression = BI_BITFIELDS;
+            v5.bV5RedMask = 0x00ff0000;
+            v5.bV5GreenMask = 0x0000ff00;
+            v5.bV5BlueMask = 0x000000ff;
+            v5.bV5AlphaMask = 0xff000000;
+            v5.bV5CSType = LCS_sRGB;
+            const char alphaPixels[] = { 0x33, 0x22, 0x11, 0x40 };
+            std::string dibV5(reinterpret_cast<const char*>(&v5), sizeof(v5));
+            dibV5.append(alphaPixels, sizeof(alphaPixels));
+            const auto transparent = decodeBitmap(dibV5);
+            ok &= check(transparent.size() == QSize(1, 1) && transparent.pixel(0, 0) == qRgba(0x11, 0x22, 0x33, 0x40),
+                        "packed DIBV5 preserves explicit alpha", err);
+
+            v5.bV5CSType = PROFILE_LINKED;
+            v5.bV5ProfileData = static_cast<DWORD>(dibV5.size());
+            v5.bV5ProfileSize = 8;
+            std::memcpy(dibV5.data(), &v5, sizeof(v5));
+            dibV5.append("profile", 8);
+            const auto normalized = WindowsClipboardBitmap::toBmp(dibV5, 4096);
+            BITMAPV5HEADER normalizedHeader{};
+            if (normalized.size() >= sizeof(BITMAPFILEHEADER) + sizeof(normalizedHeader)) {
+                std::memcpy(&normalizedHeader, normalized.data() + sizeof(BITMAPFILEHEADER),
+                            sizeof(normalizedHeader));
+            }
+            ok &= check(normalizedHeader.bV5CSType == LCS_sRGB && !normalizedHeader.bV5ProfileData &&
+                            !normalizedHeader.bV5ProfileSize,
+                        "packed DIBV5 never dereferences a linked profile path", err);
+        }
         {
             cb->setText("keep clipboard");
             ClipboardSync sync;

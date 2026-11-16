@@ -103,6 +103,7 @@ public:
     // Mirror the Android client's cap (32 Mpx) so a stray full-screen capture
     // doesn't try to PNG-encode a 100 MB bitmap and stall the GUI thread.
     static constexpr qint64  MAX_IMAGE_PIXELS = 32LL * 1024 * 1024;
+    static constexpr qint64 MAX_BITMAP_BYTES = MAX_IMAGE_PIXELS * 4 + MAX_BLOB_BYTES;
 
     static constexpr bool shouldTransferOutOfBand(qint64 payloadBytes)
     {
@@ -189,7 +190,8 @@ private:
 
     static uint64_t hashBytes(const QByteArray& bytes);
     static uint64_t hashImagePixels(const QImage& image);
-    static bool decodeImage(const QByteArray& bytes, QImage& image, const char* format = nullptr);
+    static bool decodeImage(const QByteArray& bytes, QImage& image, const char* format = nullptr,
+                            qint64 maxBytes = MAX_BLOB_BYTES);
     bool decodeInboundPng(const QByteArray& bytes, QImage& image) const;
     void rememberClipboard(const QByteArray& text, const QImage& image);
     void beginClipboardChange(quint32 token = 0);

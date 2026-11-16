@@ -865,11 +865,20 @@ void ClipboardSync::onLocalClipboardChanged()
 #endif
 #ifdef LITE_NATIVE_CLIPBOARD_HTTP
     if (m_ClipboardListener) {
-        if (!havePng && mime != nullptr && m_ClipboardListener->hasBitmap()) {
-            image = qvariant_cast<QImage>(mime->imageData());
-            havePng = encodeImageAsPng(image, png, "Windows bitmap");
-            if (havePng) imageSourceDescription = QStringLiteral("Windows bitmap");
-            else image = QImage();
+        if (!havePng) {
+            using BitmapFormat = WindowsClipboardListener::BitmapFormat;
+            for (const auto format : {BitmapFormat::DibV5, BitmapFormat::Dib}) {
+                const auto bytes = m_ClipboardListener->readBitmap(format, MAX_BITMAP_BYTES);
+                if (bytes.empty()) continue;
+                const auto bmp = QByteArray::fromRawData(bytes.data(), static_cast<qsizetype>(bytes.size()));
+                if (decodeImage(bmp, image, "BMP", MAX_BITMAP_BYTES) &&
+                    encodeImageAsPng(image, png, "Windows bitmap")) {
+                    imageSourceDescription = QStringLiteral("Windows bitmap");
+                    havePng = true;
+                    break;
+                }
+                image = QImage();
+            }
         }
         if (!havePng && mime != nullptr && !hasFileReferences(mime)) {
             const auto formats = mime->formats();
@@ -1038,9 +1047,9 @@ uint64_t ClipboardSync::hashImagePixels(const QImage& image)
     return h;
 }
 
-bool ClipboardSync::decodeImage(const QByteArray& bytes, QImage& image, const char* format)
+bool ClipboardSync::decodeImage(const QByteArray& bytes, QImage& image, const char* format, qint64 maxBytes)
 {
-    if (bytes.isEmpty() || bytes.size() > MAX_BLOB_BYTES) {
+    if (bytes.isEmpty() || bytes.size() > maxBytes) {
         return false;
     }
     QBuffer buffer;
