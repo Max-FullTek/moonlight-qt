@@ -34,6 +34,9 @@ public:
     explicit GpuiCoreBridge(QObject* parent = nullptr);
     ~GpuiCoreBridge() override;
     void start();
+#ifdef Q_OS_WIN32
+    int execNative();
+#endif
 private:
     enum class InputKind { Command, InvalidJson, Oversized, EndOfInput };
     struct Input {
@@ -65,6 +68,7 @@ private:
     QString m_RustQuitHost;
     int m_RustQuitRequest = 0;
     bool m_ShuttingDown = false;
+    bool m_NativeOwner = false;
     bool m_AddPending = false;
     std::mutex m_InputMutex;
     std::deque<Input> m_Input;

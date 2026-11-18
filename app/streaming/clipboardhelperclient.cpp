@@ -7,7 +7,11 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+#include "windowsclipboardprocess.h"
+#else
 #include <QProcess>
+#endif
 
 #include <SDL.h>
 
@@ -62,6 +66,11 @@ bool ClipboardHelperClient::startProcess()
         return false;
     }
 
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+    m_Process = new WindowsClipboardProcess;
+    if (!m_Process->start(m_HelperPath.toStdWString())) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Clipboard helper failed to start");
+#else
     m_Process = new QProcess(this);
     m_Process->setProgram(m_HelperPath);
     m_Process->setProcessChannelMode(QProcess::SeparateChannels);
@@ -70,6 +79,7 @@ bool ClipboardHelperClient::startProcess()
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Clipboard helper failed to start: %s",
                     m_Process->errorString().toUtf8().constData());
+#endif
         delete m_Process;
         m_Process = nullptr;
         scheduleRestart("start failed");
@@ -100,18 +110,30 @@ void ClipboardHelperClient::stop()
         return;
     }
 
-    if (m_Process->state() != QProcess::NotRunning) {
+    if (isRunning()) {
         writeLine(ClipboardIpc::encodeStop(nextSequence()));
         flushProcessInput();
         if (m_Process != nullptr) {
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+            m_Process->closeInput();
+#else
             m_Process->closeWriteChannel();
+#endif
         }
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+        if (m_Process != nullptr && !m_Process->wait(1000)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Clipboard helper did not exit cleanly; killing it");
+            m_Process->terminate();
+            m_Process->wait(1000);
+        }
+#else
         if (m_Process != nullptr && !m_Process->waitForFinished(1000)) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "Clipboard helper did not exit cleanly; killing it");
             m_Process->kill();
             m_Process->waitForFinished(1000);
         }
+#endif
     }
 
     if (m_Process != nullptr) {
@@ -122,8 +144,7 @@ void ClipboardHelperClient::stop()
 
 void ClipboardHelperClient::updateHostContext()
 {
-    if (!m_Enabled || m_Disabled || m_Process == nullptr ||
-            m_Process->state() == QProcess::NotRunning) {
+    if (!m_Enabled || m_Disabled || !isRunning()) {
         return;
     }
 
@@ -151,17 +172,21 @@ void ClipboardHelperClient::processPendingMessages()
         return;
     }
 
-    if (m_Process->state() == QProcess::NotRunning) {
+    if (!isRunning()) {
         readHelperOutput();
         readHelperErrors();
         // Invalid trailing output may have already destroyed the process.
         if (m_Process == nullptr) {
             return;
         }
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Clipboard helper exited: exitCode=%u", m_Process->exitCode());
+#else
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Clipboard helper exited: exitCode=%d error=%s",
                     m_Process->exitCode(),
                     m_Process->errorString().toUtf8().constData());
+#endif
         delete m_Process;
         m_Process = nullptr;
         m_HelperReady = false;
@@ -176,7 +201,9 @@ void ClipboardHelperClient::processPendingMessages()
         return;
     }
 
+#if !defined(Q_OS_WIN) || !defined(LITE_NATIVE_HTTP)
     m_Process->waitForReadyRead(0);
+#endif
     readHelperOutput();
     readHelperErrors();
     if (m_Process == nullptr) {
@@ -201,7 +228,11 @@ void ClipboardHelperClient::processPendingMessages()
 
 bool ClipboardHelperClient::isRunning() const
 {
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+    return m_Process != nullptr && m_Process->running();
+#else
     return m_Process != nullptr && m_Process->state() != QProcess::NotRunning;
+#endif
 }
 
 void ClipboardHelperClient::scheduleRestart(const char* reason)
@@ -344,7 +375,11 @@ void ClipboardHelperClient::readHelperOutput()
         return;
     }
 
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+    m_StdoutBuffer += QByteArray::fromStdString(m_Process->readOutput());
+#else
     m_StdoutBuffer += m_Process->readAllStandardOutput();
+#endif
     QByteArray line;
     QString error;
     while (ClipboardIpc::takeLine(m_StdoutBuffer, line, error)) {
@@ -364,7 +399,11 @@ void ClipboardHelperClient::readHelperErrors()
         return;
     }
 
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+    m_StderrBuffer += QByteArray::fromStdString(m_Process->readErrors());
+#else
     m_StderrBuffer += m_Process->readAllStandardError();
+#endif
     if (m_StderrBuffer.size() > ClipboardIpc::MAX_LINE_BYTES) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Clipboard helper stderr line exceeded protocol limit; discarding buffered stderr");
@@ -478,9 +517,14 @@ void ClipboardHelperClient::restartHelper(const char* reason)
     m_StdinBuffer.clear();
 
     if (m_Process != nullptr) {
-        if (m_Process->state() != QProcess::NotRunning) {
+        if (isRunning()) {
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+            m_Process->terminate();
+            m_Process->wait(1000);
+#else
             m_Process->kill();
             m_Process->waitForFinished(1000);
+#endif
         }
         delete m_Process;
         m_Process = nullptr;
@@ -491,10 +535,19 @@ void ClipboardHelperClient::restartHelper(const char* reason)
 
 bool ClipboardHelperClient::flushProcessInput()
 {
-    if (m_Process == nullptr || m_Process->state() == QProcess::NotRunning) {
+    if (!isRunning()) {
         return false;
     }
 
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+    bool success = m_Process->flush();
+    if (success && m_Process->pendingBytes() == 0 && !m_StdinBuffer.isEmpty()) {
+        success = m_Process->write({m_StdinBuffer.constData(), static_cast<size_t>(m_StdinBuffer.size())});
+        if (success) m_StdinBuffer.clear();
+    }
+    if (!success) restartHelper("pipe write failed");
+    return success;
+#else
     while (!m_StdinBuffer.isEmpty()) {
         qint64 written = m_Process->write(m_StdinBuffer.constData(), m_StdinBuffer.size());
         if (written < 0) {
@@ -514,17 +567,23 @@ bool ClipboardHelperClient::flushProcessInput()
 
     m_Process->waitForBytesWritten(0);
     return true;
+#endif
 }
 
 bool ClipboardHelperClient::writeLine(const QByteArray& line)
 {
-    if (m_Process == nullptr || m_Process->state() == QProcess::NotRunning) {
+    if (!isRunning()) {
         return false;
     }
 
     QByteArray out = line;
     out.append('\n');
-    if (m_Process->bytesToWrite() + m_StdinBuffer.size() + out.size() > MAX_PENDING_STDIN_BYTES) {
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+    const auto pendingBytes = m_Process->pendingBytes();
+#else
+    const auto pendingBytes = m_Process->bytesToWrite();
+#endif
+    if (pendingBytes + m_StdinBuffer.size() + out.size() > MAX_PENDING_STDIN_BYTES) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                     "Clipboard helper stdin backlog exceeded protocol limit");
         restartHelper("pipe backlog exceeded");

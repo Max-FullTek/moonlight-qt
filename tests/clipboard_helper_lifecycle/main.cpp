@@ -2,6 +2,9 @@
 #include "streaming/clipboardhelperclient.h"
 #include "streaming/clipboardipc.h"
 #include "backend/identitymanager.h"
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+#include "streaming/windowsclipboardprocess.h"
+#endif
 #include <QCoreApplication>
 #include <QProcess>
 #include <QTextStream>
@@ -126,12 +129,23 @@ public:
         std::fprintf(stderr, "Starting lifecycle case: %s\n", qPrintable(mode));
         std::fflush(stderr);
         client.m_Enabled = true;
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+        client.m_Process = new WindowsClipboardProcess;
+        const auto oldMode = qgetenv("MOONLIGHT_CLIPBOARD_CLIENT_TEST_CHILD");
+        qputenv("MOONLIGHT_CLIPBOARD_CLIENT_TEST_CHILD", mode.toUtf8());
+        const bool started = client.m_Process->start(QCoreApplication::applicationFilePath().toStdWString());
+        if (oldMode.isNull()) qunsetenv("MOONLIGHT_CLIPBOARD_CLIENT_TEST_CHILD");
+        else qputenv("MOONLIGHT_CLIPBOARD_CLIENT_TEST_CHILD", oldMode);
+        client.m_LastPingTicks = client.m_LastResponseTicks = SDL_GetTicks();
+        return started;
+#else
         client.m_Process = new QProcess(&client);
         client.m_Process->start(QCoreApplication::applicationFilePath(), { mode });
         std::fputs("Helper process launched; initializing timer\n", stderr);
         std::fflush(stderr);
         client.m_LastPingTicks = client.m_LastResponseTicks = SDL_GetTicks();
         return client.m_Process->waitForStarted(3000);
+#endif
     }
     static bool run(QTextStream& err)
     {
@@ -187,7 +201,12 @@ public:
             const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
             while (sentFrames.size() < expected.size() && std::chrono::steady_clock::now() < until) {
                 if (!client.m_Process) break;
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                client.flushProcessInput();
+#else
                 client.m_Process->waitForReadyRead(100);
+#endif
                 client.readHelperOutput();
             }
             check(sentFrames == expected, "cross-thread frames preserve binary content and FIFO order through helper IPC");
@@ -224,7 +243,11 @@ public:
             ClipboardHelperClient client(nullptr);
             if (!start(client, "--invalid-output"))
                 return false;
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+            check(client.m_Process->wait(3000), "fake helper exits");
+#else
             check(client.m_Process->waitForFinished(3000), "fake helper exits");
+#endif
             client.processPendingMessages();
             check(client.m_Process == nullptr && client.m_RestartAttempts == 1,
                   "invalid trailing output schedules one restart without null dereference");
@@ -251,10 +274,14 @@ public:
             ClipboardHelperClient client(nullptr);
             if (!start(client, "--hung"))
                 return false;
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+            client.m_Process->write(std::string(ClipboardHelperClient::MAX_PENDING_STDIN_BYTES, 'x'));
+#else
             client.m_Process->write(
                 QByteArray(ClipboardHelperClient::MAX_PENDING_STDIN_BYTES, 'x'));
+#endif
             check(!client.writeLine(QByteArray(65536, 'y')) && client.m_Process == nullptr,
-                  "QProcess internal write backlog counts toward limit");
+                  "process write backlog counts toward limit");
         }
         {
             ClipboardHelperClient client(nullptr);
@@ -272,7 +299,8 @@ public:
 };
 int main(int argc, char** argv)
 {
-    if (argc == 2 && !std::strcmp(argv[1], "--reflect-frames")) {
+    const char* mode = argc == 2 ? argv[1] : std::getenv("MOONLIGHT_CLIPBOARD_CLIENT_TEST_CHILD");
+    if (mode && !std::strcmp(mode, "--reflect-frames")) {
         std::string line;
         while (std::getline(std::cin, line)) {
             ClipboardIpc::Message message;
@@ -288,11 +316,11 @@ int main(int argc, char** argv)
         }
         return 0;
     }
-    if (argc == 2 && !std::strcmp(argv[1], "--invalid-output")) {
+    if (mode && !std::strcmp(mode, "--invalid-output")) {
         std::puts("invalid JSON");
         return 0;
     }
-    if (argc == 2 && !std::strcmp(argv[1], "--hung")) {
+    if (mode && !std::strcmp(mode, "--hung")) {
         QThread::sleep(15);
         return 0;
     }

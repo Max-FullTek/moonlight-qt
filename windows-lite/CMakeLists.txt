@@ -198,6 +198,11 @@ if(LITE_ENABLE_NATIVE_HTTP AND TARGET lite-clipboard-ipc)
 endif()
 
 add_library(lite-worker-dispatch STATIC "${LITE_SOURCE_ROOT}/app/backend/windowsworkerdispatch.cpp")
+
+add_library(lite-clipboard-process STATIC "${LITE_SOURCE_ROOT}/app/streaming/windowsclipboardprocess.cpp")
+target_compile_features(lite-clipboard-process PUBLIC cxx_std_17)
+target_compile_options(lite-clipboard-process PRIVATE /W3 /WX)
+target_include_directories(lite-clipboard-process PUBLIC "${LITE_SOURCE_ROOT}/app")
 target_compile_features(lite-worker-dispatch PUBLIC cxx_std_17)
 target_compile_options(lite-worker-dispatch PRIVATE /W3 /WX)
 target_include_directories(lite-worker-dispatch PUBLIC "${LITE_SOURCE_ROOT}/app")
@@ -407,6 +412,10 @@ if(BUILD_TESTING)
     endif()
 
     add_executable(windows_worker_dispatch "${LITE_SOURCE_ROOT}/tests/windows_worker_dispatch/main.cpp")
+    add_executable(windows_clipboard_process "${LITE_SOURCE_ROOT}/tests/windows_worker_dispatch/clipboardprocess.cpp")
+    target_link_libraries(windows_clipboard_process PRIVATE lite-clipboard-process)
+    add_test(NAME windows_clipboard_process COMMAND windows_clipboard_process)
+    set_tests_properties(windows_clipboard_process PROPERTIES TIMEOUT 15)
     target_link_libraries(windows_worker_dispatch PRIVATE lite-worker-dispatch)
     add_test(NAME windows_worker_dispatch COMMAND windows_worker_dispatch)
 

@@ -17,6 +17,7 @@
 #include <QTimer>
 #include <QSet>
 #include <condition_variable>
+#include <atomic>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -238,6 +239,7 @@ public:
         m_HostCompletionDispatcher = std::move(dispatcher);
     }
     void interruptPolling();
+    void beginShutdown();
 
 signals:
     void computerStateChanged(NvComputer* computer);
@@ -260,6 +262,7 @@ private:
     void saveHosts();
     void finishHostDeletion(NvComputer* computer, const QString& uuid);
     void dispatchHostCompletion(std::function<void()> completion);
+    bool waitBeforeAddRetry();
 
     void runDelayedFlush();
 
@@ -271,6 +274,9 @@ private:
 
     StreamingPreferences* m_Prefs;
     std::function<void(std::function<void()>)> m_HostCompletionDispatcher;
+    std::atomic_bool m_Stopping{false};
+    std::mutex m_AddRetryMutex;
+    std::condition_variable m_AddRetryCondition;
     bool m_ExternalPolling;
     int m_PollingRef;
     QReadWriteLock m_Lock;

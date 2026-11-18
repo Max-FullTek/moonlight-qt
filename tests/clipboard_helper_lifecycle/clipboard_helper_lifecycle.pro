@@ -19,3 +19,7 @@ win32 {
     PKGCONFIG += sdl2
 }
 SOURCES += ../../app/backend/nvaddress.cpp
+win32:native-clipboard-process {
+    DEFINES += LITE_NATIVE_HTTP
+    SOURCES += ../../app/streaming/windowsclipboardprocess.cpp
+}

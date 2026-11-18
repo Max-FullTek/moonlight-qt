@@ -57,6 +57,8 @@ $savedPath = $env:PATH
 $savedWorker = [Environment]::GetEnvironmentVariable('NATIVE_HTTP_QT_WORKER', 'Process')
 try {
     $env:PATH = "$(Join-Path $repoRoot 'libs/windows/lib/x64');$env:SystemRoot/System32;$env:SystemRoot"
+    & (Join-Path $BuildDirectory "$Configuration/native_http_request_lifetime.exe")
+    if ($LASTEXITCODE -ne 0) { throw 'Native HTTP request lifetime checks failed' }
     $work = Join-Path $BuildDirectory ('scenarios-' + [guid]::NewGuid().ToString('N'))
     & $python (Join-Path $repoRoot 'tests/native_host_http/check.py') (Join-Path $BuildDirectory "$Configuration/native_host_http.exe") (Join-Path $repoRoot 'tests/clipboard_payload_routing/fixtures') $work
     if ($LASTEXITCODE -ne 0) { throw 'HTTP capability checks failed' }

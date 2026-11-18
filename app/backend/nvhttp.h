@@ -109,6 +109,9 @@ class NvHTTP : public QObject
     Q_OBJECT
 
 public:
+    // Set once before GPUI tasks start; Qt clients keep their existing owner.
+    static void enableNativeOwner();
+    static void closeNativeOwner();
     enum NvLogLevel {
         NVLL_NONE,
         NVLL_ERROR,

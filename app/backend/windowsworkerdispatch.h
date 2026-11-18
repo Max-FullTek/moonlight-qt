@@ -18,6 +18,8 @@ public:
     // Unlike the single in-flight launch/cleanup slot, operation completions
     // may overlap. Each callback runs in a later owner message dispatch.
     bool postCompletion(std::function<void()> completion);
+    static int runOwnerLoop();
+    static void exitOwnerLoop(int result = 0);
 
 private:
     struct Window;

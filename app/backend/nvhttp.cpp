@@ -1,4 +1,7 @@
 #include "nvcomputer.h"
+#ifdef LITE_NATIVE_HTTP
+#include "nativehttprequests.h"
+#endif
 #include "pairedcertificate.h"
 #include "sessionapirpc.h"
 #include <Limelight.h>
@@ -22,7 +25,24 @@
 #ifdef LITE_NATIVE_HTTP
 #include "qtnativehttptransport.h"
 #include "qtnativehttppolicy.h"
+namespace {
+std::unique_ptr<NativeHttp::RequestGroup> s_NativeRequests;
+}
 #endif
+
+void NvHTTP::enableNativeOwner()
+{
+#ifdef LITE_NATIVE_HTTP
+    s_NativeRequests = std::make_unique<NativeHttp::RequestGroup>();
+#endif
+}
+
+void NvHTTP::closeNativeOwner()
+{
+#ifdef LITE_NATIVE_HTTP
+    if (s_NativeRequests) s_NativeRequests->close();
+#endif
+}
 
 bool NvHTTP::usesRustSessionApi() { return SessionApiRpc::broker().enabled(); }
 QJsonObject NvHTTP::rustSessionCall(QJsonObject request,unsigned timeoutMs) {
@@ -818,7 +838,8 @@ NvHTTP::request(QUrl url, QByteArray body, bool post, bool json,
     if (logLevel >= NVLL_VERBOSE) {
         qInfo() << "Executing native request:" << url.adjusted(QUrl::RemoveQuery | QUrl::RemoveUserInfo | QUrl::RemoveFragment).toString();
     }
-    auto response = NativeHttp::performWithQtEvents(native);
+    if (s_NativeRequests) native.cancellation = s_NativeRequests->acquire();
+    auto response = s_NativeRequests ? NativeHttp::perform(native) : NativeHttp::performWithQtEvents(native);
     if (response.error == NativeHttp::Error::ResponseTooLarge) {
         throw GfeHttpResponseException(400, "USB capability response too large");
     }

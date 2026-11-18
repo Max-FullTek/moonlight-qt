@@ -90,7 +90,12 @@ private:
         //
         // Since QThread inherit the priority of the current thread, this also
         // ensures that the NAM's worker thread will inherit our lower priority.
-        QNetworkAccessManager nam;
+#ifdef LITE_NATIVE_HTTP
+        QNetworkAccessManager* nam = nullptr;
+#else
+        QNetworkAccessManager network;
+        auto* nam = &network;
+#endif
 
         // Always fetch the applist the first time
         int pollsSinceLastAppListFetch = POLLS_PER_APPLIST_FETCH;
@@ -104,7 +109,7 @@ private:
                         return;
                     }
 
-                    if (tryPollComputer(&nam, address, stateChanged)) {
+                    if (tryPollComputer(nam, address, stateChanged)) {
                         if (!wasOnline) {
                             qInfo() << m_Computer->name << "is now online at" << m_Computer->activeAddress.toString();
                         }
@@ -135,7 +140,7 @@ private:
                     stateChanged = false;
                 }
 
-                if (updateAppList(&nam, stateChanged)) {
+                if (updateAppList(nam, stateChanged)) {
                     pollsSinceLastAppListFetch = 0;
                 }
             }
@@ -597,7 +602,23 @@ void ComputerManager::clientSideAttributeUpdated(NvComputer* computer)
 
 void ComputerManager::handleAboutToQuit()
 {
+    beginShutdown();
+}
+
+void ComputerManager::beginShutdown()
+{
+    {
+        std::lock_guard lock(m_AddRetryMutex);
+        m_Stopping = true;
+    }
+    m_AddRetryCondition.notify_all();
     interruptPolling();
+}
+
+bool ComputerManager::waitBeforeAddRetry()
+{
+    std::unique_lock lock(m_AddRetryMutex);
+    return !m_AddRetryCondition.wait_for(lock, std::chrono::seconds(5), [this] { return m_Stopping.load(); });
 }
 
 void ComputerManager::interruptPolling()
@@ -797,8 +818,7 @@ public:
           m_Name(name),
           m_Address(address),
           m_MdnsIpv6Address(mdnsIpv6Address),
-          m_Mdns(mdns),
-          m_AboutToQuit(false)
+          m_Mdns(mdns)
     {
         connect(this, &PendingAddTask::computerAddCompleted,
                 computerManager, [computerManager](QVariant success, QVariant portBlocking) {
@@ -812,8 +832,6 @@ public:
                 computerManager->handleComputerStateChanged(computer);
             });
         }, Qt::DirectConnection);
-        connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
-                this, &PendingAddTask::handleAboutToQuit);
     }
 
 signals:
@@ -822,17 +840,12 @@ signals:
     void computerStateChanged(NvComputer* computer);
 
 private:
-    void handleAboutToQuit()
-    {
-        m_AboutToQuit = true;
-    }
-
     QString fetchServerInfo(NvHTTP& http)
     {
         QString serverInfo;
 
         // Do nothing if we're quitting
-        if (m_AboutToQuit) {
+        if (m_ComputerManager->m_Stopping) {
             return QString();
         }
 
@@ -846,7 +859,7 @@ private:
             } catch (const QtNetworkReplyException& e) {
                 if (e.getError() == QNetworkReply::ServiceUnavailableError) {
                     qWarning() << "Retrying request in 5 seconds after ServiceUnavailableError";
-                    QThread::sleep(5);
+                    if (!m_ComputerManager->waitBeforeAddRetry()) return QString();
                     serverInfo = http.getServerInfo(NvHTTP::NVLL_VERBOSE);
                     qInfo() << "Retry successful";
                 }
@@ -871,7 +884,7 @@ private:
             const auto xml = fetchServerInfo(http);
             return xml.isEmpty() ? nullptr : std::make_unique<NvComputer>(http, xml);
         }
-        if (m_AboutToQuit) return nullptr;
+        if (m_ComputerManager->m_Stopping) return nullptr;
         // Rust owns the request, parsing and cancellable 503 retry wait.
         try {
             return std::make_unique<NvComputer>(http, http.hostInformation());
@@ -1027,7 +1040,6 @@ private:
     NvAddress m_Address;
     NvAddress m_MdnsIpv6Address;
     bool m_Mdns;
-    bool m_AboutToQuit;
 };
 
 void ComputerManager::addNewHost(NvAddress address, bool mdns, QString name, NvAddress mdnsIpv6Address)

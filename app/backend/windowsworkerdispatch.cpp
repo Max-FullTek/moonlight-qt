@@ -135,3 +135,20 @@ bool WindowsWorkerDispatch::postCompletion(std::function<void()> completion)
 {
     return m_Window->postCompletion(std::move(completion));
 }
+
+int WindowsWorkerDispatch::runOwnerLoop()
+{
+    MSG message{};
+    for (;;) {
+        const BOOL result = GetMessageW(&message, nullptr, 0, 0);
+        if (result == -1) return 1;
+        if (result == 0) return static_cast<int>(message.wParam);
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+}
+
+void WindowsWorkerDispatch::exitOwnerLoop(int result)
+{
+    PostQuitMessage(result);
+}

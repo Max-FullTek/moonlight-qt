@@ -53,5 +53,17 @@ int main()
     std::vector<int> expected;
     for (int i = 0; i < 64; ++i) expected.push_back(i + 10);
     expected.push_back(100);
-    return postedCleanup && deferred && events == expected ? 0 : 5;
+    if (!postedCleanup || !deferred || events != expected) return 5;
+
+    // The production GPUI entry uses this pump, without QApplication::exec().
+    events.clear();
+    std::thread exitProducer([&] {
+        posted = dispatch.postCompletion([&] {
+            record(200);
+            WindowsWorkerDispatch::exitOwnerLoop(7);
+        });
+    });
+    exitProducer.join();
+    if (!posted) return 6;
+    return WindowsWorkerDispatch::runOwnerLoop() == 7 && events == std::vector<int>{200} ? 0 : 7;
 }

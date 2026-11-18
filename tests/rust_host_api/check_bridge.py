@@ -64,6 +64,14 @@ def check_legacy_pairing(worker, env, profile, pin_file, mode):
                 assert time.monotonic() < deadline, "C++ polling never published online state"
             send({"command": "pair", "host": "rust-display-host"})
             pin_file.write_text(event("pairing")["pin"], encoding="ascii")
+            if mode == "cancel":
+                deadline = time.monotonic() + 10
+                while not pin_file.with_suffix(".started").exists():
+                    assert time.monotonic() < deadline, "Pair request did not reach the fixture"
+                    time.sleep(0.01)
+                send({"command": "shutdown"})
+                assert process.wait(timeout=5) == 0
+                return
             if mode == "ok":
                 event("paired")
             else:
@@ -84,7 +92,7 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
     legacy_pairing = mode.startswith("legacy-")
     if legacy_pairing:
         mode = mode.removeprefix("legacy-")
-        assert peer_executable and mode in ("ok", "wrong-pin", "final-reject")
+        assert peer_executable and mode in ("ok", "wrong-pin", "final-reject", "cancel")
     quit_mode = peer_executable == "quit"
     launch_mode = peer_executable == "launch-rejected"
     if quit_mode or launch_mode:
@@ -97,6 +105,7 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
     work.mkdir(parents=True, exist_ok=False)
     seen = []
     peer = None
+    release_pair = threading.Event()
     paired = not peer_executable
     pin_file = work / "pin.txt"
     phase_file = work / "quit-phase.txt"
@@ -122,6 +131,11 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
                         f'<currentgame>{42 if quit_mode and running else 0}</currentgame><appversion>7.1.0.0</appversion>'
                         '<GfeVersion>3.26.0.0</GfeVersion></root>').encode()
             elif url.path == "/pair":
+                if legacy_pairing and mode == "cancel":
+                    pin_file.with_suffix(".started").write_text("started")
+                    release_pair.wait(timeout=15)
+                    self.close_connection = True
+                    return
                 if peer is None:
                     deadline = time.monotonic() + 10
                     while not pin_file.exists() and time.monotonic() < deadline:
@@ -213,10 +227,16 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
         if legacy_pairing:
             check_legacy_pairing(worker, env, profile, pin_file, mode)
         else:
-            subprocess.run(["cargo", "+1.99.1", "test", "--release", "--locked", "--manifest-path",
-                            str(root / "gpui-prototype/Cargo.toml"), f"core::tests::{test}",
-                            "--", "--exact", "--ignored", "--nocapture"], env=env, check=True, timeout=90)
-        if peer_executable:
+            command = ["cargo", "+1.99.1", "test", "--release", "--locked", "--manifest-path",
+                       str(root / "gpui-prototype/Cargo.toml"), f"core::tests::{test}",
+                       "--", "--exact", "--ignored", "--nocapture"]
+            if test_binary := os.environ.get("RUST_HOST_API_TEST_BINARY"):
+                command = [str(Path(test_binary).resolve()), f"core::tests::{test}",
+                           "--exact", "--ignored", "--nocapture"]
+            subprocess.run(command, env=env, check=True, timeout=90)
+        if legacy_pairing and mode == "cancel":
+            assert len([entry for entry in seen if entry[0] == "/pair"]) == 1
+        elif peer_executable:
             pairs = [entry for entry in seen if entry[0] == "/pair"]
             assert len(pairs) == (3 if mode == "wrong-pin" else 5), seen
             assert pairs[1][1]["clientname"] == ["測試主機"], pairs[1]
@@ -253,6 +273,7 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
         operation = "legacy pairing " + mode if legacy_pairing else "launch rejection and retry" if launch_mode else "session quit" if quit_mode else "pairing " + mode if peer_executable else "display query"
         print(f"Real worker context, {operation}, persistence and shutdown: passed")
     finally:
+        release_pair.set()
         for server in (tls, plain):
             server.shutdown()
             server.server_close()

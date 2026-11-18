@@ -1547,10 +1547,13 @@ int main(int argc, char *argv[])
     }
 
     std::unique_ptr<QQmlApplicationEngine> engineStorage;
+    GpuiCoreBridge* gpuiBridge = nullptr;
     if (gpuiCoreMode) {
         app.setQuitOnLastWindowClosed(false);
-        auto* bridge = new GpuiCoreBridge(&app);
-        QTimer::singleShot(0, bridge, &GpuiCoreBridge::start);
+        gpuiBridge = new GpuiCoreBridge(&app);
+#if !defined(Q_OS_WIN32) || !defined(LITE_NATIVE_HTTP)
+        QTimer::singleShot(0, gpuiBridge, &GpuiCoreBridge::start);
+#endif
     }
     else {
         engineStorage = std::make_unique<QQmlApplicationEngine>();
@@ -1641,7 +1644,11 @@ int main(int argc, char *argv[])
 
     } // Normal Qt/QML client startup; GPUI core never creates a QML engine.
 
+#if defined(Q_OS_WIN32) && defined(LITE_NATIVE_HTTP)
+    int err = gpuiCoreMode ? gpuiBridge->execNative() : app.exec();
+#else
     int err = app.exec();
+#endif
 
     // Give worker tasks time to properly exit. Fixes PendingQuitTask
     // sometimes freezing and blocking process exit.

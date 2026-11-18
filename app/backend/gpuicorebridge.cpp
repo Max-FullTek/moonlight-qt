@@ -228,6 +228,7 @@ GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent) {
 GpuiCoreBridge::~GpuiCoreBridge()
 {
     SessionApiRpc::broker().close();
+    if (m_NativeOwner) NvHTTP::closeNativeOwner();
     if (m_Reader.joinable()) {
 #ifdef Q_OS_WIN32
         const HANDLE reader = static_cast<HANDLE>(m_Reader.native_handle());
@@ -236,6 +237,16 @@ GpuiCoreBridge::~GpuiCoreBridge()
         m_Reader.join();
     }
 }
+
+#ifdef Q_OS_WIN32
+int GpuiCoreBridge::execNative()
+{
+    m_NativeOwner = true;
+    NvHTTP::enableNativeOwner();
+    start();
+    return WindowsWorkerDispatch::runOwnerLoop();
+}
+#endif
 
 void GpuiCoreBridge::postCompletion(std::function<void()> completion)
 {
@@ -501,7 +512,8 @@ void GpuiCoreBridge::shutdown() {
     if (m_ShuttingDown) return;
     m_ShuttingDown = true;
     SessionApiRpc::broker().close();
-    m_Manager->interruptPolling();
+    m_Manager->beginShutdown();
+    if (m_NativeOwner) NvHTTP::closeNativeOwner();
     if (m_Session) m_Session->interrupt();
     finishShutdown();
 }
@@ -510,7 +522,12 @@ void GpuiCoreBridge::finishShutdown()
 {
     // Host deletion must retire its tombstone and Session must be destroyed
     // before the owner loop stops dispatching completions.
-    if (m_ShuttingDown && !m_Session && !m_DeletingHost) QCoreApplication::quit();
+    if (m_ShuttingDown && !m_Session && !m_DeletingHost) {
+#ifdef Q_OS_WIN32
+        if (m_NativeOwner) { WindowsWorkerDispatch::exitOwnerLoop(); return; }
+#endif
+        QCoreApplication::quit();
+    }
 }
 
 void GpuiCoreBridge::finishSession(Session* session)
@@ -716,10 +733,10 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         QThreadPool::globalInstance()->start(QRunnable::create([this, address, httpsPort, certificate, uuid, useTrueUid] {
             NvHTTP http(address, httpsPort, certificate, useTrueUid, nullptr, uuid);
             const auto displays = QJsonArray::fromVariantList(http.getDisplays());
-            QMetaObject::invokeMethod(this, [this, uuid, displays] {
+            postCompletion([this, uuid, displays] {
                 m_AddPending = false;
                 send({{"event", "displays"}, {"host", uuid}, {"displays", displays}});
-            }, Qt::QueuedConnection);
+            });
         }));
         return;
     }
@@ -819,10 +836,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
     session->setCoreCommandHandler([this] { drainInput(); });
 #ifdef Q_OS_WIN32
     session->setLifecycleDispatcher([this](std::function<void()> completion) {
-        if (!m_InputWakeWindow->postLifecycle(std::move(completion))) {
-            QMetaObject::invokeMethod(this, [this] { m_InputWakeWindow->finishLifecycle(); },
-                                      Qt::QueuedConnection);
-        }
+        postCompletion(std::move(completion));
     });
 #endif
     m_Session = session;

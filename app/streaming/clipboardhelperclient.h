@@ -8,7 +8,11 @@
 #include <string>
 
 class NvComputer;
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+class WindowsClipboardProcess;
+#else
 class QProcess;
+#endif
 
 class ClipboardHelperClient : public QObject
 {
@@ -57,7 +61,11 @@ private:
     quint32 nextSequence();
 
     NvComputer* m_Computer;
+#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+    WindowsClipboardProcess* m_Process;
+#else
     QProcess* m_Process;
+#endif
     QString m_HelperPath;
     std::mutex m_InboundMutex;
     std::deque<std::string> m_InboundFrames;

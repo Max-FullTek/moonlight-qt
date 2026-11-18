@@ -25,7 +25,7 @@ win32:lite-native-worker-json {
     HEADERS += backend/workercommandrouting.h
 }
 
-# Transitional Windows Lite owner: native HTTP, existing Qt event dispatcher.
+# Transitional Windows Lite owner: native HTTP and Win32 GPUI event dispatcher.
 # The build entry prepares verified static libraries; never fetch from qmake.
 lite-native-http {
     !win32|!contains(QT_ARCH, x86_64): error("Native host HTTP requires Windows x64")
@@ -213,6 +213,7 @@ win32 {
     CONFIG += ffmpeg libplacebo
 }
 win32: SOURCES += backend/windowsworkerdispatch.cpp
+win32: SOURCES += streaming/windowsclipboardprocess.cpp
 win32:!winrt {
     DEFINES += HAVE_WINDOWS_RAW_TOUCHPAD HAVE_WINDOWS_PEN_INPUT HAVE_PHYSICAL_DS5_HAPTICS
     LIBS += -lhid

@@ -2768,7 +2768,7 @@ void Session::startRuntimeBitrateWorker()
         event.type = SDL_USEREVENT;
         event.user.code = SDL_CODE_RUNTIME_BITRATE_FINISHED;
         if (SDL_PushEvent(&event) != 1) {
-            QMetaObject::invokeMethod(this, &Session::finishRuntimeBitrateChange, Qt::QueuedConnection);
+            dispatchLifecycleCompletion([this] { finishRuntimeBitrateChange(); });
         }
     });
 }
@@ -3032,8 +3032,9 @@ void Session::handleSdlUserEvent(const SDL_UserEvent& event)
         if (m_CoreCommandHandler) {
             m_CoreCommandHandler();
         }
-        // The transition worker still uses Qt for queued notifications.
-        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        if (!usesGpuiControls()) {
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        }
         break;
     case SDL_CODE_FLUSH_CURSOR_VISIBILITY:
         if (m_InputHandler != nullptr) {
@@ -3749,8 +3750,10 @@ void Session::exec()
     // Pump the Qt event loop one last time before we create our SDL window
     // This is sometimes necessary for the QML code to process any signals
     // we've emitted from the async connection thread.
-    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    QCoreApplication::sendPostedEvents();
+    if (!usesGpuiControls()) {
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        QCoreApplication::sendPostedEvents();
+    }
 
     int x, y, width, height;
     getWindowDimensions(x, y, width, height);
