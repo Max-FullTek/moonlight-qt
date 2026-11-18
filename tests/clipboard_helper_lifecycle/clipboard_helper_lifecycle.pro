@@ -18,8 +18,12 @@ win32 {
     CONFIG += link_pkgconfig
     PKGCONFIG += sdl2
 }
-SOURCES += ../../app/backend/nvaddress.cpp
 win32:native-clipboard-process {
-    DEFINES += LITE_NATIVE_HTTP
-    SOURCES += ../../app/streaming/windowsclipboardprocess.cpp
+    JSON_SOURCE = $$(LITE_CLIPBOARD_JSON_SOURCE)
+    !exists("$$JSON_SOURCE/include/nlohmann/json.hpp"): error("Native clipboard JSON source is required")
+    INCLUDEPATH += "$$JSON_SOURCE/include"
+    DEFINES += LITE_NATIVE_HTTP LITE_NATIVE_WORKER_JSON
+    SOURCES += ../../app/streaming/windowsclipboardprocess.cpp \
+               ../../app/streaming/nativeclipboardipc.cpp
+    LIBS += crypt32.lib
 }

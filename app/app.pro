@@ -16,6 +16,12 @@ HEADERS += backend/nativepairing.h
 SOURCES += backend/nativeidentity.cpp
 HEADERS += backend/nativeidentity.h
 
+win32:lite-native-http:lite-native-worker-json {
+    SOURCES += streaming/nativeclipboardipc.cpp
+} else {
+    SOURCES += streaming/clipboardipc.cpp
+}
+
 win32:lite-native-worker-json {
     WORKER_JSON_SOURCE = $$(LITE_CLIPBOARD_JSON_SOURCE)
     !exists("$$WORKER_JSON_SOURCE/include/nlohmann/json.hpp"): error("Native worker JSON source is required")
@@ -296,7 +302,6 @@ SOURCES += \
     streaming/input/reltouch.cpp \
     streaming/session.cpp \
     streaming/clipboardhelperclient.cpp \
-    streaming/clipboardipc.cpp \
     streaming/clipboardpipelines.cpp \
     streaming/audio/audio.cpp \
     streaming/audio/audiopipeline.cpp \

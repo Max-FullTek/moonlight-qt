@@ -1,8 +1,7 @@
 #define SDL_MAIN_HANDLED
 #include "streaming/clipboardhelperclient.h"
 #include "streaming/clipboardipc.h"
-#include "backend/identitymanager.h"
-#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+#if defined(_WIN32) && defined(LITE_NATIVE_HTTP)
 #include "streaming/windowsclipboardprocess.h"
 #endif
 #include <QCoreApplication>
@@ -57,20 +56,6 @@ private:
     std::thread worker;
 };
 
-// The test exercises process supervision, never the user's paired identity or
-// a real streaming connection. Keep those external dependencies inert.
-IdentityManager* IdentityManager::get()
-{
-    return nullptr;
-}
-QByteArray IdentityManager::getCertificate()
-{
-    return QByteArray();
-}
-QByteArray IdentityManager::getPrivateKey()
-{
-    return QByteArray();
-}
 static std::vector<std::string> sentFrames;
 extern "C" int LiSendClipboardData(const void* data, int length)
 {
@@ -129,8 +114,8 @@ public:
         std::fprintf(stderr, "Starting lifecycle case: %s\n", qPrintable(mode));
         std::fflush(stderr);
         client.m_Enabled = true;
-#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
-        client.m_Process = new WindowsClipboardProcess;
+#if defined(_WIN32) && defined(LITE_NATIVE_HTTP)
+        client.m_Process = std::make_unique<WindowsClipboardProcess>();
         const auto oldMode = qgetenv("MOONLIGHT_CLIPBOARD_CLIENT_TEST_CHILD");
         qputenv("MOONLIGHT_CLIPBOARD_CLIENT_TEST_CHILD", mode.toUtf8());
         const bool started = client.m_Process->start(QCoreApplication::applicationFilePath().toStdWString());
@@ -139,7 +124,7 @@ public:
         client.m_LastPingTicks = client.m_LastResponseTicks = SDL_GetTicks();
         return started;
 #else
-        client.m_Process = new QProcess(&client);
+        client.m_Process = std::make_unique<QProcess>();
         client.m_Process->start(QCoreApplication::applicationFilePath(), { mode });
         std::fputs("Helper process launched; initializing timer\n", stderr);
         std::fflush(stderr);
@@ -157,23 +142,23 @@ public:
             }
         };
         {
-            ClipboardHelperClient client(nullptr);
             int notices = 0;
-            QObject::connect(&client, &ClipboardHelperClient::unsupportedFormat,
-                             [&] { ++notices; });
+            ClipboardHelperClient client({}, [&] { ++notices; });
             const auto unsupported = ClipboardIpc::encodeError(
                 0, QStringLiteral("unsupported-format"), QString());
-            client.processProtocolLine(unsupported);
+            client.processProtocolLine(unsupported.toStdString());
             check(notices == 0, "unconfigured helper cannot raise a format notice");
             client.m_HelperReady = true;
             client.processProtocolLine(ClipboardIpc::encodeError(
-                0, QStringLiteral("bad-message"), QString()));
-            client.processProtocolLine(unsupported);
+                0, QStringLiteral("bad-message"), QString()).toStdString());
+            client.processProtocolLine(unsupported.toStdString());
             check(notices == 1, "only unsupported format raises a format notice");
             check(client.m_HelperReady, "unsupported format does not reset the helper");
         }
         {
-            ClipboardHelperClient client(nullptr);
+            ClipboardHelperClient client([] {
+                return NativeClipboardIpc::Host{"localhost", 47984, "server", "client", "key"};
+            });
             // The receive buffer belongs to the producer and may be reused as
             // soon as handleIncomingFrame returns. Include NUL and non-UTF-8.
             std::vector<std::string> expected;
@@ -195,25 +180,20 @@ public:
             receiver.join();
             check(client.m_DroppedInboundFrames == 8, "bounded receive queue drops eight oldest frames");
             if (!start(client, "--reflect-frames")) return false;
-            client.m_HelperReady = true;
+            check(client.sendCurrentConfig(), "send helper host configuration");
             sentFrames.clear();
-            client.flushQueuedHostFrames();
             const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
             while (sentFrames.size() < expected.size() && std::chrono::steady_clock::now() < until) {
                 if (!client.m_Process) break;
-#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+                client.processPendingMessages();
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                client.flushProcessInput();
-#else
-                client.m_Process->waitForReadyRead(100);
-#endif
-                client.readHelperOutput();
             }
+            check(client.m_HelperReady, "helper acknowledges the matching host configuration");
             check(sentFrames == expected, "cross-thread frames preserve binary content and FIFO order through helper IPC");
             check(client.m_InboundFrames.empty() && client.m_DroppedInboundFrames == 0,
                   "flushing consumes queued frames and drop count");
         }
-#if defined(Q_OS_WIN) && defined(NDEBUG)
+#if defined(_WIN32) && defined(NDEBUG)
         {
             QTemporaryDir untrusted;
             check(untrusted.isValid(), "isolated untrusted helper directory");
@@ -227,10 +207,10 @@ public:
             fake.close();
             qputenv("MOONLIGHT_CLIPBOARD_HELPER", fakePath.toUtf8());
             check(QDir::setCurrent(untrusted.path()), "enter untrusted working directory");
-            ClipboardHelperClient client(nullptr);
+            ClipboardHelperClient client({});
             const QString expected = QDir(QCoreApplication::applicationDirPath())
                 .filePath("moonlight-clipboard-helper.exe");
-            const QString resolved = client.findHelperExecutable();
+            const QString resolved = QString::fromStdU16String(client.findHelperExecutable().u16string());
             check(resolved != fakePath, "release helper ignores environment and working directory");
             check(resolved == (QFileInfo(expected).isFile() ? expected : QString()),
                   "release helper uses bundled executable or disables clipboard");
@@ -240,10 +220,10 @@ public:
         }
 #endif
         {
-            ClipboardHelperClient client(nullptr);
+            ClipboardHelperClient client({});
             if (!start(client, "--invalid-output"))
                 return false;
-#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+#if defined(_WIN32) && defined(LITE_NATIVE_HTTP)
             check(client.m_Process->wait(3000), "fake helper exits");
 #else
             check(client.m_Process->waitForFinished(3000), "fake helper exits");
@@ -253,7 +233,7 @@ public:
                   "invalid trailing output schedules one restart without null dereference");
         }
         {
-            ClipboardHelperClient client(nullptr);
+            ClipboardHelperClient client({});
             if (!start(client, "--hung"))
                 return false;
             client.m_LastResponseTicks = SDL_GetTicks() - 30001;
@@ -262,36 +242,36 @@ public:
                   "living but unresponsive helper restarts");
         }
         {
-            ClipboardHelperClient client(nullptr);
+            ClipboardHelperClient client({});
             if (!start(client, "--hung"))
                 return false;
             client.m_ConfigSentTicks = SDL_GetTicks() - 30001;
-            client.processProtocolLine(ClipboardIpc::encodePong(1));
+            client.processProtocolLine(ClipboardIpc::encodePong(1).toStdString());
             client.processPendingMessages();
             check(client.m_Process == nullptr, "pong cannot hide missing READY timeout");
         }
         {
-            ClipboardHelperClient client(nullptr);
+            ClipboardHelperClient client({});
             if (!start(client, "--hung"))
                 return false;
-#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+#if defined(_WIN32) && defined(LITE_NATIVE_HTTP)
             client.m_Process->write(std::string(ClipboardHelperClient::MAX_PENDING_STDIN_BYTES, 'x'));
 #else
             client.m_Process->write(
                 QByteArray(ClipboardHelperClient::MAX_PENDING_STDIN_BYTES, 'x'));
 #endif
-            check(!client.writeLine(QByteArray(65536, 'y')) && client.m_Process == nullptr,
+            check(!client.writeLine(std::string(65536, 'y')) && client.m_Process == nullptr,
                   "process write backlog counts toward limit");
         }
         {
-            ClipboardHelperClient client(nullptr);
+            ClipboardHelperClient client({});
             if (!start(client, "--hung"))
                 return false;
-            const auto frame = ClipboardIpc::encodeLocalFrame(1, QByteArray(60000, 'x'));
+            const auto frame = ClipboardIpc::encodeLocalFrame(1, QByteArray(60000, 'x')).toStdString();
             for (int i = 0; i < 20; ++i)
                 client.m_StdoutBuffer += frame + '\n';
             client.readHelperOutput();
-            check(client.m_Process != nullptr && client.m_StdoutBuffer.isEmpty(),
+            check(client.m_Process != nullptr && client.m_StdoutBuffer.empty(),
                   "legal aggregated stdout does not restart helper");
         }
         return ok;
@@ -307,8 +287,19 @@ int main(int argc, char** argv)
             QString error;
             if (!ClipboardIpc::decodeLine(QByteArray::fromStdString(line), message, error)) return 2;
             if (message.type == ClipboardIpc::MessageType::Stop) break;
-            if (message.type == ClipboardIpc::MessageType::HostFrame) {
-                const auto result = ClipboardIpc::encodeLocalFrame(message.sequence, message.frame);
+            QByteArray result;
+            if (message.type == ClipboardIpc::MessageType::Configure) {
+                const auto& host = message.config;
+                if (host.address != QStringLiteral("localhost") || host.httpsPort != 47984 ||
+                    host.serverCertPem != "server" || host.clientCertPem != "client" ||
+                    host.clientKeyPem != "key") {
+                    return 3;
+                }
+                result = ClipboardIpc::encodeReady(message.sequence);
+            } else if (message.type == ClipboardIpc::MessageType::HostFrame) {
+                result = ClipboardIpc::encodeLocalFrame(message.sequence, message.frame);
+            }
+            if (!result.isEmpty()) {
                 std::fwrite(result.constData(), 1, static_cast<size_t>(result.size()), stdout);
                 std::fputc('\n', stdout);
                 std::fflush(stdout);

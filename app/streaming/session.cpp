@@ -3646,8 +3646,19 @@ void Session::start()
     // thread can possibly invoke clClipboardData(). Host frames are queued by
     // ClipboardHelperClient and flushed from the SDL loop.
     if (m_ClipboardHelper == nullptr) {
-        m_ClipboardHelper = new ClipboardHelperClient(m_Computer, this);
-        connect(m_ClipboardHelper, &ClipboardHelperClient::unsupportedFormat, this, [this] {
+        m_ClipboardHelper = new ClipboardHelperClient([this] {
+            NativeClipboardIpc::Host config;
+            if (m_Computer != nullptr) {
+                config.address = m_Computer->activeAddress.address().toStdString();
+                config.httpsPort = m_Computer->activeHttpsPort;
+                config.serverCertPem = m_Computer->serverCert.toPem().toStdString();
+            }
+            if (auto* identity = IdentityManager::get()) {
+                config.clientCertPem = identity->getCertificate().toStdString();
+                config.clientKeyPem = identity->getPrivateKey().toStdString();
+            }
+            return config;
+        }, [this] {
             showStreamingToast(tr("Unsupported clipboard format"));
         });
         m_ClipboardHelper->start();

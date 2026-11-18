@@ -1,26 +1,28 @@
 #pragma once
 
-#include <QByteArray>
-#include <QObject>
-#include <QString>
+#include "nativeclipboardipc.h"
+
+#include <filesystem>
+#include <functional>
+#include <memory>
 #include <deque>
 #include <mutex>
 #include <string>
 
-class NvComputer;
-#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
+#if defined(_WIN32) && defined(LITE_NATIVE_HTTP)
 class WindowsClipboardProcess;
 #else
 class QProcess;
 #endif
 
-class ClipboardHelperClient : public QObject
+class ClipboardHelperClient
 {
-    Q_OBJECT
-
 public:
-    explicit ClipboardHelperClient(NvComputer* computer, QObject* parent = nullptr);
-    ~ClipboardHelperClient() override;
+    using HostConfigProvider = std::function<NativeClipboardIpc::Host()>;
+
+    explicit ClipboardHelperClient(HostConfigProvider hostConfig,
+                                   std::function<void()> unsupportedFormat = {});
+    ~ClipboardHelperClient();
 
     void start();
     void stop();
@@ -34,17 +36,14 @@ public:
 
     bool isRunning() const;
 
-signals:
-    void unsupportedFormat();
-
 private:
     friend class ClipboardHelperClientTest;
     static constexpr int MAX_QUEUED_HOST_FRAMES = 32;
     static constexpr int MAX_PENDING_STDIN_BYTES = 4 * 1024 * 1024;
     static constexpr int MAX_RESTART_ATTEMPTS = 3;
-    static constexpr quint32 RESTART_DELAY_MS = 1000;
+    static constexpr uint32_t RESTART_DELAY_MS = 1000;
 
-    QString findHelperExecutable() const;
+    std::filesystem::path findHelperExecutable() const;
     bool sendCurrentConfig();
     bool startProcess();
     void scheduleRestart(const char* reason);
@@ -52,36 +51,37 @@ private:
     void flushQueuedHostFrames();
     void readHelperOutput();
     void readHelperErrors();
-    void logHelperStderrLine(const QByteArray& line);
-    void processProtocolLine(const QByteArray& line);
-    void handleProtocolError(const QString& error);
+    void logHelperStderrLine(std::string_view line);
+    void processProtocolLine(std::string_view line);
+    void handleProtocolError(const std::string& error);
     void restartHelper(const char* reason);
     bool flushProcessInput();
-    bool writeLine(const QByteArray& line);
-    quint32 nextSequence();
+    bool writeLine(std::string line);
+    uint32_t nextSequence();
 
-    NvComputer* m_Computer;
-#if defined(Q_OS_WIN) && defined(LITE_NATIVE_HTTP)
-    WindowsClipboardProcess* m_Process;
+    HostConfigProvider m_HostConfig;
+    std::function<void()> m_UnsupportedFormat;
+#if defined(_WIN32) && defined(LITE_NATIVE_HTTP)
+    std::unique_ptr<WindowsClipboardProcess> m_Process;
 #else
-    QProcess* m_Process;
+    std::unique_ptr<QProcess> m_Process;
 #endif
-    QString m_HelperPath;
+    std::filesystem::path m_HelperPath;
     std::mutex m_InboundMutex;
     std::deque<std::string> m_InboundFrames;
-    QByteArray m_StdoutBuffer;
-    QByteArray m_StderrBuffer;
-    QByteArray m_StdinBuffer;
+    std::string m_StdoutBuffer;
+    std::string m_StderrBuffer;
+    std::string m_StdinBuffer;
     bool m_Enabled;
     bool m_Disabled;
     bool m_StopRequested;
     bool m_HelperReady;
-    quint32 m_ConfigSequence;
-    quint32 m_NextSequence;
-    quint32 m_NextRestartTicks;
-    quint32 m_LastResponseTicks = 0;
-    quint32 m_LastPingTicks = 0;
-    quint32 m_ConfigSentTicks = 0;
+    uint32_t m_ConfigSequence;
+    uint32_t m_NextSequence;
+    uint32_t m_NextRestartTicks;
+    uint32_t m_LastResponseTicks = 0;
+    uint32_t m_LastPingTicks = 0;
+    uint32_t m_ConfigSentTicks = 0;
     int m_RestartAttempts;
     int m_DroppedInboundFrames;
 };
