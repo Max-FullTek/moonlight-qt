@@ -69,6 +69,16 @@ int main(int argc, char* argv[])
         }
         return result;
     };
+    for (const auto* spelling : {L"127.0.0.1", L"255.255.255.255", L"127.1", L"0177.0.0.1", L"0x7f000001",
+                                L"::1", L"2001:db8::2", L"::ffff:192.0.2.1",
+                                L"fe80::1%12", L"fe80::1%ethernet",
+                                L"localhost", L"2001:db8:::2", L"192.0.2.256"}) {
+        const auto qt = addressBytes(QHostAddress(QString::fromWCharArray(spelling)));
+        const auto native = WindowsReachability::parseLiteral(spelling);
+        ok &= require(native.size == qt.size && native.bytes == qt.bytes,
+                      QStringLiteral("Winsock literal parser matches Qt for %1")
+                          .arg(QString::fromWCharArray(spelling)), err);
+    }
     const auto addresses = QNetworkInterface::allInterfaces();
     QList<QHostAddress> checked;
     for (const auto& nic : addresses) {

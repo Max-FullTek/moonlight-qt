@@ -1,11 +1,11 @@
-QT += core gui network svg
+QT += core gui svg
 lite-gpui-worker {
     !win32|!lite-native-http|!lite-native-worker-json: error("The Lite GPUI worker requires the native Windows HTTP and profile backends")
     DEFINES += LITE_GPUI_WORKER
     SOURCES += backend/hostcertificate.cpp
     HEADERS += backend/hostcertificate.h
 } else {
-    QT += quick quickcontrols2 gui-private
+    QT += network quick quickcontrols2 gui-private
 }
 win32:lite-no-microphone: DEFINES += LITE_NO_MICROPHONE
 !config_SL:!contains(DEFINES, LITE_NO_MICROPHONE): QT += multimedia
@@ -51,8 +51,11 @@ lite-native-http {
     NATIVE_HTTP_BUILD = $$(LITE_NATIVE_HTTP_BUILD)
     isEmpty(NATIVE_HTTP_BUILD): error("Set LITE_NATIVE_HTTP_BUILD to the prepared native HTTP build")
     DEFINES += LITE_NATIVE_HTTP
-    SOURCES += backend/qtnativehttptransport.cpp
-    HEADERS += backend/nativehttptransport.h backend/qtnativehttptransport.h backend/qtnativehttppolicy.h
+    HEADERS += backend/nativehttptransport.h backend/qtnativehttppolicy.h
+    !lite-gpui-worker {
+        SOURCES += backend/qtnativehttptransport.cpp
+        HEADERS += backend/qtnativehttptransport.h
+    }
     INCLUDEPATH += $$PWD/../build/curl-capability-source/curl-8.23.0/include
     CONFIG(release, debug|release): NATIVE_HTTP_CONFIG = Release
     else: NATIVE_HTTP_CONFIG = Debug
@@ -115,7 +118,7 @@ win32 {
     }
 
     INCLUDEPATH += $$PWD/../libs/windows/include
-    LIBS += ws2_32.lib iphlpapi.lib winmm.lib dxva2.lib ole32.lib uuid.lib gdi32.lib user32.lib d3d9.lib dwmapi.lib dbghelp.lib advapi32.lib
+    LIBS += ws2_32.lib iphlpapi.lib ntdll.lib winmm.lib dxva2.lib ole32.lib uuid.lib gdi32.lib user32.lib d3d9.lib dwmapi.lib dbghelp.lib advapi32.lib
 }
 win32 {
     SOURCES += backend/windowsreachability.cpp
@@ -285,7 +288,6 @@ SOURCES += \
     backend/gpuicorebridge.cpp \
     backend/nvapp.cpp \
     main.cpp \
-    backend/computerseeker.cpp \
     backend/identitymanager.cpp \
     backend/nvcomputer.cpp \
     backend/nvhttp.cpp \
@@ -340,10 +342,10 @@ HEADERS += \
     settings/devicelocalsettings.h \
     streaming/video/videoenhancement.h \
     utils.h \
-    backend/computerseeker.h \
     backend/identitymanager.h \
     backend/nvcomputer.h \
     backend/reachabilitypolicy.h \
+    backend/hostrequesterror.h \
     backend/nvhttp.h \
     backend/nvpairingmanager.h \
     backend/computermanager.h \
@@ -682,7 +684,8 @@ require-qt-sdl-wayland-bridge:!qt-sdl-wayland-bridge {
 RESOURCES += resources.qrc
 !lite-gpui-worker {
     RESOURCES += qml.qrc
-    SOURCES += cli/pair.cpp \
+    SOURCES += backend/computerseeker.cpp \
+               cli/pair.cpp \
                cli/commandlineparser.cpp \
                cli/listapps.cpp \
                cli/quitstream.cpp \
@@ -692,7 +695,8 @@ RESOURCES += resources.qrc
                gui/sdlgamepadkeynavigation.cpp \
                gui/windowplacement.cpp \
                gui/windowswindowchrome.cpp
-    HEADERS += cli/pair.h \
+    HEADERS += backend/computerseeker.h \
+               cli/pair.h \
                cli/commandlineparser.h \
                cli/listapps.h \
                cli/quitstream.h \
@@ -753,12 +757,14 @@ else:unix: LIBS += -L$$OUT_PWD/../moonlight-common-c/ -lmoonlight-common-c
 INCLUDEPATH += $$PWD/../moonlight-common-c/moonlight-common-c/src
 DEPENDPATH += $$PWD/../moonlight-common-c/moonlight-common-c/src
 
-win32:CONFIG(release, debug|release): LIBS += -L$$OUT_PWD/../qmdnsengine/release/ -lqmdnsengine
-else:win32:CONFIG(debug, debug|release): LIBS += -L$$OUT_PWD/../qmdnsengine/debug/ -lqmdnsengine
-else:unix: LIBS += -L$$OUT_PWD/../qmdnsengine/ -lqmdnsengine
+!lite-gpui-worker {
+    win32:CONFIG(release, debug|release): LIBS += -L$$OUT_PWD/../qmdnsengine/release/ -lqmdnsengine
+    else:win32:CONFIG(debug, debug|release): LIBS += -L$$OUT_PWD/../qmdnsengine/debug/ -lqmdnsengine
+    else:unix: LIBS += -L$$OUT_PWD/../qmdnsengine/ -lqmdnsengine
 
-INCLUDEPATH += $$PWD/../qmdnsengine/qmdnsengine/src/include $$PWD/../qmdnsengine
-DEPENDPATH += $$PWD/../qmdnsengine/qmdnsengine/src/include $$PWD/../qmdnsengine
+    INCLUDEPATH += $$PWD/../qmdnsengine/qmdnsengine/src/include $$PWD/../qmdnsengine
+    DEPENDPATH += $$PWD/../qmdnsengine/qmdnsengine/src/include $$PWD/../qmdnsengine
+}
 
 win32:CONFIG(release, debug|release): LIBS += -L$$OUT_PWD/../h264bitstream/release/ -lh264bitstream
 else:win32:CONFIG(debug, debug|release): LIBS += -L$$OUT_PWD/../h264bitstream/debug/ -lh264bitstream

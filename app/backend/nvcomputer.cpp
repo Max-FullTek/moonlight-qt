@@ -7,14 +7,18 @@
 #include <QCoreApplication>
 #endif
 
+#ifndef LITE_GPUI_WORKER
 #include <QUdpSocket>
 #include <QHostInfo>
 #include <QNetworkInterface>
+#endif
 #include <QUrl>
 #ifdef Q_OS_WIN
 #include "windowsreachability.h"
 #endif
+#ifndef LITE_GPUI_WORKER
 #include <QNetworkProxy>
+#endif
 #include <QJsonArray>
 #include <climits>
 
@@ -76,6 +80,7 @@ NvComputer::NvComputer(QSettings& settings)
     this->activeHttpsPort = 0;
 }
 
+#ifndef LITE_GPUI_WORKER
 void NvComputer::setRemoteAddress(QHostAddress address)
 {
     QWriteLocker lock(&this->lock);
@@ -84,6 +89,7 @@ void NvComputer::setRemoteAddress(QHostAddress address)
 
     this->remoteAddress = NvAddress(address, this->externalPort);
 }
+#endif
 
 void NvComputer::serialize(QSettings& settings, bool serializeApps) const
 {
@@ -264,6 +270,7 @@ NvComputer::NvComputer(NvHTTP& http,const QJsonObject& info)
     isSupportedServerVersion=CompatFetcher::isGfeVersionSupported(gfeVersion);
 }
 
+#ifndef LITE_GPUI_WORKER
 bool NvComputer::wake() const
 {
     QByteArray wolPayload;
@@ -423,6 +430,7 @@ static bool isOnLink(const QHostAddress& local, const QHostAddress& peer, int pr
     }
     return false;
 }
+#endif
 
 NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
 {
@@ -456,7 +464,6 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
     };
 
 #ifdef Q_OS_WIN
-    const bool useNativeReachability = NvHTTP::usesRustSessionApi();
     const auto cacheNativeRoute = [&cacheResult](ReachabilityPolicy::Route route) {
         switch (route) {
         case ReachabilityPolicy::Route::Vpn: return cacheResult(ReachabilityType::RI_VPN);
@@ -464,7 +471,22 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
         default: return cacheResult(ReachabilityType::RI_UNKNOWN);
         }
     };
-    if (useNativeReachability) {
+#ifdef LITE_GPUI_WORKER
+    const auto host = copyOfActiveAddress.address().trimmed();
+    const auto literal = WindowsReachability::parseLiteral(host.toStdWString());
+    if (literal.size != 0) {
+        const auto separator = literal.size == 16 ? host.lastIndexOf(u'%') : -1;
+        const auto scopeName = separator >= 0 ? host.mid(separator + 1) : QString{};
+        bool numeric = false;
+        const auto number = scopeName.toUInt(&numeric);
+        const auto scope = numeric ? number : WindowsReachability::interfaceIndex(scopeName.toStdWString().c_str());
+        return cacheNativeRoute(WindowsReachability::probeAddress(literal, copyOfActiveAddress.port(), scope));
+    }
+    const auto ace = QUrl::toAce(host);
+    const std::wstring hostname(ace.begin(), ace.end());
+    return cacheNativeRoute(WindowsReachability::probeHostname(hostname.c_str(), copyOfActiveAddress.port()));
+#else
+    if (NvHTTP::usesRustSessionApi()) {
         const QHostAddress literal(copyOfActiveAddress.address());
         WindowsReachability::Address address;
         if (literal.protocol() == QAbstractSocket::IPv4Protocol) {
@@ -488,7 +510,9 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
         return cacheNativeRoute(WindowsReachability::probeHostname(host.c_str(), copyOfActiveAddress.port()));
     }
 #endif
+#endif
 
+#ifndef LITE_GPUI_WORKER
     QTcpSocket s;
     s.setProxy(QNetworkProxy::NoProxy);
     s.connectToHost(copyOfActiveAddress.address(), copyOfActiveAddress.port());
@@ -544,6 +568,7 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
         qWarning() << "Unable to check for reachability within 3 seconds";
         return cacheResult(ReachabilityType::RI_UNKNOWN);
     }
+#endif
 }
 
 bool NvComputer::updateAppList(QVector<NvApp> newAppList) {

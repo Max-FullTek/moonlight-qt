@@ -3,6 +3,9 @@
 #include "nvcomputer.h"
 #include "nvhttp.h"
 #include "nvpairingmanager.h"
+#ifdef LITE_GPUI_WORKER
+#include "windowsreachability.h"
+#endif
 #ifdef LITE_NATIVE_WORKER_JSON
 #include "hostprofile.h"
 #endif
@@ -174,7 +177,9 @@ ComputerManager::ComputerManager(StreamingPreferences* prefs, bool externalPolli
       m_ExternalPolling(externalPolling),
       m_ProfileDirectory(std::move(profileDirectory)),
       m_PollingRef(0),
+#ifndef LITE_GPUI_WORKER
       m_MdnsBrowser(nullptr),
+#endif
       m_CompatFetcher(nullptr),
       m_NeedsDelayedFlush(false)
 {
@@ -255,6 +260,7 @@ ComputerManager::~ComputerManager()
 
     QWriteLocker lock(&m_Lock);
 
+#ifndef LITE_GPUI_WORKER
     // Delete machines that haven't been resolved yet
     while (!m_PendingResolution.isEmpty()) {
         MdnsPendingComputer* computer = m_PendingResolution.first();
@@ -265,6 +271,7 @@ ComputerManager::~ComputerManager()
     // Delete the browser to stop discovery
     delete m_MdnsBrowser;
     m_MdnsBrowser = nullptr;
+#endif
 
     // Interrupt polling
     for (ComputerPollingEntry* entry : std::as_const(m_PollEntries)) {
@@ -377,6 +384,7 @@ void ComputerManager::saveHosts()
     m_DelayedFlushCondition.notify_one();
 }
 
+#ifndef LITE_GPUI_WORKER
 QHostAddress ComputerManager::getBestGlobalAddressV6(QVector<QHostAddress> &addresses)
 {
     for (const QHostAddress& address : addresses) {
@@ -412,6 +420,7 @@ QHostAddress ComputerManager::getBestGlobalAddressV6(QVector<QHostAddress> &addr
 
     return QHostAddress();
 }
+#endif
 
 void ComputerManager::startPolling()
 {
@@ -421,6 +430,7 @@ void ComputerManager::startPolling()
         return;
     }
 
+#ifndef LITE_GPUI_WORKER
     if (m_Prefs->enableMdns) {
         // Start an MDNS query for GameStream hosts
         m_MdnsServer.reset(new QMdnsEngine::Server());
@@ -438,6 +448,7 @@ void ComputerManager::startPolling()
     else {
         qWarning() << "mDNS is disabled by user preference";
     }
+#endif
 
     // Start polling threads for each known host
     QMapIterator<QString, NvComputer*> i(m_KnownHosts);
@@ -475,6 +486,7 @@ void ComputerManager::startPollingComputer(NvComputer* computer)
     }
 }
 
+#ifndef LITE_GPUI_WORKER
 void ComputerManager::handleMdnsServiceResolved(MdnsPendingComputer* computer,
                                                 QVector<QHostAddress>& addresses)
 {
@@ -516,6 +528,7 @@ void ComputerManager::handleMdnsServiceResolved(MdnsPendingComputer* computer,
     m_PendingResolution.removeOne(computer);
     computer->deleteLater();
 }
+#endif
 
 void ComputerManager::saveHost(NvComputer *computer)
 {
@@ -823,6 +836,7 @@ void ComputerManager::stopPollingAsync()
         return;
     }
 
+#ifndef LITE_GPUI_WORKER
     // Delete machines that haven't been resolved yet
     while (!m_PendingResolution.isEmpty()) {
         MdnsPendingComputer* computer = m_PendingResolution.first();
@@ -834,6 +848,7 @@ void ComputerManager::stopPollingAsync()
     delete m_MdnsBrowser;
     m_MdnsBrowser = nullptr;
     m_MdnsServer.reset();
+#endif
 
     // Interrupt all threads, but don't wait for them to terminate
     for (ComputerPollingEntry* entry : std::as_const(m_PollEntries)) {
@@ -848,7 +863,11 @@ void ComputerManager::addNewHostManually(QString address)
         // If there wasn't a port specified, use the default
         addNewHost(NvAddress(url.host(), url.port(DEFAULT_HTTP_PORT)), false);
     }
+#ifdef LITE_GPUI_WORKER
+    else if (WindowsReachability::parseLiteral(address.trimmed().toStdWString()).size == 16) {
+#else
     else if (QHostAddress(address).protocol() == QAbstractSocket::IPv6Protocol) {
+#endif
         // The user specified an IPv6 literal without URL escaping, so use the default port
         addNewHost(NvAddress(address, DEFAULT_HTTP_PORT), false);
     }
@@ -906,7 +925,7 @@ private:
             try {
                 serverInfo = http.getServerInfo(NvHTTP::NVLL_VERBOSE);
             } catch (const QtNetworkReplyException& e) {
-                if (e.getError() == QNetworkReply::ServiceUnavailableError) {
+                if (e.getError() == HostRequestError::ServiceUnavailableError) {
                     qWarning() << "Retrying request in 5 seconds after ServiceUnavailableError";
                     if (!m_ComputerManager->waitBeforeAddRetry()) return QString();
                     serverInfo = http.getServerInfo(NvHTTP::NVLL_VERBOSE);
@@ -1010,19 +1029,15 @@ private:
             }
 
             if (!m_MdnsIpv6Address.isNull()) {
+#ifndef LITE_GPUI_WORKER
                 Q_ASSERT(QHostAddress(m_MdnsIpv6Address.address()).protocol() == QAbstractSocket::IPv6Protocol);
+#endif
                 newComputer->ipv6Address = m_MdnsIpv6Address;
             }
         }
         else {
             newComputer->manualAddress = m_Address;
         }
-
-        QHostAddress hostAddress(m_Address.address());
-        bool addressIsSiteLocalV4 =
-                hostAddress.isInSubnet(QHostAddress("10.0.0.0"), 8) ||
-                hostAddress.isInSubnet(QHostAddress("172.16.0.0"), 12) ||
-                hostAddress.isInSubnet(QHostAddress("192.168.0.0"), 16);
 
         {
             // Check if this PC already exists using opportunistic read lock

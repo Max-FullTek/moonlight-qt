@@ -9,21 +9,29 @@
 #include "clienthostname.h"
 #include <QDebug>
 #include <QUuid>
+#ifndef LITE_GPUI_WORKER
 #include <QtNetwork/QNetworkReply>
+#endif
 #include <QEventLoop>
 #include <QTimer>
 #include <QXmlStreamReader>
+#ifndef LITE_GPUI_WORKER
 #include <QSslKey>
+#endif
 #include <QImageReader>
 #include <QtEndian>
+#ifndef LITE_GPUI_WORKER
 #include <QNetworkProxy>
+#endif
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <memory>
 #include <QBuffer>
 #ifdef LITE_NATIVE_HTTP
+#ifndef LITE_GPUI_WORKER
 #include "qtnativehttptransport.h"
+#endif
 #include "qtnativehttppolicy.h"
 namespace {
 std::unique_ptr<NativeHttp::RequestGroup> s_NativeRequests;
@@ -57,8 +65,8 @@ QJsonObject NvHTTP::rustSessionCall(QJsonObject request,unsigned timeoutMs) {
     std::string reply;
     try { reply=SessionApiRpc::broker().call(QJsonDocument(QJsonObject{{"context",context},{"request",request}})
         .toJson(QJsonDocument::Compact).toStdString(),timeoutMs+1000); }
-    catch (const SessionApiRpc::Timeout&) { throw QtNetworkReplyException(QNetworkReply::TimeoutError,tr("Host control request timed out.")); }
-    catch (const std::exception&) { throw QtNetworkReplyException(QNetworkReply::OperationCanceledError,tr("Host control request cancelled or disconnected.")); }
+    catch (const SessionApiRpc::Timeout&) { throw QtNetworkReplyException(HostRequestError::TimeoutError,tr("Host control request timed out.")); }
+    catch (const std::exception&) { throw QtNetworkReplyException(HostRequestError::OperationCanceledError,tr("Host control request cancelled or disconnected.")); }
     const auto result=QJsonDocument::fromJson(QByteArray::fromStdString(reply)).object();
     if (result["ok"].toBool() && result["value"].isObject()) return result["value"].toObject();
     const auto kind=result["kind"].toString();
@@ -69,7 +77,7 @@ QJsonObject NvHTTP::rustSessionCall(QJsonObject request,unsigned timeoutMs) {
         throw GfeHttpResponseException(code,message);
     }
     if (kind=="http") throw GfeHttpResponseException(code,tr("Host control HTTP request failed."));
-    throw QtNetworkReplyException(kind=="timeout"?QNetworkReply::TimeoutError:QNetworkReply::UnknownNetworkError,
+    throw QtNetworkReplyException(kind=="timeout"?HostRequestError::TimeoutError:HostRequestError::UnknownNetworkError,
         kind=="timeout"?tr("Host control request timed out."):tr("Host control request failed."));
 }
 QJsonObject NvHTTP::sessionServerInfo() {
@@ -698,7 +706,7 @@ UsbForwarding::Capability NvHTTP::getUsbForwardingCapability()
     // A normally trusted certificate may not emit sslErrors at all. Require
     // the paired leaf certificate even on that path before accepting credentials.
     if (!reply.paired) {
-        throw QtNetworkReplyException(QNetworkReply::SslHandshakeFailedError,
+        throw QtNetworkReplyException(HostRequestError::SslHandshakeFailedError,
                                       "USB forwarding host certificate mismatch");
     }
     if (reply.status != 200) {
@@ -839,12 +847,16 @@ NvHTTP::request(QUrl url, QByteArray body, bool post, bool json,
         qInfo() << "Executing native request:" << url.adjusted(QUrl::RemoveQuery | QUrl::RemoveUserInfo | QUrl::RemoveFragment).toString();
     }
     if (s_NativeRequests) native.cancellation = s_NativeRequests->acquire();
+#ifdef LITE_GPUI_WORKER
+    auto response = NativeHttp::perform(native);
+#else
     auto response = s_NativeRequests ? NativeHttp::perform(native) : NativeHttp::performWithQtEvents(native);
+#endif
     if (response.error == NativeHttp::Error::ResponseTooLarge) {
         throw GfeHttpResponseException(400, "USB capability response too large");
     }
-    const auto error = NativeHttp::qtNetworkError(response);
-    if (error != QNetworkReply::NoError) {
+    const auto error = NativeHttp::requestError(response);
+    if (error != HostRequestError::NoError) {
         throw QtNetworkReplyException(error, NativeHttp::qtErrorText(response));
     }
     if (response.httpStatus >= 300 && response.httpStatus < 400) {

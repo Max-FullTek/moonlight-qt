@@ -10,7 +10,9 @@
 #include <QDir>
 #include <QMutex>
 #include <QtDebug>
+#ifndef LITE_GPUI_WORKER
 #include <QNetworkProxyFactory>
+#endif
 #include <QPalette>
 #include <QFont>
 #include <QCursor>
@@ -1074,12 +1076,14 @@ int main(int argc, char *argv[])
     qputenv("MTL_SHADER_VALIDATION", "1");
 #endif
 
+#ifndef LITE_GPUI_WORKER
     // We don't want system proxies to apply to us
     QNetworkProxyFactory::setUseSystemConfiguration(false);
 
     // Clear any default application proxy
     QNetworkProxy noProxy(QNetworkProxy::NoProxy);
     QNetworkProxy::setApplicationProxy(noProxy);
+#endif
 
     // Register custom metatypes for use in signals
     qRegisterMetaType<NvApp>("NvApp");

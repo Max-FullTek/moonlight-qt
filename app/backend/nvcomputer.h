@@ -46,14 +46,18 @@ public:
 
     explicit NvComputer(QSettings& settings);
 
+#ifndef LITE_GPUI_WORKER
     void
     setRemoteAddress(QHostAddress);
+#endif
 
     bool
     update(const NvComputer& that);
 
+#ifndef LITE_GPUI_WORKER
     bool
     wake() const;
+#endif
 
     enum ReachabilityType
     {

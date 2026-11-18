@@ -4,11 +4,13 @@
 #include "settings/streamingpreferences.h"
 #include "settings/compatfetcher.h"
 
+#ifndef LITE_GPUI_WORKER
 #include <qmdnsengine/server.h>
 #include <qmdnsengine/cache.h>
 #include <qmdnsengine/browser.h>
 #include <qmdnsengine/service.h>
 #include <qmdnsengine/resolver.h>
+#endif
 
 #include <QThread>
 #include <QReadWriteLock>
@@ -25,6 +27,7 @@
 
 class ComputerManager;
 
+#ifndef LITE_GPUI_WORKER
 class MdnsPendingComputer : public QObject
 {
     Q_OBJECT
@@ -121,6 +124,7 @@ private:
     QVector<QHostAddress> m_Addresses;
     int m_Retries = 10;
 };
+#endif
 
 class ComputerPollingEntry
 {
@@ -257,7 +261,9 @@ private slots:
 
     void handleComputerStateChanged(NvComputer* computer);
 
+#ifndef LITE_GPUI_WORKER
     void handleMdnsServiceResolved(MdnsPendingComputer* computer, QVector<QHostAddress>& addresses);
+#endif
 
 private:
     void saveHosts();
@@ -270,7 +276,9 @@ private:
 
     void saveHost(NvComputer* computer);
 
+#ifndef LITE_GPUI_WORKER
     QHostAddress getBestGlobalAddressV6(QVector<QHostAddress>& addresses);
+#endif
 
     void startPollingComputer(NvComputer* computer);
 
@@ -287,9 +295,11 @@ private:
     QSet<NvComputer*> m_DeletingHosts; // Main-thread tombstones for queued polling events
     QMap<QString, ComputerPollingEntry*> m_PollEntries;
     QHash<QString, NvComputer> m_LastSerializedHosts; // Protected by m_DelayedFlushMutex
+#ifndef LITE_GPUI_WORKER
     QSharedPointer<QMdnsEngine::Server> m_MdnsServer;
     QMdnsEngine::Browser* m_MdnsBrowser;
     QVector<MdnsPendingComputer*> m_PendingResolution;
+#endif
     CompatFetcher m_CompatFetcher;
     std::thread m_DelayedFlushThread;
     std::mutex m_DelayedFlushMutex; // Lock ordering: Must never be acquired while holding NvComputer lock

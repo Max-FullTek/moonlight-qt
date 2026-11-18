@@ -1,14 +1,15 @@
 #pragma once
 #include "nativehttptransport.h"
-#include <QNetworkReply>
+#include "hostrequesterror.h"
+#include <QString>
 #include <curl/curl.h>
 
 // Transitional exception vocabulary for NvHTTP callers. No network I/O here.
 // Preserve Qt's HTTP status categories, including ComputerManager's 503 retry.
 namespace NativeHttp {
-inline QNetworkReply::NetworkError qtNetworkError(const Response& response)
+inline HostRequestError requestError(const Response& response)
 {
-    using Q = QNetworkReply;
+    using Q = HostRequestError;
     switch (response.error) {
     case Error::Timeout:
     case Error::Cancelled: return Q::TimeoutError;
@@ -39,7 +40,7 @@ inline QNetworkReply::NetworkError qtNetworkError(const Response& response)
     }
     if (response.httpStatus < 400) return Q::NoError;
     // Keep this in step with Qt's statusCodeFromHttp() while callers still
-    // expose QNetworkReply::NetworkError. Never turn local TLS errors into 401.
+    // display the established error numbers. Never turn local TLS errors into 401.
     switch (response.httpStatus) {
     case 400:
     case 418: return Q::ProtocolInvalidOperationError;

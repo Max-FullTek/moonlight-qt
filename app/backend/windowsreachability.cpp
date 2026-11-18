@@ -5,6 +5,8 @@
 #include <windows.h>
 #include <iphlpapi.h>
 #include <ws2tcpip.h>
+#include <winternl.h>
+#include <ip2string.h>
 
 #include "windowsreachability.h"
 
@@ -138,6 +140,30 @@ std::optional<ReachabilityPolicy::Route> probeEndpoint(const ADDRINFOW& endpoint
 }
 
 } // namespace
+
+WindowsReachability::Address WindowsReachability::parseLiteral(std::wstring_view host)
+{
+    if (host.empty() || host.find(L'\0') != std::wstring_view::npos) {
+        return {};
+    }
+    const auto separator = host.rfind(L'%');
+    const std::wstring ip(host.substr(0, separator));
+    sockaddr_in ipv4{};
+    const wchar_t* end = nullptr;
+    // Accept the historical short, octal, and hexadecimal forms used by Qt.
+    if (separator == std::wstring_view::npos &&
+        RtlIpv4StringToAddressW(ip.c_str(), FALSE, &end, &ipv4.sin_addr) == 0 &&
+        end == ip.c_str() + ip.size()) {
+        ipv4.sin_family = AF_INET;
+        return readAddress({reinterpret_cast<sockaddr*>(&ipv4), sizeof(ipv4)});
+    }
+    sockaddr_in6 ipv6{};
+    if (InetPtonW(AF_INET6, ip.c_str(), &ipv6.sin6_addr) == 1) {
+        ipv6.sin6_family = AF_INET6;
+        return readAddress({reinterpret_cast<sockaddr*>(&ipv6), sizeof(ipv6)});
+    }
+    return {};
+}
 
 std::uint32_t WindowsReachability::interfaceIndex(const wchar_t* name)
 {

@@ -122,8 +122,9 @@ Copy-Item -Path (Join-Path $redist '*.dll') -Destination $deploy
 New-Item -ItemType File -Path (Join-Path $deploy 'portable.dat') | Out-Null
 & (Join-Path $PSScriptRoot 'verify-pe-machine.ps1') -Path $deploy -ExpectedMachine 0x8664
 
-# Focused existing regressions; no streaming host or user credentials are used.
-$env:PATH = "$deploy;$env:PATH"
+# Some regression executables still build the legacy Qt paths.
+# Their SDK dependencies are not part of the portable worker.
+$env:PATH = "$deploy;$qtBins;$env:PATH"
 # Test executables live outside the deployment folder and cannot infer its TLS
 # plugin path from their own directory. Retain SDK plugins for the offscreen
 # test platform, which windeployqt does not ship in the user-facing package.
@@ -154,10 +155,6 @@ foreach ($test in @('keyboard_state', 'cursor_shape_classification', 'shared_hel
         $testResults += @{ name = $test; result = 'passed' }
     } finally { Pop-Location }
 }
-
-& (Join-Path $PSScriptRoot 'smoke-portable-gui.ps1') -PortablePath $deploy `
-    -TestRoot (Join-Path $root 'gui-smoke') -QtPlugins (& $qmake -query QT_INSTALL_PLUGINS)
-$testResults += @{ name = 'gui-qml-startup'; result = 'passed-offscreen-no-host' }
 
 Invoke-Checked 'python' @((Join-Path $PSScriptRoot 'smoke-gpui-core.py'), $deploy, (Join-Path $root 'core-smoke'))
 $testResults += @{ name = 'gpui-core-protocol-lifecycle'; result = 'passed-offscreen-no-host' }

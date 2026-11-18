@@ -1,12 +1,15 @@
 TEMPLATE = subdirs
 SUBDIRS = \
     moonlight-common-c \
-    qmdnsengine \
     app \
     h264bitstream
 
 # Build the dependencies in parallel before the final app
-app.depends = qmdnsengine moonlight-common-c h264bitstream
+app.depends = moonlight-common-c h264bitstream
+!lite-gpui-worker {
+    SUBDIRS += qmdnsengine
+    app.depends += qmdnsengine
+}
 !config_SL:!lite-native-clipboard-helper {
     SUBDIRS += clipboard-helper
     app.depends += clipboard-helper

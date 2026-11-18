@@ -10,8 +10,12 @@
 #include <Limelight.h>
 
 #include <QUrl>
+#include "hostrequesterror.h"
+#ifndef LITE_GPUI_WORKER
 #include <QNetworkAccessManager>
-#include <QNetworkReply>
+#else
+class QNetworkAccessManager;
+#endif
 #include <QJsonObject>
 #include <QVariant>
 
@@ -73,7 +77,7 @@ private:
 class QtNetworkReplyException : public std::exception
 {
 public:
-    QtNetworkReplyException(QNetworkReply::NetworkError error, QString errorText) :
+    QtNetworkReplyException(HostRequestError error, QString errorText) :
         m_Error(error),
         m_ErrorText(errorText.toUtf8())
     {
@@ -90,18 +94,18 @@ public:
         return m_ErrorText.constData();
     }
 
-    QNetworkReply::NetworkError getError() const
+    HostRequestError getError() const
     {
         return m_Error;
     }
 
     QString toQString() const
     {
-        return QString::fromUtf8(m_ErrorText) + " (Error " + QString::number(m_Error) + ")";
+        return QString::fromUtf8(m_ErrorText) + " (Error " + QString::number(static_cast<int>(m_Error)) + ")";
     }
 
 private:
-    QNetworkReply::NetworkError m_Error;
+    HostRequestError m_Error;
     QByteArray m_ErrorText;
 };
 

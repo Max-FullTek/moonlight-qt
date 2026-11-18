@@ -2,12 +2,16 @@
 
 #include "reachabilitypolicy.h"
 
+#include <string_view>
+
 namespace WindowsReachability {
 
 struct Address {
     std::array<std::uint8_t, 16> bytes{};
     int size = 0;
 };
+
+Address parseLiteral(std::wstring_view host);
 
 ReachabilityPolicy::Route classify(const Address& local, const Address& peer);
 
