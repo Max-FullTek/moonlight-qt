@@ -2,7 +2,10 @@
 
 #include <QPoint>
 #include <QJsonArray>
+#include <QWindow>
+#ifndef LITE_GPUI_WORKER
 #include <QQuickWindow>
+#endif
 
 #include <atomic>
 #include <condition_variable>
@@ -69,7 +72,10 @@ public:
     {
         m_LifecycleDispatcher = std::move(dispatcher);
     }
+#ifndef LITE_GPUI_WORKER
     Q_INVOKABLE bool initialize(QQuickWindow* qtWindow);
+#endif
+    bool initializeForWorker() { return initializeWindow(nullptr); }
     Q_INVOKABLE void start();
     Q_INVOKABLE void interrupt();
     Q_PROPERTY(QStringList launchWarnings MEMBER m_LaunchWarnings NOTIFY launchWarningsChanged);
@@ -140,6 +146,7 @@ private:
         bool valid = false;
     };
 
+    bool initializeWindow(QWindow* qtWindow);
     void exec();
     void dispatchConnectionCleanup();
     void finishConnectionCleanup();
@@ -317,7 +324,7 @@ private:
     SDL_mutex* m_DecoderLock;
     bool m_AudioDisabled;
     Uint32 m_FullScreenFlag;
-    QQuickWindow* m_QtWindow;
+    QWindow* m_QtWindow;
     QWindow* m_WaylandStreamWindow;
     WaylandWindowSnapshot m_WaylandWindowSnapshot;
     bool m_WaylandOverlayShortcutPressed;

@@ -82,7 +82,7 @@ Invoke-Checked $cmake @('--build', $clipboardBuild, '--config', 'Release', '--ta
 
 Push-Location -LiteralPath $build
 try {
-    Invoke-Checked $qmake @((Join-Path $SourceRoot 'moonlight-qt.pro'), 'CONFIG+=lite-native-http lite-native-clipboard-helper lite-native-worker-json lite-no-microphone')
+    Invoke-Checked $qmake @((Join-Path $SourceRoot 'moonlight-qt.pro'), 'CONFIG+=lite-native-http lite-native-clipboard-helper lite-native-worker-json lite-no-microphone lite-gpui-worker')
     Invoke-Checked 'nmake.exe' @('/NOLOGO', 'release')
 } finally { Pop-Location }
 
@@ -107,15 +107,13 @@ Copy-Item -LiteralPath (Join-Path $SourceRoot 'build/gpui-package/moonlight-lite
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'build/gpui-package/THIRD-PARTY-NOTICES.txt') -Destination (Join-Path $deploy 'GPUI-THIRD-PARTY-NOTICES.txt')
 Copy-Item -LiteralPath (Join-Path $SourceRoot 'gpui-prototype/Cargo.lock') -Destination (Join-Path $deploy 'GPUI-Cargo.lock')
 
-# Match the existing Qt 6 deployment flags, retaining all remaining plugins.
+# Deploy the worker's remaining Qt runtime and plugins.
 Invoke-Checked $windeployqt @(
-    '--dir', $deploy, '--release', '--qmldir', (Join-Path $SourceRoot 'app/gui'),
+    '--dir', $deploy, '--release',
     '--no-opengl-sw', '--no-compiler-runtime', '--no-sql',
     '--no-system-d3d-compiler', '--no-system-dxc-compiler',
     '--skip-plugin-types', 'qmltooling,generic', '--no-ffmpeg',
-    '--no-quickcontrols2imagine', '--no-quickcontrols2universal',
-    '--no-quickcontrols2imaginestyleimpl', '--no-quickcontrols2universalstyleimpl',
-    '--no-quickcontrols2windowsstyleimpl', (Join-Path $deploy 'Moonlight.exe')
+    (Join-Path $deploy 'Moonlight.exe')
 )
 $redistCandidates = @(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC/Redist/MSVC/*/x64/Microsoft.VC*.CRT')
 if ($LASTEXITCODE -ne 0 -or !$redistCandidates.Count) { throw 'MSVC redistributable DLLs not found.' }

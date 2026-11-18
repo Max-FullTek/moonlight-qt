@@ -2,7 +2,9 @@
 
 #include <QObject>
 #include <QRect>
-#include <QQmlEngine>
+#ifndef LITE_GPUI_WORKER
+class QQmlEngine;
+#endif
 #include <QString>
 #include "streaming/video/videodecoderoptions.h"
 #include "streaming/input/inputoptions.h"
@@ -12,7 +14,11 @@ class StreamingPreferences : public QObject
     Q_OBJECT
 
 public:
+#ifdef LITE_GPUI_WORKER
+    static StreamingPreferences* get();
+#else
     static StreamingPreferences* get(QQmlEngine *qmlEngine = nullptr);
+#endif
 
     Q_INVOKABLE static int
     getDefaultBitrate(int width, int height, int fps, bool yuv444);
@@ -413,7 +419,11 @@ signals:
     void rendererSelectionChanged();
 
 private:
+#ifdef LITE_GPUI_WORKER
+    StreamingPreferences();
+#else
     explicit StreamingPreferences(QQmlEngine *qmlEngine);
+#endif
 
     QString getSuffixFromLanguage(Language lang);
 
@@ -423,5 +433,7 @@ private:
     int m_BackgroundOverlayOpacity;
     bool m_BackgroundSetupCompleted;
 
+#ifndef LITE_GPUI_WORKER
     QQmlEngine* m_QmlEngine;
+#endif
 };

@@ -1,4 +1,10 @@
-QT += core quick network quickcontrols2 svg gui-private
+QT += core gui network svg
+lite-gpui-worker {
+    !win32|!lite-native-http|!lite-native-worker-json: error("The Lite GPUI worker requires the native Windows HTTP and profile backends")
+    DEFINES += LITE_GPUI_WORKER
+} else {
+    QT += quick quickcontrols2 gui-private
+}
 win32:lite-no-microphone: DEFINES += LITE_NO_MICROPHONE
 !config_SL:!contains(DEFINES, LITE_NO_MICROPHONE): QT += multimedia
 CONFIG += c++17 lrelease embed_translations
@@ -71,7 +77,7 @@ isEmpty(MOONLIGHT_NUMERIC_VERSION): MOONLIGHT_NUMERIC_VERSION = $$cat(version.tx
 # Since this binds the app against the Qt runtime version, we will only
 # do this for Windows and Mac (when disable-prebuilts is not defined),
 # since they always ship with the matching build of the Qt runtime.
-!disable-prebuilts {
+!lite-gpui-worker:!disable-prebuilts {
     win32|macx {
         CONFIG(release, debug|release) {
             CONFIG += qtquickcompiler
@@ -276,7 +282,6 @@ SOURCES += \
     backend/nvaddress.cpp \
     backend/gpuicorebridge.cpp \
     backend/nvapp.cpp \
-    cli/pair.cpp \
     main.cpp \
     backend/computerseeker.cpp \
     backend/identitymanager.cpp \
@@ -286,10 +291,6 @@ SOURCES += \
     backend/computermanager.cpp \
     backend/boxartmanager.cpp \
     backend/richpresencemanager.cpp \
-    cli/commandlineparser.cpp \
-    cli/listapps.cpp \
-    cli/quitstream.cpp \
-    cli/startstream.cpp \
     settings/compatfetcher.cpp \
     settings/devicelocalsettings.cpp \
     settings/streamingpreferences.cpp \
@@ -310,15 +311,10 @@ SOURCES += \
     streaming/audio/dualsensehaptics.cpp \
     streaming/audio/renderers/sdlaud.cpp \
     streaming/network/bandwidth.cpp \
-    gui/computermodel.cpp \
-    gui/appmodel.cpp \
     streaming/streamutils.cpp \
     path.cpp \
     settings/mappingmanager.cpp \
-    gui/sdlgamepadkeynavigation.cpp \
-    gui/windowplacement.cpp \
     gui/windowsdisplaygeometry.cpp \
-    gui/windowswindowchrome.cpp \
     streaming/video/decoderfactory.cpp \
     streaming/video/overlaymanager.cpp \
     streaming/video/overlaymenupanel.cpp \
@@ -338,7 +334,6 @@ HEADERS += \
     SDL_compat.h \
     backend/nvaddress.h \
     backend/nvapp.h \
-    cli/pair.h \
     settings/compatfetcher.h \
     settings/devicelocalsettings.h \
     streaming/video/videoenhancement.h \
@@ -352,10 +347,6 @@ HEADERS += \
     backend/computermanager.h \
     backend/boxartmanager.h \
     backend/richpresencemanager.h \
-    cli/commandlineparser.h \
-    cli/listapps.h \
-    cli/quitstream.h \
-    cli/startstream.h \
     settings/streamingpreferences.h \
     streaming/input/cursorshapeclassifier.h \
     streaming/input/penhistory.h \
@@ -378,8 +369,6 @@ HEADERS += \
     streaming/audio/dualsensehapticsrouting.h \
     streaming/audio/dualsensehapticsstream.h \
     streaming/audio/renderers/sdl.h \
-    gui/computermodel.h \
-    gui/appmodel.h \
     streaming/video/decodebuffer.h \
     streaming/video/decoder.h \
     streaming/video/videodecoderoptions.h \
@@ -387,10 +376,7 @@ HEADERS += \
     streaming/streamutils.h \
     path.h \
     settings/mappingmanager.h \
-    gui/sdlgamepadkeynavigation.h \
-    gui/windowplacement.h \
     gui/windowsdisplaygeometry.h \
-    gui/windowswindowchrome.h \
     streaming/video/decoderfactory.h \
     streaming/video/overlaymanager.h \
     streaming/video/overlaymenupanel.h \
@@ -691,9 +677,30 @@ require-qt-sdl-wayland-bridge:!qt-sdl-wayland-bridge {
     error("The AppImage requires Linux, Qt 6.5+, Wayland, and sdl2-compat 2.32.50+")
 }
 
-RESOURCES += \
-    resources.qrc \
-    qml.qrc
+RESOURCES += resources.qrc
+!lite-gpui-worker {
+    RESOURCES += qml.qrc
+    SOURCES += cli/pair.cpp \
+               cli/commandlineparser.cpp \
+               cli/listapps.cpp \
+               cli/quitstream.cpp \
+               cli/startstream.cpp \
+               gui/computermodel.cpp \
+               gui/appmodel.cpp \
+               gui/sdlgamepadkeynavigation.cpp \
+               gui/windowplacement.cpp \
+               gui/windowswindowchrome.cpp
+    HEADERS += cli/pair.h \
+               cli/commandlineparser.h \
+               cli/listapps.h \
+               cli/quitstream.h \
+               cli/startstream.h \
+               gui/computermodel.h \
+               gui/appmodel.h \
+               gui/sdlgamepadkeynavigation.h \
+               gui/windowplacement.h \
+               gui/windowswindowchrome.h
+}
 
 TRANSLATIONS += \
     languages/qml_zh_CN.ts \

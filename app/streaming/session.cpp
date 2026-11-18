@@ -418,10 +418,6 @@ bool qtWindowNativeMonitorBounds(QWindow* window, QRect& bounds)
 #endif
 }
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-#include <QQuickOpenGLUtils>
-#endif
-
 CONNECTION_LISTENER_CALLBACKS Session::k_ConnCallbacks = {
     Session::clStageStarting,
     nullptr,
@@ -1049,7 +1045,14 @@ Session::~Session()
     SDL_DestroyMutex(m_DecoderLock);
 }
 
+#ifndef LITE_GPUI_WORKER
 bool Session::initialize(QQuickWindow* qtWindow)
+{
+    return initializeWindow(qtWindow);
+}
+#endif
+
+bool Session::initializeWindow(QWindow* qtWindow)
 {
     m_QtWindow = qtWindow;
 #ifdef Q_OS_WIN32

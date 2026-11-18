@@ -882,7 +882,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         postCompletion([this, session] { finishSession(session); });
     };
     session->setWorkerEvents(std::move(events));
-    if (!session->initialize(nullptr)) {
+    if (!session->initializeForWorker()) {
         postCompletion([this, session] { finishSession(session); });
         return;
     }

@@ -1,11 +1,13 @@
 #include <QGuiApplication>
+#ifndef LITE_GPUI_WORKER
 #include <QStyleHints>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
-#include <QDir>
 #include <QIcon>
 #include <QLibraryInfo>
 #include <QQuickStyle>
+#endif
+#include <QDir>
 #include <QMutex>
 #include <QtDebug>
 #include <QNetworkProxyFactory>
@@ -20,6 +22,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QTimer>
+#include <QSettings>
+#include <QThreadPool>
 #include <memory>
 #include <QStandardPaths>
 
@@ -49,6 +53,7 @@
 #include <openssl/ssl.h>
 #endif
 
+#ifndef LITE_GPUI_WORKER
 static QString getStartupApplicationDir(const char* argv0)
 {
 #if defined(Q_OS_WIN32)
@@ -78,16 +83,21 @@ static QString getStartupApplicationDir(const char* argv0)
 
     return QDir::currentPath();
 }
+#endif
 
+#ifndef LITE_GPUI_WORKER
 #include "cli/listapps.h"
 #include "cli/quitstream.h"
 #include "cli/startstream.h"
 #include "cli/pair.h"
 #include "cli/commandlineparser.h"
+#endif
 #include "path.h"
 #include "utils.h"
+#ifndef LITE_GPUI_WORKER
 #include "gui/computermodel.h"
 #include "gui/appmodel.h"
+#endif
 #include "backend/computermanager.h"
 #include "backend/gpuicorebridge.h"
 #ifdef LITE_NATIVE_WORKER_JSON
@@ -99,9 +109,11 @@ static QString getStartupApplicationDir(const char* argv0)
 #include "streaming/waylandqtsdlbridge.h"
 #endif
 #include "settings/streamingpreferences.h"
+#ifndef LITE_GPUI_WORKER
 #include "gui/sdlgamepadkeynavigation.h"
 #include "gui/windowplacement.h"
 #include "gui/windowswindowchrome.h"
+#endif
 #include "uifont.h"
 #include "streaming/macpermissions.h"
 #ifdef Q_OS_DARWIN
@@ -746,6 +758,7 @@ void configureSignalHandlers()
 
 #endif
 
+#ifndef LITE_GPUI_WORKER
 // 暗色 Material 配置：Qt <6.8 的默认样式，也是发行版 Qt 缺 FluentWinUI3 时
 // 的回退（Ubuntu 26.04 的 Qt 就没带这个样式的 QML）。图标按暗色主题绘制，
 // 所以主题不允许用户覆盖；其余 Material 变量保留用户覆盖权。
@@ -784,15 +797,24 @@ static bool styleQmlAvailable(const QString& style)
     return QFile::exists(qmldir);
 }
 #endif
+#endif
 
 int main(int argc, char *argv[])
 {
     SDL_SetMainReady();
 
-    const QString startupApplicationDir = getStartupApplicationDir(argc > 0 ? argv[0] : nullptr);
-    bool gpuiCoreMode = false;
 #ifdef Q_OS_WIN32
-    gpuiCoreMode = argc == 2 && QByteArray(argv[1]) == "--gpui-core";
+    const bool gpuiCoreMode = argc == 2 && QByteArray(argv[1]) == "--gpui-core";
+#else
+    const bool gpuiCoreMode = false;
+#endif
+#ifdef LITE_GPUI_WORKER
+    if (!gpuiCoreMode) {
+        fputs("Start Windows Lite from its GPUI application.\n", stderr);
+        return 2;
+    }
+#else
+    const QString startupApplicationDir = getStartupApplicationDir(argc > 0 ? argv[0] : nullptr);
 #endif
 
     // Set the app version for the QCommandLineParser's showVersion() command
@@ -820,6 +842,7 @@ int main(int argc, char *argv[])
 #endif
         Path::initialize(true, profile);
     }
+#ifndef LITE_GPUI_WORKER
     else if (QFile(QDir(startupApplicationDir).filePath("portable.dat")).exists()) {
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, startupApplicationDir);
@@ -837,6 +860,7 @@ int main(int argc, char *argv[])
     if (qEnvironmentVariableIsEmpty("QML_DISK_CACHE_PATH")) {
         qputenv("QML_DISK_CACHE_PATH", Path::getQmlCacheDir().toUtf8());
     }
+#endif
 
 #ifdef Q_OS_WIN32
     // Grab the original std handles before we potentially redirect them later
@@ -1238,6 +1262,7 @@ int main(int argc, char *argv[])
     }
 #endif
 
+#ifndef LITE_GPUI_WORKER
     GlobalCommandLineParser parser;
     GlobalCommandLineParser::ParseResult commandLineParserResult = gpuiCoreMode
             ? GlobalCommandLineParser::NormalStartRequested : parser.parse(app.arguments());
@@ -1249,6 +1274,7 @@ int main(int argc, char *argv[])
     default:
         break;
     }
+#endif
 
     SDL_version compileVersion;
     SDL_VERSION(&compileVersion);
@@ -1376,6 +1402,7 @@ int main(int argc, char *argv[])
     qputenv("SDL_VIDEO_WAYLAND_WMCLASS", "com.moonlight_stream.Moonlight");
     qputenv("SDL_VIDEO_X11_WMCLASS", "com.moonlight_stream.Moonlight");
 
+#ifndef LITE_GPUI_WORKER
     // Register our C++ types for QML
     qmlRegisterType<ComputerModel>("ComputerModel", 1, 0, "ComputerModel");
     qmlRegisterType<AppModel>("AppModel", 1, 0, "AppModel");
@@ -1402,10 +1429,12 @@ int main(int argc, char *argv[])
                                                    });
     qmlRegisterType<WindowPlacement>("WindowPlacement", 1, 0, "WindowPlacement");
     qmlRegisterType<WindowsWindowChrome>("WindowsWindowChrome", 1, 0, "WindowsWindowChrome");
+#endif
 
     // Create the identity manager on the main thread
     IdentityManager::get();
 
+#ifndef LITE_GPUI_WORKER
 #if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
     // Qt 6.8+ ships the FluentWinUI3 style, which is what our settings UI is designed
     // around. It picks light/dark from the application color scheme (there is no env
@@ -1473,6 +1502,7 @@ int main(int argc, char *argv[])
 #else
     // Fall back to the Material theme on older Qt builds
     configureMaterialFallback();
+#endif
 #endif
 
     // 界面字体：Manrope（正文/标题）+ DM Mono（数字、状态徽标、宽字距微标签），
@@ -1553,7 +1583,9 @@ int main(int argc, char *argv[])
         app.setFont(uiFont);
     }
 
+#ifndef LITE_GPUI_WORKER
     std::unique_ptr<QQmlApplicationEngine> engineStorage;
+#endif
     GpuiCoreBridge* gpuiBridge = nullptr;
     if (gpuiCoreMode) {
         app.setQuitOnLastWindowClosed(false);
@@ -1562,6 +1594,7 @@ int main(int argc, char *argv[])
         QTimer::singleShot(0, gpuiBridge, &GpuiCoreBridge::start);
 #endif
     }
+#ifndef LITE_GPUI_WORKER
     else {
         engineStorage = std::make_unique<QQmlApplicationEngine>();
         auto& engine = *engineStorage;
@@ -1650,9 +1683,12 @@ int main(int argc, char *argv[])
         }
 
     } // Normal Qt/QML client startup; GPUI core never creates a QML engine.
+#endif
 
-#if defined(Q_OS_WIN32) && defined(LITE_NATIVE_HTTP)
-    int err = gpuiCoreMode ? gpuiBridge->execNative() : app.exec();
+#if defined(LITE_GPUI_WORKER)
+    const int err = gpuiBridge->execNative();
+#elif defined(Q_OS_WIN32) && defined(LITE_NATIVE_HTTP)
+    const int err = gpuiCoreMode ? gpuiBridge->execNative() : app.exec();
 #else
     int err = app.exec();
 #endif

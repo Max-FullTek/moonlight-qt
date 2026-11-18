@@ -9,7 +9,10 @@
 #include <QTranslator>
 #include <QCoreApplication>
 #include <QLocale>
+#ifndef LITE_GPUI_WORKER
+#include <QQmlEngine>
 #include <QReadWriteLock>
+#endif
 #include <QtMath>
 
 #include <QtDebug>
@@ -95,9 +98,10 @@
 
 static constexpr int DEFAULT_BACKGROUND_OVERLAY_OPACITY = 72;
 
+#ifndef LITE_GPUI_WORKER
 static StreamingPreferences* s_GlobalPrefs;
-
 Q_GLOBAL_STATIC(QReadWriteLock, s_GlobalPrefsLock)
+#endif
 
 static StreamingPreferences::OverlayMenuPosition decodeOverlayMenuPlacement(int value)
 {
@@ -238,12 +242,23 @@ static StreamingPreferences::OverlayMenuPosition loadOverlayMenuPlacement(Stream
     return migratedPosition;
 }
 
+#ifdef LITE_GPUI_WORKER
+StreamingPreferences::StreamingPreferences()
+#else
 StreamingPreferences::StreamingPreferences(QQmlEngine *qmlEngine)
     : m_QmlEngine(qmlEngine)
+#endif
 {
     reload();
 }
 
+#ifdef LITE_GPUI_WORKER
+StreamingPreferences* StreamingPreferences::get()
+{
+    static StreamingPreferences* const preferences = new StreamingPreferences();
+    return preferences;
+}
+#else
 StreamingPreferences* StreamingPreferences::get(QQmlEngine *qmlEngine)
 {
     {
@@ -280,6 +295,8 @@ StreamingPreferences* StreamingPreferences::get(QQmlEngine *qmlEngine)
         return s_GlobalPrefs;
     }
 }
+
+#endif
 
 void StreamingPreferences::reload()
 {
@@ -629,7 +646,7 @@ bool StreamingPreferences::retranslate()
 {
     static QTranslator* translator = nullptr;
 
-#if QT_VERSION < QT_VERSION_CHECK(5, 10, 0)
+#if !defined(LITE_GPUI_WORKER) && QT_VERSION < QT_VERSION_CHECK(5, 10, 0)
     if (m_QmlEngine != nullptr) {
         // Dynamic retranslation is not supported until Qt 5.10
         return false;
@@ -659,6 +676,7 @@ bool StreamingPreferences::retranslate()
         delete newTranslator;
     }
 
+#ifndef LITE_GPUI_WORKER
     if (m_QmlEngine != nullptr) {
 #if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
         // This is a dynamic retranslation from the settings page.
@@ -673,6 +691,7 @@ bool StreamingPreferences::retranslate()
         // This is a translation from a non-QML context, which means
         // it is probably app startup. There's nothing to refresh.
     }
+#endif
 
     return true;
 }
