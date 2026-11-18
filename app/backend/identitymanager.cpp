@@ -2,10 +2,15 @@
 #include "nativeidentity.h"
 
 #include <QDebug>
+#ifdef LITE_NATIVE_WORKER_JSON
+#include "windowsprofilefile.h"
+#include <nlohmann/json.hpp>
+#else
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#endif
 
 
 #define SER_UNIQUEID "uniqueid"
@@ -55,6 +60,25 @@ IdentityManager::IdentityManager()
     if (qEnvironmentVariableIsSet("MOONLIGHT_GPUI_RUST_IDENTITY")) {
         const auto profile = qEnvironmentVariable("MOONLIGHT_GPUI_PROFILE");
         if (!profile.isEmpty()) {
+#ifdef LITE_NATIVE_WORKER_JSON
+            try {
+                const auto path = std::filesystem::path(profile.toStdWString()) / L"identity-v1.json";
+                if (const auto bytes = WindowsProfileFile::read(path, 64 * 1024)) {
+                    const auto record = nlohmann::json::parse(*bytes);
+                    const auto& version = record.at("version");
+                    m_CachedUniqueId = QString::fromStdString(record.at("unique_id").get<std::string>());
+                    m_CachedPemCert = QByteArray::fromStdString(record.at("certificate").get<std::string>());
+                    m_CachedPrivateKey = QByteArray::fromStdString(record.at("private_key").get<std::string>());
+                    if (!version.is_number_integer() || version != 1 || m_CachedUniqueId.isEmpty() ||
+                        getSslCertificate().isNull() || getSslKey().isNull()) {
+                        qFatal("Invalid GPUI identity");
+                    }
+                    return;
+                }
+            } catch (const std::exception&) {
+                qFatal("Unable to read the GPUI identity");
+            }
+#else
             QFile identity(QDir(profile).filePath("identity-v1.json"));
             if (identity.exists()) {
                 if (!identity.open(QIODevice::ReadOnly) || identity.size() > 64 * 1024) {
@@ -70,6 +94,7 @@ IdentityManager::IdentityManager()
                 }
                 return;
             }
+#endif
         }
     }
     QSettings settings;

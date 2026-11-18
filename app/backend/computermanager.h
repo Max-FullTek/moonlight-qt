@@ -205,7 +205,8 @@ class ComputerManager : public QObject
     friend class PendingQuitTask;
 
 public:
-    explicit ComputerManager(StreamingPreferences* prefs, bool externalPolling = false);
+    explicit ComputerManager(StreamingPreferences* prefs, bool externalPolling = false,
+                             QString profileDirectory = {});
 
     virtual ~ComputerManager();
 
@@ -265,6 +266,7 @@ private:
     bool waitBeforeAddRetry();
 
     void runDelayedFlush();
+    void loadLegacyHosts();
 
     void saveHost(NvComputer* computer);
 
@@ -278,6 +280,7 @@ private:
     std::mutex m_AddRetryMutex;
     std::condition_variable m_AddRetryCondition;
     bool m_ExternalPolling;
+    const QString m_ProfileDirectory;
     int m_PollingRef;
     QReadWriteLock m_Lock;
     QMap<QString, NvComputer*> m_KnownHosts;

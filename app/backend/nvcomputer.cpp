@@ -2,6 +2,10 @@
 #include "reachabilitypolicy.h"
 #include "nvapp.h"
 #include "settings/compatfetcher.h"
+#ifdef LITE_NATIVE_WORKER_JSON
+#include "hostprofile.h"
+#include <QCoreApplication>
+#endif
 
 #include <QUdpSocket>
 #include <QHostInfo>
@@ -751,6 +755,16 @@ bool NvComputer::update(const NvComputer& that)
 
 void NvComputer::savePairname(const QString& uuid, const QString& pairname)
 {
+#ifdef LITE_NATIVE_WORKER_JSON
+    if (QCoreApplication::applicationName() == QStringLiteral("MoonlightGPUI")) {
+        try {
+            HostProfile::setPairName(qEnvironmentVariable("MOONLIGHT_GPUI_PROFILE"), uuid, pairname);
+        } catch (const std::exception&) {
+            qWarning("Unable to save the GPUI pair name");
+        }
+        return;
+    }
+#endif
     QSettings settings;
     settings.beginGroup("Pairnames");
     settings.setValue(uuid, pairname);
@@ -759,6 +773,16 @@ void NvComputer::savePairname(const QString& uuid, const QString& pairname)
 
 QString NvComputer::getPairname(const QString& uuid)
 {
+#ifdef LITE_NATIVE_WORKER_JSON
+    if (QCoreApplication::applicationName() == QStringLiteral("MoonlightGPUI")) {
+        try {
+            return HostProfile::pairName(qEnvironmentVariable("MOONLIGHT_GPUI_PROFILE"), uuid);
+        } catch (const std::exception&) {
+            qWarning("Unable to read the GPUI pair name");
+            return {};
+        }
+    }
+#endif
     QSettings settings;
     settings.beginGroup("Pairnames");
     QString pairname = settings.value(uuid).toString();

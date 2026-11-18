@@ -192,7 +192,7 @@ GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent) {
     prefs->detectNetworkBlocking = false;
     prefs->quitAppAfter = false;
     m_RustMonitor = qEnvironmentVariable("MOONLIGHT_GPUI_RUST_MONITOR") == "1";
-    m_Manager = new ComputerManager(prefs, m_RustMonitor);
+    m_Manager = new ComputerManager(prefs, m_RustMonitor, qEnvironmentVariable("MOONLIGHT_GPUI_PROFILE"));
     m_Manager->setParent(this);
     connect(m_Manager, &ComputerManager::hostDeleted, this, [this](const QString& uuid) {
         m_DeletingHost = nullptr;

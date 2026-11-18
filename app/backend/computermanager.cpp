@@ -3,6 +3,9 @@
 #include "nvcomputer.h"
 #include "nvhttp.h"
 #include "nvpairingmanager.h"
+#ifdef LITE_NATIVE_WORKER_JSON
+#include "hostprofile.h"
+#endif
 
 #include <Limelight.h>
 #include <QtEndian>
@@ -166,13 +169,46 @@ private:
     NvComputer* m_Computer;
 };
 
-ComputerManager::ComputerManager(StreamingPreferences* prefs, bool externalPolling)
+ComputerManager::ComputerManager(StreamingPreferences* prefs, bool externalPolling, QString profileDirectory)
     : m_Prefs(prefs),
       m_ExternalPolling(externalPolling),
+      m_ProfileDirectory(std::move(profileDirectory)),
       m_PollingRef(0),
       m_MdnsBrowser(nullptr),
       m_CompatFetcher(nullptr),
       m_NeedsDelayedFlush(false)
+{
+    bool loadedNative = false;
+#ifdef LITE_NATIVE_WORKER_JSON
+    if (!m_ProfileDirectory.isEmpty()) {
+        try {
+            auto hosts = HostProfile::read(std::filesystem::path(m_ProfileDirectory.toStdWString()) / L"hosts-v1.json");
+            if (hosts) {
+                for (auto& computer : *hosts) {
+                    if (m_KnownHosts.contains(computer->uuid)) qFatal("Duplicate UUID in the GPUI host profile");
+                    computer->isSupportedServerVersion = true;
+                    computer->externalPort = computer->remoteAddress.port();
+                    m_LastSerializedHosts[computer->uuid] = *computer;
+                    m_KnownHosts.insert(computer->uuid, computer.get());
+                    computer.release();
+                }
+                loadedNative = true;
+            }
+        } catch (const std::exception&) {
+            qFatal("Unable to read the GPUI host profile");
+        }
+    }
+#endif
+    if (!loadedNative) loadLegacyHosts();
+
+    m_DelayedFlushThread = std::thread(&ComputerManager::runDelayedFlush, this);
+#ifdef LITE_NATIVE_WORKER_JSON
+    if (!loadedNative && !m_ProfileDirectory.isEmpty() && !m_KnownHosts.isEmpty()) saveHosts();
+#endif
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, &ComputerManager::handleAboutToQuit);
+}
+
+void ComputerManager::loadLegacyHosts()
 {
     QSettings settings;
 
@@ -194,15 +230,6 @@ ComputerManager::ComputerManager(StreamingPreferences* prefs, bool externalPolli
     }
     settings.endArray();
 
-    // Start the delayed flush thread to handle saveHosts() calls
-    m_DelayedFlushThread = std::thread(&ComputerManager::runDelayedFlush, this);
-
-    // To quit in a timely manner, we must block additional requests
-    // after we receive the aboutToQuit() signal. This is necessary
-    // because NvHTTP uses aboutToQuit() to abort requests in progress
-    // while quitting, however this is a one time signal - additional
-    // requests would not be aborted and block termination.
-    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, &ComputerManager::handleAboutToQuit);
 }
 
 ComputerManager::~ComputerManager()
@@ -255,6 +282,9 @@ ComputerManager::~ComputerManager()
 
 void ComputerManager::runDelayedFlush() {
     for (;;) {
+#ifdef LITE_NATIVE_WORKER_JSON
+        std::vector<NvComputer> snapshot;
+#endif
         // Wait for a delayed flush request or an interruption
         {
             std::unique_lock locker(m_DelayedFlushMutex);
@@ -273,14 +303,31 @@ void ComputerManager::runDelayedFlush() {
             m_NeedsDelayedFlush = false;
 
             // Update the last serialized hosts map under the delayed flush mutex
+            QReadLocker hostsLock(&m_Lock);
             m_LastSerializedHosts.clear();
             for (const NvComputer* computer : std::as_const(m_KnownHosts)) {
                 // Copy the current state of the NvComputer to allow us to check later if we need
                 // to serialize it again when attribute updates occur.
                 QReadLocker computerLock(&computer->lock);
                 m_LastSerializedHosts[computer->uuid] = *computer;
+#ifdef LITE_NATIVE_WORKER_JSON
+                if (!m_ProfileDirectory.isEmpty()) snapshot.push_back(*computer);
+#endif
             }
         }
+
+#ifdef LITE_NATIVE_WORKER_JSON
+        if (!m_ProfileDirectory.isEmpty()) {
+            try {
+                HostProfile::save(std::filesystem::path(m_ProfileDirectory.toStdWString()) / L"hosts-v1.json", snapshot);
+            } catch (const std::exception&) {
+                qWarning("Unable to save the GPUI host profile");
+                std::lock_guard lock(m_DelayedFlushMutex);
+                m_LastSerializedHosts.clear();
+            }
+            continue;
+        }
+#endif
 
         // Perform the flush
         {

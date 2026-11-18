@@ -241,10 +241,11 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
             assert len(pairs) == (3 if mode == "wrong-pin" else 5), seen
             assert pairs[1][1]["clientname"] == ["測試主機"], pairs[1]
             assert len({entry[1]["uuid"][0] for entry in pairs}) == len(pairs), "Request nonce reused"
-            saved = settings.read_text(encoding="utf-8")
-            cert_line = next(line for line in saved.splitlines() if line.startswith("1\\srvcert="))
-            assert ("-----BEGIN CERTIFICATE-----" in cert_line) == (mode == "ok"), "Incorrect certificate persistence"
-            assert "rust-display-host=測試主機" in saved, "Pair name was not saved"
+            saved = json.loads((profile / "hosts-v1.json").read_text(encoding="utf-8"))
+            names = json.loads((profile / "pair-names-v1.json").read_text(encoding="utf-8"))
+            cert = saved["hosts"][0]["server_certificate"]
+            assert ("-----BEGIN CERTIFICATE-----" in cert) == (mode == "ok"), "Incorrect certificate persistence"
+            assert names["names"]["rust-display-host"] == "測試主機", "Pair name was not saved"
             assert len([entry for entry in seen if entry[0] == "/unpair"]) == (0 if mode == "ok" else 1), seen
         displays = [entry for entry in seen if entry[0] == "/displays"]
         if launch_mode:

@@ -18,8 +18,13 @@ def check(executable, profile, eof=False, seeded=False, platform="offscreen",
         settings.write_text(
             "[hosts]\nsize=1\n1\\hostname=CI Host\n1\\uuid=ci-offline-host\n"
             "1\\localaddress=127.0.0.1\n1\\localport=1\n"
-            "1\\manualaddress=127.0.0.1\n1\\manualport=1\n",
+            "1\\manualaddress=127.0.0.1\n1\\manualport=1\n"
+            "1\\apps\\size=1\n1\\apps\\1\\id=42\n1\\apps\\1\\name=Desktop\n"
+            "1\\apps\\1\\hidden=true\n1\\apps\\1\\directlaunch=true\n",
             encoding="utf-8")
+    if seeded:
+        legacy_path = profile / "Moonlight Game Streaming Project" / "MoonlightGPUI.ini"
+        legacy_contents = legacy_path.read_text(encoding="utf-8")
     env = dict(os.environ, MOONLIGHT_GPUI_PROFILE=str(profile.resolve()),
                QT_QPA_PLATFORM=platform, QT_QUICK_BACKEND="software")
     if rust_monitor:
@@ -72,6 +77,8 @@ def check(executable, profile, eof=False, seeded=False, platform="offscreen",
             hosts = event("hosts")["hosts"]
             if seeded:
                 assert len(hosts) == 1 and hosts[0]["id"] == "ci-offline-host", hosts
+                assert hosts[0]["apps"] == [{"id": 42, "name": "Desktop", "hidden": True,
+                                             "direct_launch": True}], hosts
                 if reuse:
                     assert hosts[0]["name"] == "測試 Host 😀", hosts
                 send('{"command":"rename","host":"ci-offline-host","name":""}')
@@ -146,11 +153,18 @@ def check(executable, profile, eof=False, seeded=False, platform="offscreen",
             # Explicit shutdown must exit even while the parent keeps stdin
             # open. The worker owns and joins its reader during teardown.
             assert process.wait(timeout=35) == 0
-            if remove_on_exit:
-                saved = configparser.ConfigParser(interpolation=None)
-                saved.read(profile / "Moonlight Game Streaming Project" / "MoonlightGPUI.ini",
-                           encoding="utf-8")
-                assert saved["hosts"]["size"] == "0", "Removed host was not persisted on exit"
+            if seeded:
+                saved = json.loads((profile / "hosts-v1.json").read_text(encoding="utf-8"))
+                assert saved["version"] == 1
+                if rename_only:
+                    assert saved["hosts"][0]["name"] == "測試 Host 😀"
+                else:
+                    assert saved["hosts"] == [], "Removed host was not persisted on exit"
+                legacy = configparser.ConfigParser(interpolation=None)
+                legacy.read_string(legacy_contents)
+                current = configparser.ConfigParser(interpolation=None)
+                current.read(legacy_path, encoding="utf-8")
+                assert dict(current["hosts"]) == dict(legacy["hosts"]), "Legacy hosts changed during migration"
         finally:
             if process.poll() is None:
                 process.kill()  # Only this script's known, isolated test worker.
@@ -222,5 +236,7 @@ if __name__ == "__main__":
     for eof in (False, True):
         check(executable, root / f"remove-exit-{eof}", seeded=True, eof=eof,
               platform=args.platform, rust_monitor=True, remove_on_exit=True)
+        check(executable, root / f"remove-exit-{eof}", eof=True, reuse=True,
+              platform=args.platform, rust_monitor=True)
     check_output_closed(executable, root / "output-closed", args.platform)
     print(f"GPUI worker handshake, validation, offline host management and persistence, deletion during shutdown/EOF, open-stdin shutdown and output failure passed ({args.platform}); no real host used.")

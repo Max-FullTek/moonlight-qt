@@ -104,8 +104,9 @@ def main(worker, runtime, plugins, work, mode="new"):
             assert "uniqueid=fixture-legacy" in settings.read_text(encoding="utf8")
         if mode == "bad-pin":
             assert not any(secure for _, _, secure, _ in requests), "Wrong pin reached HTTP"
-            saved = settings.read_text(encoding="utf8")
-            assert "1\\manualport=1\n" in saved and "my-custom-name" in saved, "Failed verification changed cached profile"
+            saved = json.loads((profile / "hosts-v1.json").read_text(encoding="utf8"))["hosts"][0]
+            assert saved["manual"]["port"] == 1 and saved["name"] == "my-custom-name", "Failed verification changed cached profile"
+            assert saved["server_certificate"] == (fixtures / "other.pem").read_text(encoding="ascii")
         if mode == "retry":
             assert requests[1][0] - requests[0][0] >= 4.9, "503 retry skipped delay"
         if mode == "fail":
