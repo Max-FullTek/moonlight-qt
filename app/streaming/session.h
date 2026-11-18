@@ -58,6 +58,7 @@ public:
     void setClientDisplay(int display) { m_GpuiClientDisplay = display; }
     void setGpuiControlsClient(unsigned long processId) { m_GpuiControlsClient = processId; }
     bool usesGpuiControls() const { return m_GpuiControlsClient != 0; }
+    bool shouldExit() const { return m_ShouldExit; }
     void openGpuiControls();
     bool handleGpuiControl(const QString& action, int value = 0, int requestId = 0);
     static void wakeForCoreCommands();

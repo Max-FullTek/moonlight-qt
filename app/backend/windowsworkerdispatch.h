@@ -15,6 +15,9 @@ public:
     bool postInput() const;
     bool postLifecycle(std::function<void()> completion);
     void finishLifecycle();
+    // Unlike the single in-flight launch/cleanup slot, operation completions
+    // may overlap. Each callback runs in a later owner message dispatch.
+    bool postCompletion(std::function<void()> completion);
 
 private:
     struct Window;

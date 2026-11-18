@@ -1,5 +1,6 @@
 """Check the real worker's protocol and lifetime without a network host."""
 import argparse
+import configparser
 import json
 import os
 from pathlib import Path
@@ -9,7 +10,7 @@ import threading
 
 
 def check(executable, profile, eof=False, seeded=False, platform="offscreen",
-          rename_only=False, reuse=False, rust_monitor=False):
+          rename_only=False, reuse=False, rust_monitor=False, remove_on_exit=False):
     profile.mkdir(parents=True, exist_ok=reuse)
     if seeded and not reuse:
         settings = profile / "Moonlight Game Streaming Project" / "MoonlightGPUI.ini"
@@ -88,9 +89,16 @@ def check(executable, profile, eof=False, seeded=False, platform="offscreen",
                         send(json.dumps({"command": command, "host": "ci-offline-host"}))
                         assert event("error")["code"] == "not_ready"
                     send('{"command":"remove","host":"ci-offline-host"}')
+                    if remove_on_exit:
+                        # Exit while deletion is still in flight. The owner
+                        # must dispatch its completion before stopping.
+                        if eof:
+                            process.stdin.close()
+                        else:
+                            send('{"command":"shutdown"}')
                     assert event("host_removed")["host"] == "ci-offline-host"
                     assert event("hosts")["hosts"] == []
-                if not eof:
+                if not eof and not remove_on_exit:
                     send('{"command":"shutdown"}')
             elif eof:
                 assert hosts == [], hosts
@@ -133,12 +141,61 @@ def check(executable, profile, eof=False, seeded=False, platform="offscreen",
                 send('{"command":"list"}')
                 assert event("hosts")["hosts"] == []
                 send('{"command":"shutdown"}')
-            process.stdin.close()
+            if eof:
+                process.stdin.close()
+            # Explicit shutdown must exit even while the parent keeps stdin
+            # open. The worker owns and joins its reader during teardown.
             assert process.wait(timeout=35) == 0
+            if remove_on_exit:
+                saved = configparser.ConfigParser(interpolation=None)
+                saved.read(profile / "Moonlight Game Streaming Project" / "MoonlightGPUI.ini",
+                           encoding="utf-8")
+                assert saved["hosts"]["size"] == "0", "Removed host was not persisted on exit"
         finally:
             if process.poll() is None:
                 process.kill()  # Only this script's known, isolated test worker.
                 process.wait()
+            process.stdin.close()
+
+
+def check_output_closed(executable, profile, platform):
+    profile.mkdir(parents=True)
+    env = dict(os.environ, MOONLIGHT_GPUI_PROFILE=str(profile.resolve()),
+               QT_QPA_PLATFORM=platform, QT_QUICK_BACKEND="software")
+    if platform == "windows":
+        for key in ("QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH"):
+            env.pop(key, None)
+        system_root = os.environ["SystemRoot"]
+        env["PATH"] = os.pathsep.join((str(executable.parent),
+                                      str(Path(system_root) / "System32"), system_root))
+    with (profile / "stderr.log").open("wb") as log:
+        process = subprocess.Popen([str(executable), "--gpui-core"], env=env,
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=log, text=True, encoding="utf-8")
+        received = queue.Queue()
+
+        def read_initial():
+            received.put(process.stdout.readline())
+            received.put(process.stdout.readline())
+
+        reader = threading.Thread(target=read_initial, daemon=True)
+        reader.start()
+        try:
+            assert json.loads(received.get(timeout=30))["event"] == "ready"
+            assert json.loads(received.get(timeout=30))["event"] == "hosts"
+            reader.join(timeout=5)
+            assert not reader.is_alive()
+            process.stdout.close()
+            process.stdin.write('{"command":"list"}\n')
+            process.stdin.flush()
+            # Output failure initiates owner shutdown without an input EOF or
+            # shutdown command. Teardown must cancel the blocked pipe reader.
+            assert process.wait(timeout=35) == 0
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            process.stdin.close()
 
 
 if __name__ == "__main__":
@@ -162,4 +219,8 @@ if __name__ == "__main__":
           rename_only=True, rust_monitor=True)
     check(executable, root / "persistence-eof", seeded=True, platform=args.platform,
           reuse=True, rust_monitor=True)
-    print(f"GPUI worker handshake, validation, offline host management and persistence, shutdown and parent EOF passed ({args.platform}); no real host used.")
+    for eof in (False, True):
+        check(executable, root / f"remove-exit-{eof}", seeded=True, eof=eof,
+              platform=args.platform, rust_monitor=True, remove_on_exit=True)
+    check_output_closed(executable, root / "output-closed", args.platform)
+    print(f"GPUI worker handshake, validation, offline host management and persistence, deletion during shutdown/EOF, open-stdin shutdown and output failure passed ({args.platform}); no real host used.")

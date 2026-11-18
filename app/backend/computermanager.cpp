@@ -539,10 +539,14 @@ public:
         // Finally, delete the computer itself. This must be done
         // last because the polling thread might be using it.
         delete m_Computer;
-        QMetaObject::invokeMethod(m_ComputerManager, [manager = m_ComputerManager, computer = m_Computer, uuid] {
-            manager->m_DeletingHosts.remove(computer);
-            emit manager->hostDeleted(uuid);
-        }, Qt::QueuedConnection);
+        auto completion = [manager = m_ComputerManager, computer = m_Computer, uuid] {
+            manager->finishHostDeletion(computer, uuid);
+        };
+        if (m_ComputerManager->m_HostDeletionDispatcher) {
+            m_ComputerManager->m_HostDeletionDispatcher(std::move(completion));
+        } else {
+            QMetaObject::invokeMethod(m_ComputerManager, std::move(completion), Qt::QueuedConnection);
+        }
     }
 
 private:
@@ -557,6 +561,12 @@ void ComputerManager::deleteHost(NvComputer* computer)
     // Punt to a worker thread to avoid stalling the
     // UI while waiting for the polling thread to die
     QThreadPool::globalInstance()->start(new DeferredHostDeletionTask(this, computer));
+}
+
+void ComputerManager::finishHostDeletion(NvComputer* computer, const QString& uuid)
+{
+    m_DeletingHosts.remove(computer);
+    emit hostDeleted(uuid);
 }
 
 void ComputerManager::renameHost(NvComputer* computer, QString name)
@@ -579,6 +589,11 @@ void ComputerManager::clientSideAttributeUpdated(NvComputer* computer)
 }
 
 void ComputerManager::handleAboutToQuit()
+{
+    interruptPolling();
+}
+
+void ComputerManager::interruptPolling()
 {
     QReadLocker lock(&m_Lock);
 

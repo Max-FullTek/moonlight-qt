@@ -27,5 +27,31 @@ int main()
 
     MSG message{};
     while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&message);
-    return postedCleanup && events == std::vector<int>{1, 2, 3} ? 0 : 3;
+    if (!postedCleanup || events != std::vector<int>{1, 2, 3}) return 3;
+
+    // Multiple host/session completions must coexist, retain FIFO ordering,
+    // and retire objects only after the callback that scheduled retirement.
+    events.clear();
+    bool callbackActive = false;
+    bool deferred = false;
+    std::thread operations([&] {
+        for (int i = 0; i < 64; ++i) {
+            if (!dispatch.postCompletion([&, i] { record(i + 10); })) posted = false;
+        }
+        if (!dispatch.postCompletion([&] {
+            callbackActive = true;
+            postedCleanup = dispatch.postCompletion([&] {
+                deferred = !callbackActive;
+                record(100);
+            });
+            callbackActive = false;
+        })) posted = false;
+    });
+    operations.join();
+    if (!posted || !events.empty()) return 4;
+    while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&message);
+    std::vector<int> expected;
+    for (int i = 0; i < 64; ++i) expected.push_back(i + 10);
+    expected.push_back(100);
+    return postedCleanup && deferred && events == expected ? 0 : 5;
 }

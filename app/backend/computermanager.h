@@ -17,8 +17,10 @@
 #include <QTimer>
 #include <QSet>
 #include <condition_variable>
+#include <functional>
 #include <mutex>
 #include <thread>
+#include <utility>
 
 class ComputerManager;
 
@@ -228,6 +230,14 @@ public:
 
     void clientSideAttributeUpdated(NvComputer* computer);
 
+    // GPUI owner dispatch for host-deletion completion. The Qt client retains
+    // its queued callback until its own lifecycle is migrated.
+    void setHostDeletionDispatcher(std::function<void(std::function<void()>)> dispatcher)
+    {
+        m_HostDeletionDispatcher = std::move(dispatcher);
+    }
+    void interruptPolling();
+
 signals:
     void computerStateChanged(NvComputer* computer);
 
@@ -247,6 +257,7 @@ private slots:
 
 private:
     void saveHosts();
+    void finishHostDeletion(NvComputer* computer, const QString& uuid);
 
     void runDelayedFlush();
 
@@ -257,6 +268,7 @@ private:
     void startPollingComputer(NvComputer* computer);
 
     StreamingPreferences* m_Prefs;
+    std::function<void(std::function<void()>)> m_HostDeletionDispatcher;
     bool m_ExternalPolling;
     int m_PollingRef;
     QReadWriteLock m_Lock;

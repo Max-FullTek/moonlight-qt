@@ -5,9 +5,11 @@
 #include <QPointer>
 #include <QHash>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 
 class ComputerManager;
 class NvComputer;
@@ -47,6 +49,9 @@ private:
     void publishMonitorContexts();
     void applyMonitorUpdate(const QJsonObject& request);
     void shutdown();
+    void finishShutdown();
+    void finishSession(Session* session);
+    void postCompletion(std::function<void()> completion);
     NvComputer* findHost(const QString& uuid);
     ComputerManager* m_Manager;
     bool m_RustMonitor = false;
@@ -64,6 +69,7 @@ private:
     std::mutex m_InputMutex;
     std::deque<Input> m_Input;
     bool m_DrainingInput = false; // Owner thread only.
+    std::thread m_Reader;
 #ifdef Q_OS_WIN32
     std::unique_ptr<WindowsWorkerDispatch> m_InputWakeWindow;
 #endif

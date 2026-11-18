@@ -1832,11 +1832,8 @@ void Session::dispatchConnectionCleanup()
         releaseActiveSession();
         dispatchLifecycleCompletion([this] {
             m_ConnectionThread.join();
-            const bool shouldExit = m_ShouldExit;
             emit readyForDeletion();
-            if (shouldExit) {
-                QCoreApplication::quit();
-            }
+            // GPUI's owner handles process exit after retiring the Session.
         });
     });
 }

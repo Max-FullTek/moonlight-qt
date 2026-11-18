@@ -31,6 +31,7 @@
 
 #ifdef Q_OS_WIN32
 #include "windowsworkerdispatch.h"
+#include <windows.h>
 #endif
 
 namespace {
@@ -197,6 +198,7 @@ GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent) {
         m_DeletingHost = nullptr;
         send({{"event", "host_removed"}, {"host", uuid}});
         publishHosts();
+        finishShutdown();
     });
     connect(m_Manager, &ComputerManager::quitAppCompleted, this, [this](QVariant error) {
         if (!m_QuitPending) return;
@@ -223,7 +225,26 @@ GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent) {
     });
 }
 
-GpuiCoreBridge::~GpuiCoreBridge() = default;
+GpuiCoreBridge::~GpuiCoreBridge()
+{
+    SessionApiRpc::broker().close();
+    if (m_Reader.joinable()) {
+#ifdef Q_OS_WIN32
+        const HANDLE reader = static_cast<HANDLE>(m_Reader.native_handle());
+        while (WaitForSingleObject(reader, 10) == WAIT_TIMEOUT) CancelSynchronousIo(reader);
+#endif
+        m_Reader.join();
+    }
+}
+
+void GpuiCoreBridge::postCompletion(std::function<void()> completion)
+{
+#ifdef Q_OS_WIN32
+    if (m_InputWakeWindow && m_InputWakeWindow->postCompletion(completion)) return;
+#endif
+    // Transitional failure/non-Windows path while the Qt entry still exists.
+    QMetaObject::invokeMethod(this, std::move(completion), Qt::QueuedConnection);
+}
 
 void GpuiCoreBridge::send(QJsonObject event) {
     if (!writeProtocol(event)) {
@@ -298,6 +319,9 @@ void GpuiCoreBridge::start() {
         return;
     }
 #endif
+    m_Manager->setHostDeletionDispatcher([this](std::function<void()> completion) {
+        postCompletion(std::move(completion));
+    });
     if (m_RustMonitor) SessionApiRpc::broker().install([](uint64_t id,const std::string& payload) {
         const auto request=QJsonDocument::fromJson(QByteArray::fromStdString(payload)).object();
         return writeProtocol({{"event","session_api"},{"request_id",double(id)},
@@ -315,8 +339,9 @@ void GpuiCoreBridge::start() {
     publishHosts();
     m_Manager->startPolling();
     // The reader owns no Qt/network state and exits on shutdown or pipe EOF.
-    // The process owns this thread; the parent closes stdin during teardown.
-    std::thread([this] {
+    // Keep the reader alive until owner shutdown, then join it before the
+    // bridge or its wake window can be destroyed (stdin may still be open).
+    m_Reader = std::thread([this] {
 #ifdef LITE_NATIVE_WORKER_JSON
         WorkerCommandRouting::run(stdin, [this](WorkerCommandRouting::Input status, std::string line) {
             using PipeInput = WorkerCommandRouting::Input;
@@ -353,7 +378,7 @@ void GpuiCoreBridge::start() {
         SessionApiRpc::broker().close();
         enqueueInput({InputKind::EndOfInput, {}});
 #endif
-    }).detach();
+    });
 }
 void GpuiCoreBridge::publishHosts() {
     QJsonArray hosts;
@@ -475,8 +500,29 @@ void GpuiCoreBridge::applyMonitorUpdate(const QJsonObject& request) {
 void GpuiCoreBridge::shutdown() {
     if (m_ShuttingDown) return;
     m_ShuttingDown = true;
+    SessionApiRpc::broker().close();
+    m_Manager->interruptPolling();
     if (m_Session) m_Session->interrupt();
-    else QCoreApplication::quit();
+    finishShutdown();
+}
+
+void GpuiCoreBridge::finishShutdown()
+{
+    // Host deletion must retire its tombstone and Session must be destroyed
+    // before the owner loop stops dispatching completions.
+    if (m_ShuttingDown && !m_Session && !m_DeletingHost) QCoreApplication::quit();
+}
+
+void GpuiCoreBridge::finishSession(Session* session)
+{
+    Q_ASSERT(m_Session == session);
+    const bool shouldExit = session->shouldExit();
+    m_Session = nullptr;
+    delete session;
+    send({{"event", "stream_finished"}});
+    publishHosts();
+    if (shouldExit) shutdown();
+    finishShutdown();
 }
 void GpuiCoreBridge::command(const QByteArray& line) {
     if (m_ShuttingDown) return;
@@ -781,36 +827,42 @@ void GpuiCoreBridge::command(const QByteArray& line) {
 #endif
     m_Session = session;
     connect(session, &Session::hostQuitFailed, this, [this](const QString& message) {
-        fail("host_quit_failed", message);
-    });
+        postCompletion([this, message] { fail("host_quit_failed", message); });
+    }, Qt::DirectConnection);
     connect(session, &Session::gpuiControlsChanged, this, [this](bool active, bool mouse, bool gamepad) {
-        send({{"event", "controls"}, {"active", active}, {"gamepad_mouse", mouse}, {"has_gamepad", gamepad}});
-    });
+        postCompletion([this, active, mouse, gamepad] {
+            send({{"event", "controls"}, {"active", active}, {"gamepad_mouse", mouse}, {"has_gamepad", gamepad}});
+        });
+    }, Qt::DirectConnection);
     connect(session, &Session::gpuiControlsNavigate, this, [this](const QString& direction) {
-        send({{"event", "controls_navigate"}, {"direction", direction}});
-    });
+        postCompletion([this, direction] { send({{"event", "controls_navigate"}, {"direction", direction}}); });
+    }, Qt::DirectConnection);
     connect(session, &Session::gpuiBitrateResult, this, [this, session](int requestId, int requested, bool success, const QString& error) {
-        if (m_Session != session) return;
-        send({{"event", "bitrate_result"}, {"request_id", requestId}, {"requested_kbps", requested},
-              {"success", success}, {"message", error}});
-    });
-    connect(session, &Session::stageStarting, this, [this](QString stage) { send({{"event", "stage"}, {"stage", stage}}); });
+        postCompletion([this, session, requestId, requested, success, error] {
+            if (m_Session != session) return;
+            send({{"event", "bitrate_result"}, {"request_id", requestId}, {"requested_kbps", requested},
+                  {"success", success}, {"message", error}});
+        });
+    }, Qt::DirectConnection);
+    connect(session, &Session::stageStarting, this, [this](QString stage) {
+        postCompletion([this, stage] { send({{"event", "stage"}, {"stage", stage}}); });
+    }, Qt::DirectConnection);
     connect(session, &Session::stageFailed, this, [this](QString stage, int code, QString) {
-        fail("stage_failed", tr("%1 failed (%2)").arg(stage).arg(code));
-    });
-    connect(session, &Session::displayLaunchError, this, [this](QString message) { fail("launch_failed", message); });
-    connect(session, &Session::connectionStarted, this, [this] { send({{"event", "stream_started"}}); });
+        postCompletion([this, stage, code] { fail("stage_failed", tr("%1 failed (%2)").arg(stage).arg(code)); });
+    }, Qt::DirectConnection);
+    connect(session, &Session::displayLaunchError, this, [this](QString message) {
+        postCompletion([this, message] { fail("launch_failed", message); });
+    }, Qt::DirectConnection);
+    connect(session, &Session::connectionStarted, this, [this] {
+        postCompletion([this] { send({{"event", "stream_started"}}); });
+    }, Qt::DirectConnection);
     connect(session, &Session::readyForDeletion, this, [this, session] {
-        m_Session = nullptr;
-        session->deleteLater();
-        send({{"event", "stream_finished"}});
-        publishHosts();
-        if (m_ShuttingDown) QCoreApplication::quit();
-    }, Qt::QueuedConnection);
+        // Always defer, even when emitted by the owner: the Session's cleanup
+        // callback must return before the object that owns it is destroyed.
+        postCompletion([this, session] { finishSession(session); });
+    }, Qt::DirectConnection);
     if (!session->initialize(nullptr)) {
-        m_Session = nullptr;
-        session->deleteLater();
-        send({{"event", "stream_finished"}});
+        postCompletion([this, session] { finishSession(session); });
         return;
     }
     send({{"event", "launching"}});
