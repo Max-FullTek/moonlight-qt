@@ -947,7 +947,7 @@ private:
     void run()
     {
         // Use the placeholder UID for the initial poll, then we'll switch to the real one if it's not GFE
-        NvHTTP http(m_Address, 0, QSslCertificate(), false);
+        NvHTTP http(m_Address, 0, HostCertificate(), false);
 
         if (m_Mdns) {
             if (m_MdnsIpv6Address.isNull()) {

@@ -1,5 +1,8 @@
 #include "identitymanager.h"
 #include "nativeidentity.h"
+#ifdef LITE_GPUI_WORKER
+#include "hostcertificate.h"
+#endif
 
 #include <QDebug>
 #ifdef LITE_NATIVE_WORKER_JSON
@@ -35,18 +38,20 @@ IdentityManager::get()
 void IdentityManager::createCredentials()
 {
     const auto credentials = NativeIdentity::generateCredentials();
+#ifndef LITE_GPUI_WORKER
     // A valid old certificate may already be cached when its key is rejected.
     // Both wrappers must refer to the newly generated identity together.
     m_CachedSslCert = QSslCertificate();
     m_CachedSslKey = QSslKey();
+#endif
     m_CachedPemCert = QByteArray::fromStdString(credentials.certificatePem);
     m_CachedPrivateKey = QByteArray::fromStdString(credentials.privateKeyPem);
 
     // Check that the new keypair is valid before persisting it
-    if (getSslCertificate().isNull()) {
+    if (!hasReadableCertificate()) {
         qFatal("Newly generated certificate is unreadable");
     }
-    if (getSslKey().isNull()) {
+    if (!hasReadablePrivateKey()) {
         qFatal("Newly generated private key is unreadable");
     }
 
@@ -66,7 +71,7 @@ IdentityManager::IdentityManager()
                 m_CachedPemCert = QByteArray::fromStdString(record.at("certificate").get<std::string>());
                 m_CachedPrivateKey = QByteArray::fromStdString(record.at("private_key").get<std::string>());
                 if (!version.is_number_integer() || version != 1 || m_CachedUniqueId.isEmpty() ||
-                    getSslCertificate().isNull() || getSslKey().isNull()) {
+                    !hasReadableCertificate() || !hasReadablePrivateKey()) {
                     qFatal("Invalid GPUI identity");
                 }
                 return;
@@ -79,7 +84,7 @@ IdentityManager::IdentityManager()
             };
             m_CachedPemCert = bytes(SER_CERT);
             m_CachedPrivateKey = bytes(SER_KEY);
-            if (getSslCertificate().isNull() || getSslKey().isNull()) createCredentials();
+            if (!hasReadableCertificate() || !hasReadablePrivateKey()) createCredentials();
             m_CachedUniqueId = QString::fromUtf8(LegacyWorkerProfile::value(legacy, SER_UNIQUEID));
             if (m_CachedUniqueId.isEmpty()) {
                 m_CachedUniqueId = QString::fromStdString(NativeIdentity::generateUniqueId());
@@ -110,7 +115,7 @@ IdentityManager::IdentityManager()
                 m_CachedPemCert = record.value("certificate").toString().toLatin1();
                 m_CachedPrivateKey = record.value("private_key").toString().toLatin1();
                 if (record.value("version").toInt() != 1 || m_CachedUniqueId.isEmpty() ||
-                    getSslCertificate().isNull() || getSslKey().isNull()) {
+                    !hasReadableCertificate() || !hasReadablePrivateKey()) {
                     qFatal("Invalid GPUI identity");
                 }
                 return;
@@ -129,13 +134,13 @@ IdentityManager::IdentityManager()
         settings.setValue(SER_CERT, m_CachedPemCert);
         settings.setValue(SER_KEY, m_CachedPrivateKey);
     }
-    else if (getSslCertificate().isNull()) {
+    else if (!hasReadableCertificate()) {
         qWarning() << "Certificate is unreadable";
         createCredentials();
         settings.setValue(SER_CERT, m_CachedPemCert);
         settings.setValue(SER_KEY, m_CachedPrivateKey);
     }
-    else if (getSslKey().isNull()) {
+    else if (!hasReadablePrivateKey()) {
         qWarning() << "Private key is unreadable";
         createCredentials();
         settings.setValue(SER_CERT, m_CachedPemCert);
@@ -143,10 +148,10 @@ IdentityManager::IdentityManager()
     }
 
     // We should have valid credentials now. If not, we're screwed
-    if (getSslCertificate().isNull()) {
+    if (!hasReadableCertificate()) {
         qFatal("Certificate is unreadable");
     }
-    if (getSslKey().isNull()) {
+    if (!hasReadablePrivateKey()) {
         qFatal("Private key is unreadable");
     }
 
@@ -165,6 +170,25 @@ IdentityManager::IdentityManager()
     }
 }
 
+bool IdentityManager::hasReadableCertificate()
+{
+#ifdef LITE_GPUI_WORKER
+    return !HostCertificate(m_CachedPemCert).isNull();
+#else
+    return !getSslCertificate().isNull();
+#endif
+}
+
+bool IdentityManager::hasReadablePrivateKey()
+{
+#ifdef LITE_GPUI_WORKER
+    return NativeIdentity::isReadableRsaPrivateKey(m_CachedPrivateKey.toStdString());
+#else
+    return !getSslKey().isNull();
+#endif
+}
+
+#ifndef LITE_GPUI_WORKER
 QSslCertificate
 IdentityManager::getSslCertificate()
 {
@@ -198,6 +222,7 @@ IdentityManager::getSslConfig()
     sslConfig.setPrivateKey(getSslKey());
     return sslConfig;
 }
+#endif
 
 QString
 IdentityManager::getUniqueId()

@@ -615,7 +615,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
             fail("invalid_pairing",tr("Invalid pairing result.")); return;
         }
         const int state=request["state"].toInt();
-        QSslCertificate certificate(request["certificate"].toString().toLatin1());
+        HostCertificate certificate(request["certificate"].toString().toLatin1());
         if (state==0 && (certificate.isNull() || !request["error"].toString().isEmpty())) {
             fail("invalid_pairing",tr("Invalid pairing certificate.")); return;
         }
@@ -712,7 +712,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
     if (name == "displays") {
         NvAddress address;
         uint16_t httpsPort;
-        QSslCertificate certificate;
+        HostCertificate certificate;
         QString uuid;
         bool useTrueUid;
         {

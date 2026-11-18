@@ -48,7 +48,7 @@ NvComputer::NvComputer(QSettings& settings)
                                   settings.value(SER_IPV6PORT, QVariant(DEFAULT_HTTP_PORT)).toUInt());
     this->manualAddress = NvAddress(settings.value(SER_MANUALADDR).toString(),
                                     settings.value(SER_MANUALPORT, QVariant(DEFAULT_HTTP_PORT)).toUInt());
-    this->serverCert = QSslCertificate(settings.value(SER_SRVCERT).toByteArray());
+    this->serverCert = HostCertificate(settings.value(SER_SRVCERT).toByteArray());
     this->isNvidiaServerSoftware = settings.value(SER_NVIDIASOFTWARE).toBool();
 
     int appCount = settings.beginReadArray(SER_APPLIST);

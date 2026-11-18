@@ -129,7 +129,7 @@ public:
     QString name;
     bool hasCustomName;
     QString uuid;
-    QSslCertificate serverCert;
+    HostCertificate serverCert;
     QVector<NvApp> appList;
     bool isNvidiaServerSoftware;
     // Remember to update isEqualSerialized() when adding fields here!

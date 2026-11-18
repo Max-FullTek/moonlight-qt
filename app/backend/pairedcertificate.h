@@ -1,21 +1,27 @@
 #pragma once
 
+#include "hostcertificate.h"
+#include <QString>
+
+#ifndef LITE_GPUI_WORKER
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QSslCertificate>
 #include <QSslConfiguration>
 #include <QSslError>
 #include <QVariant>
+#endif
 
 namespace PairedCertificate {
 
-inline QString toOptionalPem(const QSslCertificate& certificate)
+inline QString toOptionalPem(const HostCertificate& certificate)
 {
     // The Qt backend can serialize a null certificate as an empty PEM block.
     // The Rust host API expects an empty string when no pin exists.
     return certificate.isNull() ? QString() : QString::fromLatin1(certificate.toPem());
 }
 
+#ifndef LITE_GPUI_WORKER
 inline bool matches(const QSslCertificate& pinned, const QSslCertificate& peer)
 {
     return !pinned.isNull() && !peer.isNull() && pinned == peer;
@@ -57,5 +63,7 @@ inline QMetaObject::Connection enforce(QNetworkAccessManager* manager, QObject* 
                                 }
                             });
 }
+
+#endif
 
 } // namespace PairedCertificate

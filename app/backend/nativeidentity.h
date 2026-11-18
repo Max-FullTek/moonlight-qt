@@ -11,6 +11,7 @@ struct Credentials {
 // Failure throws without publishing a partial identity.
 Credentials generateCredentials();
 std::string generateUniqueId();
+bool isReadableRsaPrivateKey(const std::string& pem);
 // Preserve PKCS8 on Windows and the existing PKCS1 adapter on Darwin. Invalid
 // or password-protected input returns empty; this function never prompts.
 std::string normalizePrivateKey(const std::string& pem, bool traditional);

@@ -1,8 +1,10 @@
 #pragma once
 
+#ifndef LITE_GPUI_WORKER
 #include <QSslConfiguration>
 #include <QSslCertificate>
 #include <QSslKey>
+#endif
 #include <QSettings>
 
 class IdentityManager
@@ -17,8 +19,10 @@ public:
     QByteArray
     getPrivateKey();
 
+#ifndef LITE_GPUI_WORKER
     QSslConfiguration
     getSslConfig();
+#endif
 
     static
     IdentityManager*
@@ -27,11 +31,16 @@ public:
 private:
     IdentityManager();
 
+#ifndef LITE_GPUI_WORKER
     QSslCertificate
     getSslCertificate();
 
     QSslKey
     getSslKey();
+#endif
+
+    bool hasReadableCertificate();
+    bool hasReadablePrivateKey();
 
     void
     createCredentials();
@@ -42,8 +51,10 @@ private:
 
     // Lazy initialized
     QString m_CachedUniqueId;
+#ifndef LITE_GPUI_WORKER
     QSslCertificate m_CachedSslCert;
     QSslKey m_CachedSslKey;
+#endif
 
     static IdentityManager* s_Im;
 };

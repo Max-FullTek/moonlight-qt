@@ -2731,7 +2731,7 @@ void Session::startRuntimeBitrateWorker()
     NvAddress address;
     uint16_t httpsPort;
     QString uuid;
-    QSslCertificate certificate;
+    HostCertificate certificate;
     {
         QReadLocker locker(&m_Computer->lock);
         address = m_Computer->activeAddress;
@@ -2948,7 +2948,7 @@ void Session::sendSunshineAbrFeedback()
 
     NvAddress address;
     uint16_t httpsPort;
-    QSslCertificate certificate;
+    HostCertificate certificate;
     QString uuid;
     {
         QReadLocker lock(&m_Computer->lock);

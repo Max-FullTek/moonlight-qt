@@ -1,6 +1,7 @@
 #include "hostprofile.h"
 #include "legacyworkerprofile.h"
 #include "nvcomputer.h"
+#include "pairedcertificate.h"
 #include "windowsprofilefile.h"
 
 #include <nlohmann/json.hpp>
@@ -49,7 +50,7 @@ Json encode(const NvComputer& host)
         {"custom_name", host.hasCustomName}, {"mac", host.macAddress.toHex().toStdString()},
         {"local", encodeAddress(host.localAddress)}, {"remote", encodeAddress(host.remoteAddress)},
         {"ipv6", encodeAddress(host.ipv6Address)}, {"manual", encodeAddress(host.manualAddress)},
-        {"server_certificate", host.serverCert.toPem().toStdString()},
+        {"server_certificate", PairedCertificate::toOptionalPem(host.serverCert).toStdString()},
         {"nvidia", host.isNvidiaServerSoftware}, {"apps", std::move(apps)}};
 }
 
@@ -67,8 +68,12 @@ std::unique_ptr<NvComputer> decode(const Json& value)
     host->remoteAddress = decodeAddress(value.at("remote"));
     host->ipv6Address = decodeAddress(value.at("ipv6"));
     host->manualAddress = decodeAddress(value.at("manual"));
-    const auto cert = string(value, "server_certificate").toLatin1();
-    host->serverCert = QSslCertificate(cert);
+    auto cert = string(value, "server_certificate").toLatin1();
+    // Older Qt TLS backends could write this for an unpaired host.
+    if (cert == "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n") {
+        cert.clear();
+    }
+    host->serverCert = HostCertificate(cert);
     if (!cert.isEmpty() && host->serverCert.isNull()) {
         throw std::runtime_error("Invalid paired host certificate");
     }
@@ -162,7 +167,7 @@ std::vector<std::unique_ptr<NvComputer>> HostProfile::importLegacy(const std::fi
         host->remoteAddress = address("remoteaddress", "remoteport");
         host->ipv6Address = address("ipv6address", "ipv6port");
         host->manualAddress = address("manualaddress", "manualport");
-        host->serverCert = QSslCertificate(bytes("srvcert"));
+        host->serverCert = HostCertificate(bytes("srvcert"));
         host->isNvidiaServerSoftware = boolean("nvidiasw");
         const auto appGroup = prefix + "apps/";
         const auto appCount = number(values, appGroup + "size");

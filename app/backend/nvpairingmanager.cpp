@@ -40,7 +40,7 @@ public:
     }
     bool pinCertificate(const std::string& pem) override
     {
-        m_Certificate = QSslCertificate(QByteArray(pem.data(), static_cast<int>(pem.size())));
+        m_Certificate = HostCertificate(QByteArray(pem.data(), static_cast<int>(pem.size())));
         if (m_Certificate.isNull()) return false;
         m_Http.setServerCert(m_Certificate);
         return true;
@@ -49,17 +49,17 @@ public:
     {
         NvComputer::savePairname(m_Computer.uuid, QString::fromStdString(name));
     }
-    const QSslCertificate& certificate() const { return m_Certificate; }
+    const HostCertificate& certificate() const { return m_Certificate; }
 private:
     NvHTTP& m_Http;
     NvComputer& m_Computer;
-    QSslCertificate m_Certificate;
+    HostCertificate m_Certificate;
 };
 }
 NvPairingManager::NvPairingManager(NvComputer* computer) : m_Http(computer), m_Computer(computer) {}
 NvPairingManager::~NvPairingManager() = default;
 
-NvPairingManager::PairState NvPairingManager::pair(QString appVersion, QString pin, QSslCertificate& serverCert)
+NvPairingManager::PairState NvPairingManager::pair(QString appVersion, QString pin, HostCertificate& serverCert)
 {
     PairingHost host(m_Http, *m_Computer);
     std::string pairedCertificate;

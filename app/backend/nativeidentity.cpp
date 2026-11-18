@@ -20,6 +20,16 @@ std::string pem(BIO* bio) {
     require(bytes && bytes->data && bytes->length > 0);
     return {bytes->data, bytes->length};
 }
+Owned<EVP_PKEY, EVP_PKEY_free> readPrivateKey(const std::string& input)
+{
+    Owned<EVP_PKEY, EVP_PKEY_free> key(nullptr, EVP_PKEY_free);
+    if (input.empty() || input.size() > INT_MAX) return key;
+    Owned<BIO, BIO_free> source(BIO_new_mem_buf(const_cast<char*>(input.data()), static_cast<int>(input.size())), BIO_free);
+    require(bool(source));
+    auto noPassword = [](char*, int, int, void*) -> int { return 0; };
+    key.reset(PEM_read_bio_PrivateKey(source.get(), nullptr, noPassword, nullptr));
+    return key;
+}
 }
 Credentials generateCredentials()
 {
@@ -74,11 +84,7 @@ std::string generateUniqueId()
 }
 std::string normalizePrivateKey(const std::string& input, bool traditional)
 {
-    if (input.empty() || input.size() > INT_MAX) return {};
-    Owned<BIO, BIO_free> source(BIO_new_mem_buf(const_cast<char*>(input.data()), static_cast<int>(input.size())), BIO_free);
-    require(bool(source));
-    auto noPassword = [](char*, int, int, void*) -> int { return 0; };
-    Owned<EVP_PKEY, EVP_PKEY_free> key(PEM_read_bio_PrivateKey(source.get(), nullptr, noPassword, nullptr), EVP_PKEY_free);
+    const auto key = readPrivateKey(input);
     if (!key) return {};
     Owned<BIO, BIO_free> output(BIO_new(BIO_s_mem()), BIO_free);
     require(bool(output));
@@ -87,5 +93,10 @@ std::string normalizePrivateKey(const std::string& input, bool traditional)
         : PEM_write_bio_PrivateKey(output.get(), key.get(), nullptr, nullptr, 0, nullptr, nullptr);
     if (result != 1) return {};
     return pem(output.get());
+}
+bool isReadableRsaPrivateKey(const std::string& input)
+{
+    const auto key = readPrivateKey(input);
+    return key && EVP_PKEY_base_id(key.get()) == EVP_PKEY_RSA;
 }
 }

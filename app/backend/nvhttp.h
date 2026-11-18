@@ -1,6 +1,7 @@
 #pragma once
 
 #include "identitymanager.h"
+#include "hostcertificate.h"
 #include "nvapp.h"
 #include "nvaddress.h"
 #include "remotecomputer.h"
@@ -122,7 +123,7 @@ public:
     // owning thread. Changing the paired identity discards cached connections.
     // LITE_NATIVE_HTTP retains this constructor contract for callers but does
     // not use or modify the manager; each request owns a native connection.
-    explicit NvHTTP(NvAddress address, uint16_t httpsPort, QSslCertificate serverCert, bool useTrueUid = false, QNetworkAccessManager* nam = nullptr, QString uuid = "");
+    explicit NvHTTP(NvAddress address, uint16_t httpsPort, HostCertificate serverCert, bool useTrueUid = false, QNetworkAccessManager* nam = nullptr, QString uuid = "");
 
     explicit NvHTTP(NvComputer* computer, QNetworkAccessManager* nam = nullptr);
 
@@ -174,7 +175,7 @@ public:
                     int currentBitrateKbps,
                     int timeoutMs = 2000);
 
-    void setServerCert(QSslCertificate serverCert);
+    void setServerCert(HostCertificate serverCert);
     void setAddress(NvAddress address);
     void setHttpsPort(uint16_t port);
     void setTrueUid(bool useTrueUid);
@@ -182,7 +183,7 @@ public:
 
     NvAddress address();
 
-    QSslCertificate serverCert();
+    HostCertificate serverCert();
 
     uint16_t httpPort();
 
@@ -269,7 +270,7 @@ private:
 
     NvAddress m_Address;
     QNetworkAccessManager* m_Nam;
-    QSslCertificate m_ServerCert;
+    HostCertificate m_ServerCert;
     bool m_UseTrueUid;
     QString m_Uuid;
 };

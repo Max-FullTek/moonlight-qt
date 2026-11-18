@@ -21,7 +21,7 @@ public:
     ~NvPairingManager();
 
     PairState
-    pair(QString appVersion, QString pin, QSslCertificate& serverCert);
+    pair(QString appVersion, QString pin, HostCertificate& serverCert);
 
 private:
     NvHTTP m_Http;

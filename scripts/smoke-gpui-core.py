@@ -235,6 +235,14 @@ if __name__ == "__main__":
     check(executable, root / "host-management", seeded=True, platform=args.platform)
     check(executable, root / "persistence", seeded=True, platform=args.platform,
           rename_only=True, rust_monitor=True)
+    native_hosts = root / "persistence" / "hosts-v1.json"
+    saved = json.loads(native_hosts.read_text(encoding="utf-8"))
+    assert saved["hosts"][0]["server_certificate"] == ""
+    # The old Qt TLS backend could serialize a null certificate this way.
+    saved["hosts"][0]["server_certificate"] = (
+        "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n"
+    )
+    native_hosts.write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
     check(executable, root / "persistence", seeded=True, platform=args.platform,
           reuse=True, rust_monitor=True)
     check(executable, root / "persistence", eof=True, platform=args.platform,

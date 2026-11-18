@@ -97,7 +97,7 @@ void NvHTTP::setRuntimeBitrate(int bitrateKbps,const QString& clientName) {
 #define XML_NAME_EQUALS(x, y) ((x) == (u##y))
 #endif
 
-NvHTTP::NvHTTP(NvAddress address, uint16_t httpsPort, QSslCertificate serverCert, bool useTrueUid, QNetworkAccessManager* nam, QString uuid) :
+NvHTTP::NvHTTP(NvAddress address, uint16_t httpsPort, HostCertificate serverCert, bool useTrueUid, QNetworkAccessManager* nam, QString uuid) :
 #ifdef LITE_NATIVE_HTTP
     m_Nam(nam),
 #else
@@ -125,7 +125,7 @@ NvHTTP::NvHTTP(NvComputer* computer, QNetworkAccessManager* nam) :
 {
 }
 
-void NvHTTP::setServerCert(QSslCertificate serverCert)
+void NvHTTP::setServerCert(HostCertificate serverCert)
 {
     m_ServerCert = serverCert;
 }
@@ -162,7 +162,7 @@ NvAddress NvHTTP::address()
     return m_Address;
 }
 
-QSslCertificate NvHTTP::serverCert()
+HostCertificate NvHTTP::serverCert()
 {
     return m_ServerCert;
 }

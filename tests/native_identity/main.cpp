@@ -16,6 +16,8 @@ int main()
         for (const auto* identity : {&first, &second}) {
             check(NativeIdentity::normalizePrivateKey(identity->privateKeyPem, false) == identity->privateKeyPem);
             const auto traditional = NativeIdentity::normalizePrivateKey(identity->privateKeyPem, true);
+            check(NativeIdentity::isReadableRsaPrivateKey(identity->privateKeyPem));
+            check(NativeIdentity::isReadableRsaPrivateKey(traditional));
             check(traditional.find("-----BEGIN RSA PRIVATE KEY-----") == 0);
             check(NativeIdentity::normalizePrivateKey(traditional, false) == identity->privateKeyPem);
             check(identity->certificatePem.find("-----BEGIN CERTIFICATE-----") == 0);
@@ -33,8 +35,10 @@ int main()
                                           sizeof(password) - 1, nullptr, nullptr) == 1);
             BUF_MEM* protectedPem = nullptr;
             BIO_get_mem_ptr(encrypted.get(), &protectedPem);
-            check(protectedPem && NativeIdentity::normalizePrivateKey(
-                std::string(protectedPem->data, protectedPem->length), false).empty());
+            check(protectedPem != nullptr);
+            const std::string encryptedKey(protectedPem->data, protectedPem->length);
+            check(NativeIdentity::normalizePrivateKey(encryptedKey, false).empty());
+            check(!NativeIdentity::isReadableRsaPrivateKey(encryptedKey));
             check(EVP_PKEY_base_id(key.get()) == EVP_PKEY_RSA && EVP_PKEY_bits(key.get()) == 2048);
             check(X509_check_private_key(cert.get(), key.get()) == 1 && X509_verify(cert.get(), key.get()) == 1);
             check(X509_get_version(cert.get()) == 2 && ASN1_INTEGER_get(X509_get_serialNumber(cert.get())) == 0);
@@ -50,6 +54,7 @@ int main()
             check(X509_cmp_current_time(X509_get0_notAfter(cert.get())) > 0);
         }
         for (const auto* invalid : {"", "not PEM", "-----BEGIN PRIVATE KEY-----\ninvalid\n-----END PRIVATE KEY-----"}) {
+            check(!NativeIdentity::isReadableRsaPrivateKey(invalid));
             check(NativeIdentity::normalizePrivateKey(invalid, false).empty());
             check(NativeIdentity::normalizePrivateKey(invalid, true).empty());
         }
