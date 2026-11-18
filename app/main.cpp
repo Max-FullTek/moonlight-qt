@@ -18,9 +18,8 @@
 #include <QPalette>
 #include <QFont>
 #include <QCursor>
-#include <QElapsedTimer>
+#include <QDateTime>
 #include <QTemporaryFile>
-#include <QRegularExpression>
 #include <QFontDatabase>
 #include <QLocale>
 #include <QFile>
@@ -30,8 +29,11 @@
 #include <QSettings>
 #endif
 #include <QThreadPool>
+#include <QTextStream>
+#include <chrono>
 #include <memory>
 #include <QStandardPaths>
+#include "logredaction.h"
 
 #ifdef Q_OS_UNIX
 #include <sys/socket.h>
@@ -171,13 +173,11 @@ void StreamUtils::exitAsyncLoggingMode()
     g_AsyncLoggingEnabled.deref();
 }
 
-static QElapsedTimer s_LoggerTime;
+static std::chrono::steady_clock::time_point s_LoggerStart;
 static QTextStream s_LoggerStream(stderr);
 static QThreadPool s_LoggerThread;
 static QMutex s_SyncLoggerMutex;
 static bool s_SuppressVerboseOutput;
-static QRegularExpression k_RikeyRegex("&rikey=\\w+");
-static QRegularExpression k_RikeyIdRegex("&rikeyid=[\\d-]+");
 #ifdef LOG_TO_FILE
 // Max log file size of 10 MB
 static const uint64_t k_MaxLogSizeBytes = 10 * 1024 * 1024;
@@ -214,6 +214,7 @@ private:
 
 void logToLoggerStream(QString& message)
 {
+    redactSessionParameters(message);
 #if defined(QT_DEBUG) && defined(Q_OS_WIN32)
     // Output log messages to a debugger if attached
     if (IsDebuggerPresent()) {
@@ -225,10 +226,6 @@ void logToLoggerStream(QString& message)
         }
     }
 #endif
-
-    // Strip session encryption keys and IVs from the logs
-    message.replace(k_RikeyRegex, "&rikey=REDACTED");
-    message.replace(k_RikeyIdRegex, "&rikeyid=REDACTED");
 
 #ifdef LOG_TO_FILE
     auto oldLogSize = s_LogBytesWritten.fetchAndAddRelaxed(message.size());
@@ -249,6 +246,13 @@ void logToLoggerStream(QString& message)
         // Log the message immediately
         LoggerTask(message).run();
     }
+}
+
+static QString logTimestamp()
+{
+    using namespace std::chrono;
+    const auto elapsed = duration_cast<milliseconds>(steady_clock::now() - s_LoggerStart);
+    return QTime::fromMSecsSinceStartOfDay(elapsed.count()).toString();
 }
 
 void sdlLogToDiskHandler(void*, int category, SDL_LogPriority priority, const char* message)
@@ -291,8 +295,7 @@ void sdlLogToDiskHandler(void*, int category, SDL_LogPriority priority, const ch
         break;
     }
 
-    QTime logTime = QTime::fromMSecsSinceStartOfDay(s_LoggerTime.elapsed());
-    QString txt = QString("%1 - SDL %2 (%3): %4\n").arg(logTime.toString()).arg(priorityTxt).arg(category).arg(message);
+    QString txt = QString("%1 - SDL %2 (%3): %4\n").arg(logTimestamp()).arg(priorityTxt).arg(category).arg(message);
 
     logToLoggerStream(txt);
 }
@@ -328,8 +331,7 @@ void qtLogToDiskHandler(QtMsgType type, const QMessageLogContext&, const QString
         break;
     }
 
-    QTime logTime = QTime::fromMSecsSinceStartOfDay(s_LoggerTime.elapsed());
-    QString txt = QString("%1 - Qt %2: %3\n").arg(logTime.toString()).arg(typeTxt).arg(msg);
+    QString txt = QString("%1 - Qt %2: %3\n").arg(logTimestamp()).arg(typeTxt).arg(msg);
 
     logToLoggerStream(txt);
 }
@@ -356,8 +358,7 @@ void ffmpegLogToDiskHandler(void* ptr, int level, const char* fmt, va_list vl)
     av_log_format_line(ptr, level, fmt, vl, lineBuffer, sizeof(lineBuffer), &printPrefix);
 
     if (shouldPrefixThisMessage) {
-        QTime logTime = QTime::fromMSecsSinceStartOfDay(s_LoggerTime.elapsed());
-        QString txt = QString("%1 - FFmpeg: %2").arg(logTime.toString()).arg(lineBuffer);
+        QString txt = QString("%1 - FFmpeg: %2").arg(logTimestamp()).arg(lineBuffer);
         logToLoggerStream(txt);
     }
     else {
@@ -904,7 +905,7 @@ int main(int argc, char *argv[])
 
     // Serialize log messages on a single thread
     s_LoggerThread.setMaxThreadCount(1);
-    s_LoggerTime.start();
+    s_LoggerStart = std::chrono::steady_clock::now();
 
     // Register our logger with all libraries
 #if SDL_VERSION_ATLEAST(3, 0, 0)

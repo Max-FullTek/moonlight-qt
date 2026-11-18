@@ -3,7 +3,6 @@
 #include "overlayrasterwindow.h"
 #include <QPainter>
 #include <QFont>
-#include <QElapsedTimer>
 #include <QSurfaceFormat>
 #include <QPropertyAnimation>
 
@@ -53,7 +52,6 @@ private slots:
 private:
     QString m_Message;
     QFont   m_Font;
-    QElapsedTimer m_Clock;
     OverlayToastEventState m_EventState;
     QPropertyAnimation* m_FadeAnimation;
     int m_ToastHeight;

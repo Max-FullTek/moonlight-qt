@@ -9,10 +9,10 @@
 #include <QIcon>
 #include <QHash>
 #include <QSurfaceFormat>
-#include <QElapsedTimer>
 #include <QTimer>
 #include <QPropertyAnimation>
 #include <QVariantAnimation>
+#include <chrono>
 #include <functional>
 #include <optional>
 #include <utility>
@@ -258,7 +258,7 @@ private:
     SliderZone m_SliderPressedZone = SliderZone::None;
     SliderZone m_SliderHotZone = SliderZone::None;
     qreal m_WheelAccum = 0.0;         // high-resolution wheel accumulation
-    QElapsedTimer m_SliderAdjustClock; // gamepad repeat acceleration window
+    std::optional<std::chrono::steady_clock::time_point> m_LastSliderAdjust;
     int m_SliderAdjustStreak = 0;
 
     // Parent rect in the panel's coordinate space. This is global for detached
@@ -281,7 +281,7 @@ private:
     QHash<QString, QIcon> m_MenuIcons;
 
     // Anti-flicker: grace period after show
-    QElapsedTimer m_ShowTimer;
+    std::chrono::steady_clock::time_point m_ShownAt;
     QTimer m_LeaveTimer;
     bool m_CloseWhenPointerOutside;
 

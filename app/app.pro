@@ -331,6 +331,7 @@ SOURCES += \
     streaming/video/videoenhancement.cpp
 
 HEADERS += \
+    logredaction.h \
     backend/gpuicorebridge.h \
     backend/sessionapirpc.h \
     versionutils.h \

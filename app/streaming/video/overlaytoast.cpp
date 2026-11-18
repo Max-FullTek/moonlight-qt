@@ -4,6 +4,7 @@
 #include <QGuiApplication>
 #include <QScreen>
 #include <QFontMetrics>
+#include <chrono>
 
 namespace {
 
@@ -17,6 +18,12 @@ const QColor kShadow(0, 0, 0, 0x8C);       // Theme.shadowColor
 
 const int kShadowOffset = 6;               // Theme.shadowOffset
 const int kAccentBar = 4;                  // Theme.accentBar
+
+auto monotonicMilliseconds()
+{
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
 
 }
 
@@ -50,8 +57,6 @@ OverlayToast::OverlayToast(QWindow* parent, OverlayWindowMode windowMode)
     m_FadeAnimation->setEndValue(0.0);
     connect(m_FadeAnimation, &QPropertyAnimation::finished,
             this, &OverlayToast::onFadeFinished);
-
-    m_Clock.start();
 }
 
 OverlayToast::~OverlayToast()
@@ -61,17 +66,17 @@ OverlayToast::~OverlayToast()
 
 bool OverlayToast::needsEventProcessing() const
 {
-    return m_EventState.needsEventProcessing(m_Clock.elapsed());
+    return m_EventState.needsEventProcessing(monotonicMilliseconds());
 }
 
 int OverlayToast::nextEventDelayMs() const
 {
-    return m_EventState.nextEventDelayMs(m_Clock.elapsed());
+    return m_EventState.nextEventDelayMs(monotonicMilliseconds());
 }
 
 void OverlayToast::beginEventProcessing()
 {
-    if (m_EventState.beginEventProcessing(m_Clock.elapsed())) {
+    if (m_EventState.beginEventProcessing(monotonicMilliseconds())) {
         startFadeOut();
     }
 }
@@ -105,7 +110,7 @@ void OverlayToast::showToast(int parentX, int parentY, int parentW, int parentH,
     // Stop any ongoing fade before replacing the toast. The state deadline is
     // reset below, so an expired older toast cannot dismiss the new message.
     m_FadeAnimation->stop();
-    m_EventState.show(m_Clock.elapsed(), durationMs);
+    m_EventState.show(monotonicMilliseconds(), durationMs);
     setOpacity(1.0);
 
     // Calculate dimensions

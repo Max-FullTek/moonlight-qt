@@ -11,7 +11,7 @@
 #include <memory>
 
 namespace {
-constexpr qint64 PointerGracePeriodMs = 300;
+constexpr auto PointerGracePeriod = std::chrono::milliseconds(300);
 constexpr int PointerCheckIntervalMs = 150;
 // Raster counterpart of gui/theme/Theme.qml (same palette and hard edges).
 const QColor MenuSurface("#171A20");
@@ -526,12 +526,14 @@ void OverlayMenuPanel::gamepadAdjustSlider(int direction)
         m_SliderAdjustStreak = 0;
         forceRepaint();
     }
-    if (m_SliderAdjustClock.isValid() && m_SliderAdjustClock.elapsed() <= 350) {
+    using namespace std::chrono;
+    const auto now = steady_clock::now();
+    if (m_LastSliderAdjust && duration_cast<milliseconds>(now - *m_LastSliderAdjust).count() <= 350) {
         m_SliderAdjustStreak++;
     } else {
         m_SliderAdjustStreak = 0;
     }
-    m_SliderAdjustClock.start();
+    m_LastSliderAdjust = now;
     // 1x → 2x → 4x → 8x (capped) while the d-pad is held or rapidly tapped.
     adjustBitrateStep(direction, 1 << qMin(m_SliderAdjustStreak / 2, 3));
 }
@@ -646,7 +648,7 @@ void OverlayMenuPanel::showInternal()
     }
 
     m_Visible = true;
-    m_ShowTimer.start();
+    m_ShownAt = std::chrono::steady_clock::now();
 
     // Calculate target geometry
     repositionWindow();
@@ -698,9 +700,10 @@ void OverlayMenuPanel::schedulePointerOutsideCheck()
         return;
     }
 
-    const qint64 remainingGrace = PointerGracePeriodMs - m_ShowTimer.elapsed();
-    if (remainingGrace > 0) {
-        m_LeaveTimer.start(static_cast<int>(remainingGrace));
+    using namespace std::chrono;
+    const auto remainingGrace = PointerGracePeriod - duration_cast<milliseconds>(steady_clock::now() - m_ShownAt);
+    if (remainingGrace > milliseconds::zero()) {
+        m_LeaveTimer.start(static_cast<int>(remainingGrace.count()));
     } else if (OverlayWindowPolicy::usesParentCoordinates(m_WindowMode)) {
         m_LeaveTimer.start(0);
     } else {
@@ -822,7 +825,8 @@ void OverlayMenuPanel::dismissOnOutsideClick(const QPoint& parentPosition)
 
 void OverlayMenuPanel::dismissOnOutsidePointerMove(const QPoint& parentPosition)
 {
-    if (!m_Visible || !m_CloseWhenPointerOutside || m_ShowTimer.elapsed() < PointerGracePeriodMs) {
+    if (!m_Visible || !m_CloseWhenPointerOutside ||
+            std::chrono::steady_clock::now() - m_ShownAt < PointerGracePeriod) {
         return;
     }
 

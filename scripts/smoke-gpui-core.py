@@ -86,6 +86,9 @@ def check(executable, profile, eof=False, seeded=False, platform="offscreen",
                     assert hosts[0]["name"] == "測試 Host 😀", hosts
                 send('{"command":"rename","host":"ci-offline-host","name":""}')
                 assert event("error")["code"] == "invalid_name"
+                for control in ("\0", "\t", "\x1f", "\x7f"):
+                    send(json.dumps({"command": "rename", "host": "ci-offline-host", "name": "a" + control + "b"}))
+                    assert event("error")["code"] == "invalid_name"
                 send(json.dumps({"command": "rename", "host": "ci-offline-host", "name": "測試 Host 😀"}))
                 event("host_renamed")
                 if not rename_only:
@@ -127,6 +130,8 @@ def check(executable, profile, eof=False, seeded=False, platform="offscreen",
                     ('{"command":"controls","action":"bitrate","value":20000,"request_id":"one"}', 'invalid_controls'),
                     ('{"command":"start","host":"missing"}', 'host_not_found'),
                     ('{"command":"add","address":"https://invalid/"}', 'invalid_address'),
+                    (json.dumps({"command": "add", "address": "host\tname"}), 'invalid_address'),
+                    (json.dumps({"command": "add", "address": "host\\name"}), 'invalid_address'),
                     ('{"command":"app_preferences","host":"missing","app":1,"hidden":false,"direct_launch":true}', 'host_not_found'),
                     ('{"command":"rename","host":"missing","name":"Test"}', 'host_not_found'),
                     ('{"command":"remove","host":"missing"}', 'host_not_found'),

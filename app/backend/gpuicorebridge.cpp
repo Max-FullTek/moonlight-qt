@@ -9,6 +9,7 @@
 #endif
 #include "streaming/streamutils.h"
 #include "SDL_compat.h"
+#include <algorithm>
 #include <cmath>
 #include <QDebug>
 #include "streaming/session.h"
@@ -21,8 +22,8 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QReadLocker>
+#include <QStringView>
 #include <QWriteLocker>
-#include <QRegularExpression>
 #include <QThreadPool>
 #include <QTimer>
 #include <cstdio>
@@ -35,6 +36,23 @@
 #endif
 
 namespace {
+bool hasAsciiControl(QStringView value)
+{
+    return std::any_of(value.begin(), value.end(), [](QChar character) {
+        const auto code = character.unicode();
+        return code <= 0x1f || code == 0x7f;
+    });
+}
+
+bool hasInvalidAddressCharacter(QStringView address)
+{
+    return std::any_of(address.begin(), address.end(), [](QChar character) {
+        const auto code = character.unicode();
+        return (code >= '\t' && code <= '\r') || code == ' ' ||
+               code == '/' || code == '\\' || code == '?' || code == '#' || code == '@';
+    });
+}
+
 bool writeProtocol(QJsonObject event) {
     event.insert("protocol",1);
     const auto line=QJsonDocument(event).toJson(QJsonDocument::Compact);
@@ -90,7 +108,9 @@ bool validAdvanced(const QJsonObject& a) {
     if (!(integer(a,"custom_width",256,8192))) return false;
     if (!(integer(a,"custom_height",256,8192))) return false;
     if (!(integer(a,"custom_fps",1,512))) return false;
-    if (!((a["host_display"].isString() && a["host_display"].toString().size()<=256 && !a["host_display"].toString().contains(QRegularExpression("[\\x00-\\x1f\\x7f]"))))) return false;
+    const auto display = a.value("host_display");
+    const auto displayName = display.toString();
+    if (!display.isString() || displayName.size() > 256 || hasAsciiControl(displayName)) return false;
     return a["hdr_min"].toDouble()<=a["hdr_average"].toDouble() && a["hdr_average"].toDouble()<=a["hdr_peak"].toDouble();
 }
 void applyAdvanced(const QJsonObject& a, StreamingPreferences* prefs) {
@@ -639,7 +659,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
     if (m_Session || m_AddPending || m_DeletingHost || m_QuitPending || !m_PairingHost.isEmpty()) { fail("busy", tr("Another operation is still active.")); return; }
     if (name == "add") {
         const auto address = request.value("address").toString().trimmed();
-        if (address.isEmpty() || address.size() > 260 || address.contains(QRegularExpression("[\\s/\\\\?#@]"))) {
+        if (address.isEmpty() || address.size() > 260 || hasInvalidAddressCharacter(address)) {
             fail("invalid_address", tr("Enter an IP address or hostname, with an optional port.")); return;
         }
         m_AddPending = true;
@@ -686,7 +706,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
     }
     if (name == "rename") {
         const auto label = request["name"].toString().trimmed();
-        if (label.isEmpty() || label.size() > 128 || label.contains(QRegularExpression("[\\x00-\\x1f\\x7f]"))) {
+        if (label.isEmpty() || label.size() > 128 || hasAsciiControl(label)) {
             fail("invalid_name", tr("Enter a host name between 1 and 128 characters.")); return;
         }
         m_Manager->renameHost(host, label);

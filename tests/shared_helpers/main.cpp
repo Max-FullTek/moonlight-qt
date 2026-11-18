@@ -1,4 +1,5 @@
 #include "backend/pairedcertificate.h"
+#include "logredaction.h"
 #include "nativeversion.h"
 #include "settings/compatfetcher.h"
 #include "versionutils.h"
@@ -40,6 +41,14 @@ int main(int argc, char* argv[])
     QCoreApplication app(argc, argv);
     QTextStream err(stderr);
     bool ok = true;
+
+    QString log = QStringLiteral("測試 &rikey=ABcd12_34&rikeyid=-123&rikey=&rikey=5678&rikeyid=;&other=keep");
+    redactSessionParameters(log);
+    ok &= require(log == QStringLiteral("測試 &rikey=REDACTED&rikeyid=REDACTED&rikey=&rikey=REDACTED&rikeyid=;&other=keep"),
+                  QStringLiteral("redact repeated session parameters and preserve other fields"), err);
+    redactSessionParameters(log);
+    ok &= require(log == QStringLiteral("測試 &rikey=REDACTED&rikeyid=REDACTED&rikey=&rikey=REDACTED&rikeyid=;&other=keep"),
+                  QStringLiteral("session parameter redaction is idempotent"), err);
 
     const QHostAddress ipv4Local(QStringLiteral("192.168.1.1"));
     const QHostAddress ipv4Peer(QStringLiteral("192.168.1.129"));
