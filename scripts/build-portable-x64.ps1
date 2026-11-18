@@ -82,7 +82,7 @@ Invoke-Checked $cmake @('--build', $clipboardBuild, '--config', 'Release', '--ta
 
 Push-Location -LiteralPath $build
 try {
-    Invoke-Checked $qmake @((Join-Path $SourceRoot 'moonlight-qt.pro'), 'CONFIG+=lite-native-http lite-native-clipboard-helper lite-native-worker-json')
+    Invoke-Checked $qmake @((Join-Path $SourceRoot 'moonlight-qt.pro'), 'CONFIG+=lite-native-http lite-native-clipboard-helper lite-native-worker-json lite-no-microphone')
     Invoke-Checked 'nmake.exe' @('/NOLOGO', 'release')
 } finally { Pop-Location }
 

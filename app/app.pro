@@ -1,5 +1,6 @@
 QT += core quick network quickcontrols2 svg gui-private
-!config_SL: QT += multimedia
+win32:lite-no-microphone: DEFINES += LITE_NO_MICROPHONE
+!config_SL:!contains(DEFINES, LITE_NO_MICROPHONE): QT += multimedia
 CONFIG += c++17 lrelease embed_translations
 QM_FILES_RESOURCE_PREFIX = /languages
 
@@ -405,8 +406,10 @@ HEADERS += \
     uifont.h
 
 # Conditional files for non-Steam Link builds
-!config_SL: SOURCES += streaming/micstream.cpp
-!config_SL: HEADERS += streaming/micstream.h
+!config_SL:!contains(DEFINES, LITE_NO_MICROPHONE) {
+    SOURCES += streaming/micstream.cpp
+    HEADERS += streaming/micstream.h
+}
 !config_SL: HEADERS += streaming/macpermissions.h
 !config_SL:macx: SOURCES += streaming/macpermissions.mm
 !config_SL:!macx: SOURCES += streaming/macpermissions_stub.cpp

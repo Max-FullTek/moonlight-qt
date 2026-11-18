@@ -1013,13 +1013,12 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences* prefere
       m_HasReceivedVideo(false), m_LastTerminationErrorCode(0), m_AsyncConnectionSuccess(false),
       m_LastClientSdrWhiteNits(0.0f), m_PortTestResults(0), m_DualSenseHapticsRenderer(nullptr), m_OverlayManager(Path::readStreamAsset("ModeSeven.ttf")),
       m_MenuPanel(nullptr), m_DeferCaptureRestore(false),
-      m_PendingMicToggle(false),
 #ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS
       m_StylusReplayTest(nullptr), m_WasCapturedBeforeStylusReplayPanel(false),
 #endif
       m_SunshineAbrEnabled(false), m_LastAbrFeedbackTicks(0),
       m_AbrCurrentBitrateKbps(std::make_shared<std::atomic_int>(0)), m_Toast(nullptr),
-      m_MenuCloseTicks(0), m_MicStream(nullptr)
+      m_MenuCloseTicks(0)
 {
     memset(&m_LastAbrVideoStats, 0, sizeof(m_LastAbrVideoStats));
     m_ClipboardHelper = nullptr;
@@ -1202,7 +1201,9 @@ bool Session::initialize(QQuickWindow* qtWindow)
         break;
     }
 
+#ifndef LITE_NO_MICROPHONE
     m_StreamConfig.enableMic = m_Preferences->enableMicrophone;
+#endif
 
     LiInitializeAudioCallbacks(&m_AudioCallbacks);
     m_AudioCallbacks.init = arInit;
@@ -1768,10 +1769,12 @@ void Session::finishConnectionCleanup()
     // The decoder can only use the connection APIs before LiStopConnection().
     SDL_assert(m_VideoDecoder == nullptr);
 
+#ifndef LITE_NO_MICROPHONE
     // GPUI stops capture on the owner thread before dispatching cleanup.
     if (!m_WorkerEvents) {
         QMetaObject::invokeMethod(this, &Session::stopMicrophone, Qt::BlockingQueuedConnection);
     }
+#endif
     if (m_DualSenseHapticsRenderer != nullptr) {
         m_DualSenseHapticsRenderer->setControllerTarget(-1);
     }
@@ -1833,7 +1836,9 @@ void Session::dispatchConnectionCleanup()
         return;
     }
 
+#ifndef LITE_NO_MICROPHONE
     stopMicrophone();
+#endif
     m_ConnectionThread = std::thread([this] {
         finishConnectionCleanup();
         releaseActiveSession();
@@ -2284,7 +2289,9 @@ void Session::showQtOverlayMenu(std::optional<QPoint> pointerGlobalPosition,
             : QString());
 
     // Update dynamic state before showing
+#ifndef LITE_NO_MICROPHONE
     m_MenuPanel->updateMicrophoneState(m_MicStream != nullptr);
+#endif
     m_MenuPanel->updateBitrateState(m_Preferences->bitrateKbps);
     m_MenuPanel->updateGamepadMouseState(m_InputHandler->isMouseEmulationActive());
     m_MenuPanel->updateMenuPositionState(
@@ -2565,9 +2572,11 @@ void Session::dispatchQtMenuAction(OverlayMenuPanel::MenuAction action)
         break;
 
     // --- Microphone toggle ---
-    // Deferred: toggle mic outside processEvents() to avoid QAudioSource heap corruption
     case OverlayMenuPanel::MenuAction::ToggleMicrophone:
+#ifndef LITE_NO_MICROPHONE
+        // Defer the toggle until outside processEvents() to avoid QAudioSource heap corruption.
         m_PendingMicToggle = true;
+#endif
         return;
 
     // --- Gamepad mouse emulation toggle ---
@@ -3243,10 +3252,12 @@ bool Session::tryReconnect()
         // to mean a real termination rather than another reconnect.
         m_UnexpectedTermination = false;
 
+#ifndef LITE_NO_MICROPHONE
         // startConnectionAsync() may have requested a mic toggle for the
         // initial-launch path. The mic capture is client-side and was never
         // torn down, so don't toggle it off on reconnect.
         m_PendingMicToggle = false;
+#endif
 
         showStreamingToast(tr("Reconnected"), 1500);
         return true;
@@ -3594,11 +3605,13 @@ bool Session::startConnectionAsync()
     else emit connectionStarted();
     startSunshineAbr();
 
+#ifndef LITE_NO_MICROPHONE
     if (m_Preferences->enableMicrophone) {
         // Use the deferred mic toggle mechanism instead of QueuedConnection to avoid
         // heap corruption when creating QAudioSource within nested event loops (processEvents).
         m_PendingMicToggle = true;
     }
+#endif
     return true;
 }
 
@@ -4911,6 +4924,7 @@ void Session::exec()
         }
 #endif
 
+#ifndef LITE_NO_MICROPHONE
         // Deferred microphone toggle — runs outside processEvents() to avoid
         // heap corruption when creating QAudioSource within nested event loops
         if (m_PendingMicToggle) {
@@ -4929,6 +4943,7 @@ void Session::exec()
                 m_MenuPanel->updateMicrophoneState(m_MicStream != nullptr);
             }
         }
+#endif
     }
 
 DispatchDeferredCleanup:
@@ -5053,6 +5068,7 @@ DispatchDeferredCleanup:
     BandwidthCalculator::instance()->stop();
 }
 
+#ifndef LITE_NO_MICROPHONE
 #ifndef STEAM_LINK
 void Session::startMicrophone()
 {
@@ -5083,6 +5099,7 @@ void Session::stopMicrophone()
 {
     // Microphone not supported on Steam Link
 }
+#endif
 #endif
 
 void Session::applyControllerMappings()

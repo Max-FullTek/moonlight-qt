@@ -28,7 +28,7 @@
 #include "video/overlaymenupanel.h"
 #include "video/overlaymenubutton.h"
 #include "video/overlaytoast.h"
-#ifndef STEAM_LINK
+#if !defined(STEAM_LINK) && !defined(LITE_NO_MICROPHONE)
 #include "micstream.h"
 #endif
 
@@ -289,8 +289,10 @@ private:
     static
     void drCleanup();
 
+#ifndef LITE_NO_MICROPHONE
     void startMicrophone();
     void stopMicrophone();
+#endif
 
     void startSunshineAbr();
     void stopSunshineAbr();
@@ -348,7 +350,9 @@ private:
     Overlay::OverlayManager m_OverlayManager;
     bool m_WasCapturedBeforeMenu;  // 菜单打开前鼠标是否处于捕获状态
     bool m_DeferCaptureRestore;    // 延迟恢复鼠标捕获（全屏切换等）
-    bool m_PendingMicToggle;       // 延迟麦克风切换（避免堆损坏）
+#ifndef LITE_NO_MICROPHONE
+    bool m_PendingMicToggle = false;       // 延迟麦克风切换（避免堆损坏）
+#endif
 #ifdef MOONLIGHT_ENABLE_FUNCTION_TESTS
     // Developer-only test harness. All replay/UI behavior lives behind this
     // boundary so production Session code keeps only integration hooks.
@@ -393,9 +397,11 @@ private:
     static Session* s_ActiveSession;
     static std::mutex s_ActiveSessionMutex;
     static std::condition_variable s_ActiveSessionChanged;
+#ifndef LITE_NO_MICROPHONE
 #ifndef STEAM_LINK
-    MicStream* m_MicStream;
+    MicStream* m_MicStream = nullptr;
 #else
-    void* m_MicStream;
+    void* m_MicStream = nullptr;
+#endif
 #endif
 };
