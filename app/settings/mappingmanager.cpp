@@ -5,6 +5,9 @@
 #endif
 
 #include <QDir>
+#ifndef LITE_GPUI_WORKER
+#include <QSettings>
+#endif
 
 #include "SDL_compat.h"
 
@@ -35,6 +38,7 @@ MappingManager::MappingManager()
         }
     } else
 #endif
+#ifndef LITE_GPUI_WORKER
     {
         QSettings settings;
 
@@ -47,6 +51,11 @@ MappingManager::MappingManager()
         }
         settings.endArray();
     }
+#else
+    {
+        qFatal("GPUI controller mappings require an initialized worker profile");
+    }
+#endif
 
     // Finally load mappings from SDL_HINT_GAMECONTROLLERCONFIG
     QStringList sdlMappings =
@@ -87,6 +96,7 @@ void MappingManager::save()
         return;
     }
 #endif
+#ifndef LITE_GPUI_WORKER
     QSettings settings;
 
     settings.remove(SER_GAMEPADMAPPING);
@@ -99,6 +109,7 @@ void MappingManager::save()
         settings.setValue(SER_MAPPING, mappings[i].getMapping());
     }
     settings.endArray();
+#endif
 }
 
 void MappingManager::applyMappings()

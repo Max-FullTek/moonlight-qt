@@ -22,6 +22,9 @@
 #include <QJsonArray>
 #include <climits>
 
+#ifndef LITE_GPUI_WORKER
+#include <QSettings>
+
 #define SER_NAME "hostname"
 #define SER_UUID "uuid"
 #define SER_MAC "mac"
@@ -80,7 +83,6 @@ NvComputer::NvComputer(QSettings& settings)
     this->activeHttpsPort = 0;
 }
 
-#ifndef LITE_GPUI_WORKER
 void NvComputer::setRemoteAddress(QHostAddress address)
 {
     QWriteLocker lock(&this->lock);
@@ -89,7 +91,6 @@ void NvComputer::setRemoteAddress(QHostAddress address)
 
     this->remoteAddress = NvAddress(address, this->externalPort);
 }
-#endif
 
 void NvComputer::serialize(QSettings& settings, bool serializeApps) const
 {
@@ -121,6 +122,8 @@ void NvComputer::serialize(QSettings& settings, bool serializeApps) const
         settings.endArray();
     }
 }
+
+#endif
 
 bool NvComputer::isEqualSerialized(const NvComputer &that) const
 {
@@ -790,10 +793,12 @@ void NvComputer::savePairname(const QString& uuid, const QString& pairname)
         return;
     }
 #endif
+#ifndef LITE_GPUI_WORKER
     QSettings settings;
     settings.beginGroup("Pairnames");
     settings.setValue(uuid, pairname);
     settings.endGroup();
+#endif
 }
 
 QString NvComputer::getPairname(const QString& uuid)
@@ -808,9 +813,13 @@ QString NvComputer::getPairname(const QString& uuid)
         }
     }
 #endif
+#ifdef LITE_GPUI_WORKER
+    return {};
+#else
     QSettings settings;
     settings.beginGroup("Pairnames");
     QString pairname = settings.value(uuid).toString();
     settings.endGroup();
     return pairname;
+#endif
 }

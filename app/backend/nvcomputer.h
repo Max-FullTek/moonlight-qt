@@ -5,7 +5,6 @@
 
 #include <QThread>
 #include <QReadWriteLock>
-#include <QSettings>
 #include <QRunnable>
 
 class CopySafeReadWriteLock : public QReadWriteLock
@@ -44,9 +43,10 @@ public:
     explicit NvComputer(NvHTTP& http, QString serverInfo);
     explicit NvComputer(NvHTTP& http, const QJsonObject& hostInfo);
 
+#ifndef LITE_GPUI_WORKER
     explicit NvComputer(QSettings& settings);
 
-#ifndef LITE_GPUI_WORKER
+
     void
     setRemoteAddress(QHostAddress);
 #endif
@@ -84,8 +84,10 @@ public:
     bool
     hasAddressTestSucceeded(const NvAddress& address) const;
 
+#ifndef LITE_GPUI_WORKER
     void
     serialize(QSettings& settings, bool serializeApps) const;
+#endif
 
     // Caller is responsible for synchronizing read access to both hosts
     bool

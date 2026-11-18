@@ -1,12 +1,19 @@
 #pragma once
 
-#include <QSettings>
+#include <QMetaType>
+#include <QString>
+
+#ifndef LITE_GPUI_WORKER
+class QSettings;
+#endif
 
 class NvApp
 {
 public:
     NvApp() {}
+#ifndef LITE_GPUI_WORKER
     explicit NvApp(QSettings& settings);
+#endif
 
     bool operator==(const NvApp& other) const
     {
@@ -30,8 +37,10 @@ public:
         return id != 0 && !name.isNull();
     }
 
+#ifndef LITE_GPUI_WORKER
     void
     serialize(QSettings& settings) const;
+#endif
 
     int id = 0;
     QString name;

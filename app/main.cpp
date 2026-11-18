@@ -24,7 +24,9 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QTimer>
+#ifndef LITE_GPUI_WORKER
 #include <QSettings>
+#endif
 #include <QThreadPool>
 #include <memory>
 #include <QStandardPaths>
@@ -822,8 +824,7 @@ int main(int argc, char *argv[])
     // Set the app version for the QCommandLineParser's showVersion() command
     QCoreApplication::setApplicationVersion(VERSION_STR);
 
-    // Set these here to allow us to use the default QSettings constructor.
-    // These also ensure that our cache directory is named correctly. As such,
+    // Set these here so the cache directory is named correctly. As such,
     // it is critical that these be called before Path::initialize().
     QCoreApplication::setOrganizationName("Moonlight Game Streaming Project");
     QCoreApplication::setOrganizationDomain("moonlight-stream.com");

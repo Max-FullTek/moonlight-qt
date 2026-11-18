@@ -1,6 +1,10 @@
 #include "compatfetcher.h"
 #include "nativeversion.h"
+
+#include <QDebug>
+#ifndef LITE_GPUI_WORKER
 #include <QSettings>
+#endif
 #ifdef LITE_NATIVE_WORKER_JSON
 #include "backend/workerpreferences.h"
 #endif
@@ -22,12 +26,17 @@ bool CompatFetcher::isGfeVersionSupported(QString gfeVersion)
     if (!WorkerPreferences::directory().empty()) {
         const auto& values = LegacyWorkerProfile::read(WorkerPreferences::directory());
         latestSupportedVersion = QString::fromUtf8(LegacyWorkerProfile::value(values, COMPAT_KEY COMPAT_VERSION));
-    } else
+    }
+#endif
+#ifndef LITE_GPUI_WORKER
+#ifdef LITE_NATIVE_WORKER_JSON
+    else
 #endif
     {
         QSettings settings;
         latestSupportedVersion = settings.value(COMPAT_KEY COMPAT_VERSION).toString();
     }
+#endif
     if (latestSupportedVersion.isEmpty()) {
         // We don't have compat data yet, so just assume it's supported
         return true;

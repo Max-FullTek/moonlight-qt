@@ -5,7 +5,8 @@
 #include <QSslCertificate>
 #include <QSslKey>
 #endif
-#include <QSettings>
+#include <QByteArray>
+#include <QString>
 
 class IdentityManager
 {

@@ -19,8 +19,11 @@
 #include <QRandomGenerator>
 #include <memory>
 
+#ifndef LITE_GPUI_WORKER
+#include <QSettings>
 #define SER_HOSTS "hosts"
 #define SER_HOSTS_BACKUP "hostsbackup"
+#endif
 
 class PcMonitorThread : public QThread
 {
@@ -205,7 +208,11 @@ ComputerManager::ComputerManager(StreamingPreferences* prefs, bool externalPolli
     } else
 #endif
     {
+#ifdef LITE_GPUI_WORKER
+        qFatal("GPUI host storage requires an initialized worker profile");
+#else
         loadLegacyHosts();
+#endif
     }
 
     m_DelayedFlushThread = std::thread(&ComputerManager::runDelayedFlush, this);
@@ -215,6 +222,7 @@ ComputerManager::ComputerManager(StreamingPreferences* prefs, bool externalPolli
     connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, &ComputerManager::handleAboutToQuit);
 }
 
+#ifndef LITE_GPUI_WORKER
 void ComputerManager::loadLegacyHosts()
 {
     QSettings settings;
@@ -236,8 +244,8 @@ void ComputerManager::loadLegacyHosts()
         m_LastSerializedHosts[computer->uuid] = *computer;
     }
     settings.endArray();
-
 }
+#endif
 
 ComputerManager::~ComputerManager()
 {
@@ -338,6 +346,7 @@ void ComputerManager::runDelayedFlush() {
         }
 #endif
 
+#ifndef LITE_GPUI_WORKER
         // Perform the flush
         {
             QSettings settings;
@@ -370,6 +379,7 @@ void ComputerManager::runDelayedFlush() {
             // Finally, delete the backup copy
             settings.remove(SER_HOSTS_BACKUP);
         }
+#endif
     }
 }
 

@@ -129,7 +129,9 @@ std::string decodeValue(std::string_view value)
     return result;
 }
 
-LegacyWorkerProfile::Values parse(std::string_view data)
+}
+
+LegacyWorkerProfile::Values LegacyWorkerProfile::parseIni(std::string_view data)
 {
     if (data.substr(0, 3) == "\xef\xbb\xbf") data.remove_prefix(3);
     LegacyWorkerProfile::Values values;
@@ -150,15 +152,13 @@ LegacyWorkerProfile::Values parse(std::string_view data)
     }
     return values;
 }
-}
-
 const LegacyWorkerProfile::Values& LegacyWorkerProfile::read(const std::filesystem::path& directory)
 {
     // The isolated worker root is configured once at startup.
     static const auto values = [&directory] {
         const auto file = WindowsProfileFile::read(directory /
             L"Moonlight Game Streaming Project" / L"MoonlightGPUI.ini", 64 * 1024 * 1024);
-        return file ? parse(*file) : Values{};
+        return file ? parseIni(*file) : Values{};
     }();
     return values;
 }

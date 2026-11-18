@@ -1,7 +1,10 @@
 #include "streamingpreferences.h"
 #include "utils.h"
 
+#include <QVariant>
+#ifndef LITE_GPUI_WORKER
 #include <QSettings>
+#endif
 #ifdef LITE_NATIVE_WORKER_JSON
 #include "backend/workerpreferences.h"
 #include <memory>
@@ -156,10 +159,12 @@ class StreamingPreferenceValues {
 public:
     StreamingPreferenceValues()
     {
+#ifndef LITE_GPUI_WORKER
         if (WorkerPreferences::directory().empty()) {
             m_LegacyUi = std::make_unique<QSettings>();
             return;
         }
+#endif
         try {
             m_Values = WorkerPreferences::load(WorkerPreferences::Section::Streaming, &m_Dirty);
         } catch (const std::exception&) {
@@ -170,29 +175,42 @@ public:
 
     QVariant value(const char* key, QVariant fallback = {}) const
     {
+#ifndef LITE_GPUI_WORKER
         if (m_LegacyUi) return m_LegacyUi->value(QLatin1String(key), fallback);
+#endif
         const auto found = m_Values.find(key);
         return found == m_Values.end() ? fallback : QVariant(QString::fromStdString(found->second));
     }
 
     bool contains(const char* key) const
     {
-        return m_LegacyUi ? m_LegacyUi->contains(QLatin1String(key)) : m_Values.count(key) != 0;
+#ifndef LITE_GPUI_WORKER
+        if (m_LegacyUi) return m_LegacyUi->contains(QLatin1String(key));
+#endif
+        return m_Values.count(key) != 0;
     }
 
     void setValue(const char* key, const QVariant& value)
     {
-        if (m_LegacyUi) m_LegacyUi->setValue(QLatin1String(key), value);
-        else {
-            m_Values[key] = value.toString().toUtf8().toStdString();
-            m_Dirty = true;
+#ifndef LITE_GPUI_WORKER
+        if (m_LegacyUi) {
+            m_LegacyUi->setValue(QLatin1String(key), value);
+            return;
         }
+#endif
+        m_Values[key] = value.toString().toUtf8().toStdString();
+        m_Dirty = true;
     }
 
     void remove(const char* key)
     {
-        if (m_LegacyUi) m_LegacyUi->remove(QLatin1String(key));
-        else if (m_Values.erase(key)) m_Dirty = true;
+#ifndef LITE_GPUI_WORKER
+        if (m_LegacyUi) {
+            m_LegacyUi->remove(QLatin1String(key));
+            return;
+        }
+#endif
+        if (m_Values.erase(key)) m_Dirty = true;
     }
 
     ~StreamingPreferenceValues()
@@ -206,7 +224,9 @@ public:
     }
 
 private:
+#ifndef LITE_GPUI_WORKER
     std::unique_ptr<QSettings> m_LegacyUi;
+#endif
     LegacyWorkerProfile::Values m_Values;
     bool m_ReadFailed = false;
     bool m_Dirty = false;

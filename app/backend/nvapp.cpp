@@ -1,5 +1,8 @@
 #include "nvapp.h"
 
+#ifndef LITE_GPUI_WORKER
+#include <QSettings>
+
 #define SER_APPNAME "name"
 #define SER_APPID "id"
 #define SER_APPHDR "hdr"
@@ -26,3 +29,4 @@ void NvApp::serialize(QSettings& settings) const
     settings.setValue(SER_HIDDEN, hidden);
     settings.setValue(SER_DIRECTLAUNCH, directLaunch);
 }
+#endif

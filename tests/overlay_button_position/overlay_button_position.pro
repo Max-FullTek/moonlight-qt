@@ -13,3 +13,9 @@ HEADERS += \
     ../../app/settings/devicelocalsettings.h \
     ../../app/streaming/video/overlaybuttonposition.h \
     ../../app/streaming/video/overlayplacementaxis.h
+
+win32:lite-gpui-worker {
+    DEFINES += LITE_GPUI_WORKER
+    SOURCES += ../../app/backend/legacyworkerprofile.cpp \
+               ../../app/backend/windowsprofilefile.cpp
+}

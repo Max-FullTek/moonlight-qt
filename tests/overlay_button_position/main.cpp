@@ -128,7 +128,27 @@ int main(int argc, char* argv[])
     require(!store.save(QPointF(qInf(), 0.5)),
             "non-finite positions must be rejected");
 
+#ifdef LITE_GPUI_WORKER
+    QSettings legacySettings(settingsPath, QSettings::IniFormat);
+    legacySettings.setValue(QStringLiteral("meta/version"), 1);
+    legacySettings.setValue(QStringLiteral("position/normalizedX"), 0.125);
+    legacySettings.setValue(QStringLiteral("position/normalizedY"), 0.25);
+    legacySettings.sync();
+    require(store.load() == QPointF(0, 1), "native placement must take precedence");
+
+    const auto importPath = temporaryDirectory.filePath(QStringLiteral("import.ini"));
+    require(QFile::copy(settingsPath, importPath), "create an isolated legacy placement");
+    OverlayButtonPositionStore importStore(importPath);
+    require(importStore.load() == QPointF(0.125, 0.25), "legacy coordinates must be readable");
+    require(importStore.save(QPointF(0.75, 0.5)), "imported position must remain writable");
+    QSettings preserved(importPath, QSettings::IniFormat);
+    require(preserved.value(QStringLiteral("position/normalizedX")).toDouble() == 0.125,
+            "native save must preserve the legacy file");
+
+    QSettings corruptSettings(temporaryDirectory.filePath(QStringLiteral("position-v1.ini")), QSettings::IniFormat);
+#else
     QSettings corruptSettings(settingsPath, QSettings::IniFormat);
+#endif
     corruptSettings.setValue(QStringLiteral("meta/version"), 99);
     corruptSettings.sync();
     OverlayButtonPositionStore corruptStore(settingsPath);

@@ -5,6 +5,9 @@
 #endif
 
 #include <QDebug>
+#ifndef LITE_GPUI_WORKER
+#include <QSettings>
+#endif
 #ifdef LITE_NATIVE_WORKER_JSON
 #include "workerpreferences.h"
 #include "windowsprofilefile.h"
@@ -123,6 +126,9 @@ IdentityManager::IdentityManager()
         }
     }
 #endif
+#ifdef LITE_GPUI_WORKER
+    qFatal("GPUI identity requires an initialized worker profile");
+#else
     QSettings settings;
 
     m_CachedPemCert = settings.value(SER_CERT).toByteArray();
@@ -168,6 +174,7 @@ IdentityManager::IdentityManager()
 
         settings.setValue(SER_UNIQUEID, m_CachedUniqueId);
     }
+#endif
 }
 
 bool IdentityManager::hasReadableCertificate()

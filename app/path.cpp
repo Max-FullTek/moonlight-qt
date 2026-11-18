@@ -3,7 +3,7 @@
 #include <QtDebug>
 #include <QDir>
 #include <QStandardPaths>
-#include <QSettings>
+#include <QFile>
 #include <QCoreApplication>
 #ifdef Q_OS_WIN32
 #include "streaming/windowsstreamassets.h"

@@ -3,9 +3,13 @@
 #include <QPoint>
 #include <QPointF>
 #include <QRect>
-#include <QSettings>
 #include <QSize>
 
+#ifdef LITE_GPUI_WORKER
+#include <filesystem>
+#else
+#include <QSettings>
+#endif
 #include <optional>
 
 class OverlayButtonPlacement
@@ -38,5 +42,10 @@ public:
     bool save(const QPointF& normalizedPosition);
 
 private:
+#ifdef LITE_GPUI_WORKER
+    std::filesystem::path m_LegacyPath;
+    std::filesystem::path m_Path;
+#else
     QSettings m_Settings;
+#endif
 };

@@ -14,7 +14,7 @@
 
 #include <QThread>
 #include <QReadWriteLock>
-#include <QSettings>
+#include <QVariant>
 #include <QRunnable>
 #include <QTimer>
 #include <QSet>
@@ -272,7 +272,9 @@ private:
     bool waitBeforeAddRetry();
 
     void runDelayedFlush();
+#ifndef LITE_GPUI_WORKER
     void loadLegacyHosts();
+#endif
 
     void saveHost(NvComputer* computer);
 

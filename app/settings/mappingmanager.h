@@ -3,8 +3,6 @@
 #include <QMap>
 #include <QStringList>
 
-#include <QSettings>
-
 class SdlGamepadMapping
 {
 public:
