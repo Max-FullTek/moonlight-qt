@@ -19,6 +19,7 @@
 #include "settings/streamingpreferences.h"
 #include "backend/nvcomputer.h"
 #include "supportedvideoformats.h"
+#include "sessionevents.h"
 #include "input/input.h"
 #include "video/decoder.h"
 #include "video/decoderfactory.h"
@@ -57,7 +58,8 @@ public:
     // Set only by the Windows GPUI bridge before initialize(). Qt callers retain -1.
     void setClientDisplay(int display) { m_GpuiClientDisplay = display; }
     void setGpuiControlsClient(unsigned long processId) { m_GpuiControlsClient = processId; }
-    bool usesGpuiControls() const { return m_GpuiControlsClient != 0; }
+    bool usesGpuiControls() const { return m_WorkerEvents.has_value() && m_GpuiControlsClient != 0; }
+    void setWorkerEvents(SessionEvents events) { m_WorkerEvents = std::move(events); }
     bool shouldExit() const { return m_ShouldExit; }
     void openGpuiControls();
     bool handleGpuiControl(const QString& action, int value = 0, int requestId = 0);
@@ -100,10 +102,6 @@ public:
     void minimizeStreamingWindow() override;
 
 signals:
-    void gpuiControlsChanged(bool active, bool gamepadMouse, bool hasGamepad);
-    void gpuiControlsNavigate(QString direction);
-    void gpuiBitrateResult(int requestId, int requestedKbps, bool success, QString error);
-    void hostQuitFailed(QString message);
     void stageStarting(QString stage);
 
     void stageFailed(QString stage, int errorCode, QString failingPorts);
@@ -126,6 +124,8 @@ private:
     unsigned long m_GpuiControlsClient = 0;
     std::function<void()> m_CoreCommandHandler;
     std::function<void(std::function<void()>)> m_LifecycleDispatcher;
+    std::optional<SessionEvents> m_WorkerEvents;
+    void reportLaunchError(QString message);
     void dispatchLifecycleCompletion(std::function<void()> completion);
     bool m_GpuiControlsActive = false;
     bool m_GpuiRestoreCapture = false;

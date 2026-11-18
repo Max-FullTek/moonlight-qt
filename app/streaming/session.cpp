@@ -449,27 +449,36 @@ std::condition_variable Session::s_ActiveSessionChanged;
 
 void Session::clStageStarting(int stage)
 {
-    // We know this is called on the same thread as LiStartConnection()
-    // which happens to be the main thread, so it's cool to interact
-    // with the GUI in these callbacks.
-    emit s_ActiveSession->stageStarting(QString::fromLocal8Bit(LiGetStageName(stage)));
+    auto* session = s_ActiveSession;
+    const char* name = LiGetStageName(stage);
+    if (session->m_WorkerEvents) session->m_WorkerEvents->stageStarting(name);
+    else emit session->stageStarting(QString::fromLocal8Bit(name));
 }
 
 void Session::clStageFailed(int stage, int errorCode)
 {
-    // External connectivity diagnostics are disabled; preserve local port details.
-    unsigned int portFlags = LiGetPortFlagsFromStage(stage);
-    s_ActiveSession->m_PortTestResults = ML_TEST_RESULT_INCONCLUSIVE;
-
-    char failingPorts[128];
-    LiStringifyPortFlags(portFlags, ", ", failingPorts, sizeof(failingPorts));
+    auto* session = s_ActiveSession;
+    session->m_PortTestResults = ML_TEST_RESULT_INCONCLUSIVE;
 
     // Suppress the failure popup while we're silently retrying a reconnect
-    if (s_ActiveSession->m_SuppressConnectionErrorDialog) {
+    if (session->m_SuppressConnectionErrorDialog) {
         return;
     }
 
-    emit s_ActiveSession->stageFailed(QString::fromLocal8Bit(LiGetStageName(stage)), errorCode, QString(failingPorts));
+    const char* name = LiGetStageName(stage);
+    if (session->m_WorkerEvents) {
+        session->m_WorkerEvents->stageFailed(name, errorCode);
+    } else {
+        char failingPorts[128];
+        LiStringifyPortFlags(LiGetPortFlagsFromStage(stage), ", ", failingPorts, sizeof(failingPorts));
+        emit session->stageFailed(QString::fromLocal8Bit(name), errorCode, QString(failingPorts));
+    }
+}
+
+void Session::reportLaunchError(QString message)
+{
+    if (m_WorkerEvents) m_WorkerEvents->launchFailed(message.toUtf8().toStdString());
+    else emit displayLaunchError(std::move(message));
 }
 
 void Session::clConnectionTerminated(int errorCode)
@@ -548,26 +557,26 @@ void Session::displayTerminationError(int errorCode)
             char ports[128];
             SDL_assert(portFlags != 0);
             LiStringifyPortFlags(portFlags, ", ", ports, sizeof(ports));
-            emit displayLaunchError(tr("No video received from host.") + "\n\n"+
+            reportLaunchError(tr("No video received from host.") + "\n\n"+
                                     tr("Check your firewall and port forwarding rules for port(s): %1").arg(ports));
         }
         break;
 
     case ML_ERROR_NO_VIDEO_FRAME:
         m_UnexpectedTermination = true;
-        emit displayLaunchError(tr("Your network connection isn't performing well. Reduce your video bitrate setting or try a faster connection."));
+        reportLaunchError(tr("Your network connection isn't performing well. Reduce your video bitrate setting or try a faster connection."));
         break;
 
     case ML_ERROR_PROTECTED_CONTENT:
     case ML_ERROR_UNEXPECTED_EARLY_TERMINATION:
         m_UnexpectedTermination = true;
-        emit displayLaunchError(tr("Something went wrong on your host PC when starting the stream.") + "\n\n" +
+        reportLaunchError(tr("Something went wrong on your host PC when starting the stream.") + "\n\n" +
                                 tr("Make sure you don't have any DRM-protected content open on your host PC. You can also try restarting your host PC."));
         break;
 
     case ML_ERROR_FRAME_CONVERSION:
         m_UnexpectedTermination = true;
-        emit displayLaunchError(tr("The host PC reported a fatal video encoding error.") + "\n\n" +
+        reportLaunchError(tr("The host PC reported a fatal video encoding error.") + "\n\n" +
                                 tr("Try disabling HDR mode, changing the streaming resolution, or changing your host PC's display resolution."));
         break;
 
@@ -576,7 +585,7 @@ void Session::displayTerminationError(int errorCode)
 
         // We'll assume large errors are hex values
         bool hexError = qAbs(errorCode) > 1000;
-        emit displayLaunchError(tr("Connection terminated") + "\n\n" +
+        reportLaunchError(tr("Connection terminated") + "\n\n" +
                                 tr("Error code: %1").arg(errorCode, hexError ? 8 : 0, hexError ? 16 : 10, QChar('0')));
         break;
     }
@@ -1456,7 +1465,7 @@ void Session::emitLaunchWarning(QString text)
 bool Session::validateLaunch(SDL_Window* testWindow)
 {
     if (!m_Computer->isSupportedServerVersion) {
-        emit displayLaunchError(tr("The version of GeForce Experience on %1 is not supported by this build of Moonlight. You must update Moonlight to stream from %1.").arg(m_Computer->name));
+        reportLaunchError(tr("The version of GeForce Experience on %1 is not supported by this build of Moonlight. You must update Moonlight to stream from %1.").arg(m_Computer->name));
         return false;
     }
 
@@ -1706,11 +1715,11 @@ bool Session::validateLaunch(SDL_Window* testWindow)
         // Pascal added support for 8K HEVC encoding support. Maxwell 2 could encode HEVC but only up to 4K.
         // We can't directly identify Pascal, but we can look for HEVC Main10 which was added in the same generation.
         if (m_Computer->maxLumaPixelsHEVC == 0 || !(m_Computer->serverCodecModeSupport & SCM_HEVC_MAIN10)) {
-            emit displayLaunchError(tr("Your host PC's GPU doesn't support streaming video resolutions over 4K."));
+            reportLaunchError(tr("Your host PC's GPU doesn't support streaming video resolutions over 4K."));
             return false;
         }
         else if ((m_SupportedVideoFormats & ~VIDEO_FORMAT_MASK_H264) == 0) {
-            emit displayLaunchError(tr("Video resolutions over 4K are not supported by the H.264 codec."));
+            reportLaunchError(tr("Video resolutions over 4K are not supported by the H.264 codec."));
             return false;
         }
     }
@@ -1724,10 +1733,10 @@ bool Session::validateLaunch(SDL_Window* testWindow)
                                    m_StreamConfig.height,
                                    m_StreamConfig.fps) != DecoderAvailability::Hardware) {
         if (m_Preferences->videoCodecConfig == StreamingPreferences::VCC_AUTO) {
-            emit displayLaunchError(tr("Your selection to force hardware decoding cannot be satisfied due to missing hardware decoding support on this PC's GPU."));
+            reportLaunchError(tr("Your selection to force hardware decoding cannot be satisfied due to missing hardware decoding support on this PC's GPU."));
         }
         else {
-            emit displayLaunchError(tr("Your codec selection and force hardware decoding setting are not compatible. This PC's GPU lacks support for decoding your chosen codec."));
+            reportLaunchError(tr("Your codec selection and force hardware decoding setting are not compatible. This PC's GPU lacks support for decoding your chosen codec."));
         }
 
         // Fail the launch, because we won't manage to get a decoder for the actual stream
@@ -1751,18 +1760,16 @@ void Session::finishConnectionCleanup()
 {
     // Only quit the running app if our session terminated gracefully.
     const bool shouldQuit = !m_UnexpectedTermination && m_Preferences->quitAppAfter;
-    if (shouldQuit) {
-        emit quitStarting();
-    }
-    else {
-        emit sessionFinished(m_PortTestResults);
+    if (!m_WorkerEvents) {
+        if (shouldQuit) emit quitStarting();
+        else emit sessionFinished(m_PortTestResults);
     }
 
     // The decoder can only use the connection APIs before LiStopConnection().
     SDL_assert(m_VideoDecoder == nullptr);
 
     // GPUI stops capture on the owner thread before dispatching cleanup.
-    if (!usesGpuiControls()) {
+    if (!m_WorkerEvents) {
         QMetaObject::invokeMethod(this, &Session::stopMicrophone, Qt::BlockingQueuedConnection);
     }
     if (m_DualSenseHapticsRenderer != nullptr) {
@@ -1785,11 +1792,11 @@ void Session::finishConnectionCleanup()
         try {
             http.quitApp();
         } catch (const GfeHttpResponseException& error) {
-            if (usesGpuiControls()) emit hostQuitFailed(error.toQString());
+            if (m_WorkerEvents) m_WorkerEvents->hostQuitFailed(error.toQString().toUtf8().toStdString());
         } catch (const QtNetworkReplyException& error) {
-            if (usesGpuiControls()) emit hostQuitFailed(error.toQString());
+            if (m_WorkerEvents) m_WorkerEvents->hostQuitFailed(error.toQString().toUtf8().toStdString());
         }
-        emit sessionFinished(m_PortTestResults);
+        if (!m_WorkerEvents) emit sessionFinished(m_PortTestResults);
     }
 }
 
@@ -1814,7 +1821,7 @@ void Session::dispatchLifecycleCompletion(std::function<void()> completion)
 void Session::dispatchConnectionCleanup()
 {
     m_RuntimeBitrateClosing = true;
-    if (!usesGpuiControls()) {
+    if (!m_WorkerEvents) {
         QThreadPool::globalInstance()->start(QRunnable::create([this] {
             finishConnectionCleanup();
             if (m_ShouldExit) {
@@ -1832,8 +1839,7 @@ void Session::dispatchConnectionCleanup()
         releaseActiveSession();
         dispatchLifecycleCompletion([this] {
             m_ConnectionThread.join();
-            emit readyForDeletion();
-            // GPUI's owner handles process exit after retiring the Session.
+            m_WorkerEvents->retired();
         });
     });
 }
@@ -2373,7 +2379,7 @@ void Session::openGpuiControls()
     // focus. No topmost/non-activating window styles or GPUI patches are used.
     AllowSetForegroundWindow(m_GpuiControlsClient);
 #endif
-    emit gpuiControlsChanged(true, m_InputHandler->isMouseEmulationActive(),
+    m_WorkerEvents->controlsChanged(true, m_InputHandler->isMouseEmulationActive(),
                              m_InputHandler->hasConnectedGamepads());
 }
 
@@ -2419,7 +2425,7 @@ bool Session::handleGpuiControl(const QString& action, int value, int requestId)
         m_InputHandler->setLocalControlsActive(false);
         if (m_GpuiRestoreCapture) m_InputHandler->setCaptureActive(true);
         m_GpuiRestoreCapture = false;
-        emit gpuiControlsChanged(false, m_InputHandler->isMouseEmulationActive(),
+        m_WorkerEvents->controlsChanged(false, m_InputHandler->isMouseEmulationActive(),
                                  m_InputHandler->hasConnectedGamepads());
         return true;
     }
@@ -2446,7 +2452,7 @@ bool Session::handleGpuiControl(const QString& action, int value, int requestId)
         // Window-state shortcuts may recapture; the control page still owns input.
         m_InputHandler->setCaptureActive(false);
     }
-    emit gpuiControlsChanged(true, m_InputHandler->isMouseEmulationActive(),
+    m_WorkerEvents->controlsChanged(true, m_InputHandler->isMouseEmulationActive(),
                              m_InputHandler->hasConnectedGamepads());
     return true;
 }
@@ -2796,8 +2802,9 @@ void Session::finishRuntimeBitrateChange()
                     OverlayMenuPanel::formatBitrateKbps(result->bitrateKbps)));
         }
     }
-    if (usesGpuiControls()) {
-        emit gpuiBitrateResult(result->requestId, result->bitrateKbps, result->success, result->error);
+    if (m_WorkerEvents) {
+        m_WorkerEvents->bitrateResult(result->requestId, result->bitrateKbps, result->success,
+                                      result->error.toUtf8().toStdString());
     }
     if (!m_RuntimeBitrateClosing && m_PendingRuntimeBitrateKbps != 0 &&
             !m_RuntimeBitrateThread.joinable()) {
@@ -3032,7 +3039,7 @@ void Session::handleSdlUserEvent(const SDL_UserEvent& event)
         if (m_CoreCommandHandler) {
             m_CoreCommandHandler();
         }
-        if (!usesGpuiControls()) {
+        if (!m_WorkerEvents) {
             QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         }
         break;
@@ -3498,12 +3505,12 @@ bool Session::startConnectionAsync()
         }
     } catch (const GfeHttpResponseException& e) {
         if (!m_SuppressConnectionErrorDialog) {
-            emit displayLaunchError(tr("Host returned error: %1").arg(e.toQString()));
+            reportLaunchError(tr("Host returned error: %1").arg(e.toQString()));
         }
         return false;
     } catch (const QtNetworkReplyException& e) {
         if (!m_SuppressConnectionErrorDialog) {
-            emit displayLaunchError(e.toQString());
+            reportLaunchError(e.toQString());
         }
         return false;
     }
@@ -3583,7 +3590,8 @@ bool Session::startConnectionAsync()
         }
     }
 
-    emit connectionStarted();
+    if (m_WorkerEvents) m_WorkerEvents->started();
+    else emit connectionStarted();
     startSunshineAbr();
 
     if (m_Preferences->enableMicrophone) {
@@ -3750,7 +3758,7 @@ void Session::exec()
     // Pump the Qt event loop one last time before we create our SDL window
     // This is sometimes necessary for the QML code to process any signals
     // we've emitted from the async connection thread.
-    if (!usesGpuiControls()) {
+    if (!m_WorkerEvents) {
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         QCoreApplication::sendPostedEvents();
     }
@@ -4545,7 +4553,7 @@ void Session::exec()
                     SDL_UnlockMutex(m_DecoderLock);
                     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                                  "Failed to recreate decoder after reset");
-                    emit displayLaunchError(tr("Unable to initialize video decoder. Please check your streaming settings and try again."));
+                    reportLaunchError(tr("Unable to initialize video decoder. Please check your streaming settings and try again."));
                     goto DispatchDeferredCleanup;
                 }
 
@@ -4775,14 +4783,14 @@ void Session::exec()
             if (m_GpuiControlsActive) {
                 if (event.cbutton.state == SDL_PRESSED) {
                     switch (event.cbutton.button) {
-                    case SDL_CONTROLLER_BUTTON_DPAD_UP: emit gpuiControlsNavigate(QStringLiteral("up")); break;
-                    case SDL_CONTROLLER_BUTTON_DPAD_DOWN: emit gpuiControlsNavigate(QStringLiteral("down")); break;
-                    case SDL_CONTROLLER_BUTTON_DPAD_LEFT: emit gpuiControlsNavigate(QStringLiteral("left")); break;
-                    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: emit gpuiControlsNavigate(QStringLiteral("right")); break;
-                    case SDL_CONTROLLER_BUTTON_X: emit gpuiControlsNavigate(QStringLiteral("edit")); break;
-                    case SDL_CONTROLLER_BUTTON_A: emit gpuiControlsNavigate(QStringLiteral("select")); break;
+                    case SDL_CONTROLLER_BUTTON_DPAD_UP: m_WorkerEvents->controlsNavigate("up"); break;
+                    case SDL_CONTROLLER_BUTTON_DPAD_DOWN: m_WorkerEvents->controlsNavigate("down"); break;
+                    case SDL_CONTROLLER_BUTTON_DPAD_LEFT: m_WorkerEvents->controlsNavigate("left"); break;
+                    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: m_WorkerEvents->controlsNavigate("right"); break;
+                    case SDL_CONTROLLER_BUTTON_X: m_WorkerEvents->controlsNavigate("edit"); break;
+                    case SDL_CONTROLLER_BUTTON_A: m_WorkerEvents->controlsNavigate("select"); break;
                     case SDL_CONTROLLER_BUTTON_B:
-                    case SDL_CONTROLLER_BUTTON_START: emit gpuiControlsNavigate(QStringLiteral("back")); break;
+                    case SDL_CONTROLLER_BUTTON_START: m_WorkerEvents->controlsNavigate("back"); break;
                     default: break;
                     }
                 }
@@ -4839,7 +4847,7 @@ void Session::exec()
         case SDL_CONTROLLERDEVICEREMOVED:
             m_InputHandler->handleControllerDeviceEvent(&event.cdevice);
             if (m_GpuiControlsActive) {
-                emit gpuiControlsChanged(true, m_InputHandler->isMouseEmulationActive(),
+                m_WorkerEvents->controlsChanged(true, m_InputHandler->isMouseEmulationActive(),
                                          m_InputHandler->hasConnectedGamepads());
             }
             updateDualSenseHapticsControllerTarget();

@@ -2,7 +2,6 @@
 
 #include <QObject>
 #include <QJsonObject>
-#include <QPointer>
 #include <QHash>
 #include <deque>
 #include <functional>
@@ -60,7 +59,6 @@ private:
     bool m_RustMonitor = false;
     int m_NextMonitorGeneration = 1;
     QHash<QString, QJsonObject> m_MonitorContexts;
-    QPointer<Session> m_Session;
     QString m_PairingHost;
     int m_RustPairingRequest = 0;
     NvComputer* m_DeletingHost = nullptr;
@@ -77,4 +75,5 @@ private:
 #ifdef Q_OS_WIN32
     std::unique_ptr<WindowsWorkerDispatch> m_InputWakeWindow;
 #endif
+    std::unique_ptr<Session> m_Session;
 };

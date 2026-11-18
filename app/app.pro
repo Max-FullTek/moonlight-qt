@@ -362,6 +362,7 @@ HEADERS += \
     streaming/session.h \
     streaming/supportedvideoformats.h \
     streaming/clipboardhelperclient.h \
+    streaming/sessionevents.h \
     streaming/clipboardipc.h \
     streaming/audio/renderers/renderer.h \
     streaming/audio/audiopipeline.h \

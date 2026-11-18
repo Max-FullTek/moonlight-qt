@@ -16,8 +16,8 @@ import time
 from urllib.parse import parse_qs, urlsplit
 
 
-def check_legacy_pairing(worker, env, profile, pin_file, mode):
-    """Exercise PendingPairingTask and C++ polling, bypassing Rust's pair API."""
+def check_direct_worker(worker, env, profile, pin_file, mode, launch_started):
+    """Exercise the direct worker protocol with C++ polling and HTTP."""
     env = dict(env)
     env["MOONLIGHT_GPUI_PROFILE"] = str(profile)
     env.pop("MOONLIGHT_GPUI_RUST_MONITOR", None)
@@ -59,9 +59,32 @@ def check_legacy_pairing(worker, env, profile, pin_file, mode):
             deadline = time.monotonic() + 20
             while True:
                 hosts = event("hosts")["hosts"]
-                if any(host["id"] == "rust-display-host" and host["online"] for host in hosts):
+                if any(host["id"] == "rust-display-host" and host["online"]
+                       and (mode != "launch" or host["paired"] and host["apps"]) for host in hosts):
                     break
                 assert time.monotonic() < deadline, "C++ polling never published online state"
+            if mode == "launch":
+                settings = {
+                    "width": 1280, "height": 720, "fps": 60, "bitrate": 10,
+                    "fec": -2, "scale_percent": 100, "codec": 1,
+                    "abr": False, "enhancement": False, "scale": False,
+                    "display": {"window_mode": 2, "decoder": 2, "hdr": False,
+                                "vsync": True, "frame_pacing": False},
+                }
+                for _ in range(2):
+                    send({"command": "start", "host": "rust-display-host", "app": 1, "settings": settings})
+                    event("launching")
+                    error = event("error")
+                    assert error["code"] == "launch_failed" and "fixture launch denied 測試" in error["message"]
+                    event("stream_finished")
+                send({"command": "start", "host": "rust-display-host", "app": 1, "settings": settings})
+                event("launching")
+                assert launch_started.wait(timeout=5), "Launch request did not reach the fixture"
+                send({"command": "shutdown"})
+                assert event("error")["code"] == "launch_failed"
+                event("stream_finished")
+                assert process.wait(timeout=5) == 0
+                return
             send({"command": "pair", "host": "rust-display-host"})
             pin_file.write_text(event("pairing")["pin"], encoding="ascii")
             if mode == "cancel":
@@ -94,7 +117,8 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
         mode = mode.removeprefix("legacy-")
         assert peer_executable and mode in ("ok", "wrong-pin", "final-reject", "cancel")
     quit_mode = peer_executable == "quit"
-    launch_mode = peer_executable == "launch-rejected"
+    direct_launch = peer_executable == "launch-no-client-pid"
+    launch_mode = direct_launch or peer_executable == "launch-rejected"
     if quit_mode or launch_mode:
         peer_executable = None
     root = Path(__file__).resolve().parents[2]
@@ -106,6 +130,9 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
     seen = []
     peer = None
     release_pair = threading.Event()
+    launch_started = threading.Event()
+    release_launch = threading.Event()
+    launch_count = 0
     paired = not peer_executable
     pin_file = work / "pin.txt"
     phase_file = work / "quit-phase.txt"
@@ -119,7 +146,7 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
             pass
 
         def do_GET(self):
-            nonlocal peer, paired, running
+            nonlocal peer, paired, running, launch_count
             url = urlsplit(self.path)
             seen.append((url.path, parse_qs(url.query)))
             if url.path == "/serverinfo":
@@ -168,7 +195,13 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
                     {"friendly_name": "家中螢幕 🎮", "display_name": "screen", "device_id": "screen-1"}, {}]}, ensure_ascii=False).encode()
             elif url.path == "/launch" and launch_mode:
                 assert isinstance(self.connection, ssl.SSLSocket), "Launch was not pinned TLS"
-                body = b'<root status_code="503" status_message="fixture launch denied"/>'
+                launch_count += 1
+                if direct_launch and launch_count == 3:
+                    launch_started.set()
+                    release_launch.wait(timeout=15)
+                    self.close_connection = True
+                    return
+                body = '<root status_code="503" status_message="fixture launch denied 測試"/>'.encode()
             elif url.path == "/cancel" and quit_mode:
                 assert isinstance(self.connection, ssl.SSLSocket), "Cancel was not pinned TLS"
                 phase = phase_file.read_text()
@@ -227,8 +260,8 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
                 "rust_quit_through_real_worker_context" if quit_mode else
                 "rust_pairing_through_real_worker_context" if peer_executable else
                 "rust_displays_through_real_worker_context")
-        if legacy_pairing:
-            check_legacy_pairing(worker, env, profile, pin_file, mode)
+        if legacy_pairing or direct_launch:
+            check_direct_worker(worker, env, profile, pin_file, "launch" if direct_launch else mode, launch_started)
         else:
             command = ["cargo", "+1.99.1", "test", "--release", "--locked", "--manifest-path",
                        str(root / "gpui-prototype/Cargo.toml"), f"core::tests::{test}",
@@ -253,7 +286,7 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
         displays = [entry for entry in seen if entry[0] == "/displays"]
         if launch_mode:
             launches = [query for endpoint, query in seen if endpoint == "/launch"]
-            assert len(launches) == 2, seen
+            assert len(launches) == (3 if direct_launch else 2), seen
             assert all(query["uniqueid"] == ["fixture-client"] for query in launches), launches
             mappings = json.loads((profile / "controller-mappings-v1.json").read_text(encoding="utf-8"))
             guid_key = next(key for key, value in mappings["values"].items()
@@ -272,7 +305,7 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
             assert query["uniqueid"] == ["fixture-client"] and query["clientname"] == ["fixture-client-name"], query
             assert len(query["uuid"][0]) == 32, query
         assert settings.read_bytes() == original_ini, "Legacy INI changed"
-        log = (profile / ("legacy-worker-stderr.log" if legacy_pairing else "core-stderr.log")).read_bytes()
+        log = (profile / ("legacy-worker-stderr.log" if legacy_pairing or direct_launch else "core-stderr.log")).read_bytes()
         assert b"/displays" not in log, "C++ still requested displays"
         assert b"PRIVATE KEY" not in log and b"BEGIN CERTIFICATE" not in log, "Identity appeared in diagnostics"
         if not legacy_pairing:
@@ -283,6 +316,7 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
         print(f"Real worker context, {operation}, persistence and shutdown: passed")
     finally:
         release_pair.set()
+        release_launch.set()
         for server in (tls, plain):
             server.shutdown()
             server.server_close()

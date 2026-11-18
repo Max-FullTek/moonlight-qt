@@ -61,11 +61,12 @@ struct WindowsWorkerDispatch::Window {
         if (completion) completion();
     }
 
-    bool postCompletion(std::function<void()> completion)
+    bool postCompletion(std::function<void()>&& completion)
     {
         std::lock_guard lock(completionMutex);
         completions.push_back(std::move(completion));
         if (window && PostMessageW(window, CompletionMessage, 0, 0)) return true;
+        completion = std::move(completions.back());
         completions.pop_back();
         return false;
     }
@@ -131,7 +132,7 @@ void WindowsWorkerDispatch::finishLifecycle()
     m_Window->finishLifecycle();
 }
 
-bool WindowsWorkerDispatch::postCompletion(std::function<void()> completion)
+bool WindowsWorkerDispatch::postCompletion(std::function<void()>&& completion)
 {
     return m_Window->postCompletion(std::move(completion));
 }

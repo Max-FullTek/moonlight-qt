@@ -251,7 +251,7 @@ int GpuiCoreBridge::execNative()
 void GpuiCoreBridge::postCompletion(std::function<void()> completion)
 {
 #ifdef Q_OS_WIN32
-    if (m_InputWakeWindow && m_InputWakeWindow->postCompletion(completion)) return;
+    if (m_InputWakeWindow && m_InputWakeWindow->postCompletion(std::move(completion))) return;
 #endif
     // Transitional failure/non-Windows path while the Qt entry still exists.
     QMetaObject::invokeMethod(this, std::move(completion), Qt::QueuedConnection);
@@ -532,10 +532,9 @@ void GpuiCoreBridge::finishShutdown()
 
 void GpuiCoreBridge::finishSession(Session* session)
 {
-    Q_ASSERT(m_Session == session);
+    Q_ASSERT(m_Session.get() == session);
     const bool shouldExit = session->shouldExit();
-    m_Session = nullptr;
-    delete session;
+    m_Session.reset();
     send({{"event", "stream_finished"}});
     publishHosts();
     if (shouldExit) shutdown();
@@ -830,51 +829,59 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         preferences->remoteResolution=false;
     }
     const int vdd=advanced["vdd"].toInt();
-    auto* session = new Session(host, selected, preferences,advanced["host_display"].toString(),vdd==0?std::nullopt:std::optional<bool>(vdd==2));
+    m_Session = std::make_unique<Session>(host, selected, preferences,
+        advanced["host_display"].toString(), vdd == 0 ? std::nullopt : std::optional<bool>(vdd == 2));
+    auto* session = m_Session.get();
     session->setClientDisplay(clientDisplay);
     session->setGpuiControlsClient(static_cast<unsigned long>(request["client_pid"].toInt()));
     session->setCoreCommandHandler([this] { drainInput(); });
-#ifdef Q_OS_WIN32
     session->setLifecycleDispatcher([this](std::function<void()> completion) {
         postCompletion(std::move(completion));
     });
-#endif
-    m_Session = session;
-    connect(session, &Session::hostQuitFailed, this, [this](const QString& message) {
-        postCompletion([this, message] { fail("host_quit_failed", message); });
-    }, Qt::DirectConnection);
-    connect(session, &Session::gpuiControlsChanged, this, [this](bool active, bool mouse, bool gamepad) {
+    SessionEvents events;
+    events.hostQuitFailed = [this](std::string message) {
+        postCompletion([this, message = std::move(message)] {
+            fail("host_quit_failed", QString::fromStdString(message));
+        });
+    };
+    events.controlsChanged = [this](bool active, bool mouse, bool gamepad) {
         postCompletion([this, active, mouse, gamepad] {
             send({{"event", "controls"}, {"active", active}, {"gamepad_mouse", mouse}, {"has_gamepad", gamepad}});
         });
-    }, Qt::DirectConnection);
-    connect(session, &Session::gpuiControlsNavigate, this, [this](const QString& direction) {
-        postCompletion([this, direction] { send({{"event", "controls_navigate"}, {"direction", direction}}); });
-    }, Qt::DirectConnection);
-    connect(session, &Session::gpuiBitrateResult, this, [this, session](int requestId, int requested, bool success, const QString& error) {
-        postCompletion([this, session, requestId, requested, success, error] {
-            if (m_Session != session) return;
-            send({{"event", "bitrate_result"}, {"request_id", requestId}, {"requested_kbps", requested},
-                  {"success", success}, {"message", error}});
+    };
+    events.controlsNavigate = [this](const char* direction) {
+        postCompletion([this, direction] {
+            send({{"event", "controls_navigate"}, {"direction", QString::fromLatin1(direction)}});
         });
-    }, Qt::DirectConnection);
-    connect(session, &Session::stageStarting, this, [this](QString stage) {
-        postCompletion([this, stage] { send({{"event", "stage"}, {"stage", stage}}); });
-    }, Qt::DirectConnection);
-    connect(session, &Session::stageFailed, this, [this](QString stage, int code, QString) {
-        postCompletion([this, stage, code] { fail("stage_failed", tr("%1 failed (%2)").arg(stage).arg(code)); });
-    }, Qt::DirectConnection);
-    connect(session, &Session::displayLaunchError, this, [this](QString message) {
-        postCompletion([this, message] { fail("launch_failed", message); });
-    }, Qt::DirectConnection);
-    connect(session, &Session::connectionStarted, this, [this] {
+    };
+    events.bitrateResult = [this, session](int requestId, int requested, bool success, std::string error) {
+        postCompletion([this, session, requestId, requested, success, error = std::move(error)] {
+            if (m_Session.get() != session) return;
+            send({{"event", "bitrate_result"}, {"request_id", requestId}, {"requested_kbps", requested},
+                  {"success", success}, {"message", QString::fromStdString(error)}});
+        });
+    };
+    events.stageStarting = [this](const char* stage) {
+        postCompletion([this, stage] {
+            send({{"event", "stage"}, {"stage", QString::fromLatin1(stage)}});
+        });
+    };
+    events.stageFailed = [this](const char* stage, int code) {
+        postCompletion([this, stage, code] {
+            fail("stage_failed", tr("%1 failed (%2)").arg(QString::fromLatin1(stage)).arg(code));
+        });
+    };
+    events.launchFailed = [this](std::string message) {
+        postCompletion([this, message = std::move(message)] { fail("launch_failed", QString::fromStdString(message)); });
+    };
+    events.started = [this] {
         postCompletion([this] { send({{"event", "stream_started"}}); });
-    }, Qt::DirectConnection);
-    connect(session, &Session::readyForDeletion, this, [this, session] {
-        // Always defer, even when emitted by the owner: the Session's cleanup
-        // callback must return before the object that owns it is destroyed.
+    };
+    events.retired = [this, session] {
+        // Let the cleanup callback return before destroying its Session.
         postCompletion([this, session] { finishSession(session); });
-    }, Qt::DirectConnection);
+    };
+    session->setWorkerEvents(std::move(events));
     if (!session->initialize(nullptr)) {
         postCompletion([this, session] { finishSession(session); });
         return;
