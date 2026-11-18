@@ -209,7 +209,10 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
         + "[hosts]\nsize=1\n1\\hostname=fixture\n1\\uuid=rust-display-host\n"
         + f"1\\manualaddress=127.0.0.1\n1\\manualport={plain.server_port}\n"
         + "1\\srvcert=" + (byte_array(fixtures / "server.pem") if paired else "@ByteArray()") + "\n"
-        + "[Pairnames]\nrust-display-host=fixture-client-name\n", encoding="utf-8")
+        + "[Pairnames]\nrust%2Ddisplay%2Dhost=fixture-client-name\n"
+        + '[gcmapping]\nsize=1\n1\\guid=03000000dead0000beef000001000000\n'
+          '1\\mapping="Migration Test,a:b0,b:b1,"\n', encoding="utf-8")
+    original_ini = settings.read_bytes()
     threads = [threading.Thread(target=server.serve_forever, daemon=True) for server in (tls, plain)]
     for thread in threads:
         thread.start()
@@ -252,6 +255,10 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
             launches = [query for endpoint, query in seen if endpoint == "/launch"]
             assert len(launches) == 2, seen
             assert all(query["uniqueid"] == ["fixture-client"] for query in launches), launches
+            mappings = json.loads((profile / "controller-mappings-v1.json").read_text(encoding="utf-8"))
+            guid_key = next(key for key, value in mappings["values"].items()
+                            if key.endswith("/guid") and value == "03000000dead0000beef000001000000")
+            assert mappings["values"][guid_key.replace("/guid", "/mapping")] == "Migration Test,a:b0,b:b1,"
         elif quit_mode:
             cancellations = [entry for entry in seen if entry[0] == "/cancel"]
             assert len(cancellations) == 3, seen
@@ -264,6 +271,7 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
             query = displays[0][1]
             assert query["uniqueid"] == ["fixture-client"] and query["clientname"] == ["fixture-client-name"], query
             assert len(query["uuid"][0]) == 32, query
+        assert settings.read_bytes() == original_ini, "Legacy INI changed"
         log = (profile / ("legacy-worker-stderr.log" if legacy_pairing else "core-stderr.log")).read_bytes()
         assert b"/displays" not in log, "C++ still requested displays"
         assert b"PRIVATE KEY" not in log and b"BEGIN CERTIFICATE" not in log, "Identity appeared in diagnostics"

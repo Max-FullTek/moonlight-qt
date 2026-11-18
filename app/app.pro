@@ -25,6 +25,8 @@ win32:lite-native-worker-json {
     HEADERS += backend/workercommandrouting.h
     SOURCES += backend/hostprofile.cpp backend/windowsprofilefile.cpp
     HEADERS += backend/hostprofile.h backend/windowsprofilefile.h
+    SOURCES += backend/legacyworkerprofile.cpp backend/workerpreferences.cpp
+    HEADERS += backend/legacyworkerprofile.h backend/workerpreferences.h
 }
 
 # Transitional Windows Lite owner: native HTTP and Win32 GPUI event dispatcher.

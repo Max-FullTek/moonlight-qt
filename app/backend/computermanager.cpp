@@ -178,32 +178,34 @@ ComputerManager::ComputerManager(StreamingPreferences* prefs, bool externalPolli
       m_CompatFetcher(nullptr),
       m_NeedsDelayedFlush(false)
 {
-    bool loadedNative = false;
 #ifdef LITE_NATIVE_WORKER_JSON
+    bool imported = false;
     if (!m_ProfileDirectory.isEmpty()) {
         try {
-            auto hosts = HostProfile::read(std::filesystem::path(m_ProfileDirectory.toStdWString()) / L"hosts-v1.json");
-            if (hosts) {
-                for (auto& computer : *hosts) {
-                    if (m_KnownHosts.contains(computer->uuid)) qFatal("Duplicate UUID in the GPUI host profile");
-                    computer->isSupportedServerVersion = true;
-                    computer->externalPort = computer->remoteAddress.port();
-                    m_LastSerializedHosts[computer->uuid] = *computer;
-                    m_KnownHosts.insert(computer->uuid, computer.get());
-                    computer.release();
-                }
-                loadedNative = true;
+            const std::filesystem::path directory(m_ProfileDirectory.toStdWString());
+            auto saved = HostProfile::read(directory / L"hosts-v1.json");
+            imported = !saved.has_value();
+            auto hosts = saved ? std::move(*saved) : HostProfile::importLegacy(directory);
+            for (auto& computer : hosts) {
+                if (m_KnownHosts.contains(computer->uuid)) qFatal("Duplicate UUID in the GPUI host profile");
+                computer->isSupportedServerVersion = true;
+                computer->externalPort = computer->remoteAddress.port();
+                m_LastSerializedHosts[computer->uuid] = *computer;
+                m_KnownHosts.insert(computer->uuid, computer.get());
+                computer.release();
             }
         } catch (const std::exception&) {
             qFatal("Unable to read the GPUI host profile");
         }
-    }
+    } else
 #endif
-    if (!loadedNative) loadLegacyHosts();
+    {
+        loadLegacyHosts();
+    }
 
     m_DelayedFlushThread = std::thread(&ComputerManager::runDelayedFlush, this);
 #ifdef LITE_NATIVE_WORKER_JSON
-    if (!loadedNative && !m_ProfileDirectory.isEmpty() && !m_KnownHosts.isEmpty()) saveHosts();
+    if (imported && !m_KnownHosts.isEmpty()) saveHosts();
 #endif
     connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, &ComputerManager::handleAboutToQuit);
 }

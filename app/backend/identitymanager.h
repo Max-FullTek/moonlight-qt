@@ -34,7 +34,7 @@ private:
     getSslKey();
 
     void
-    createCredentials(QSettings& settings);
+    createCredentials();
 
     // Initialized in constructor
     QByteArray m_CachedPrivateKey;

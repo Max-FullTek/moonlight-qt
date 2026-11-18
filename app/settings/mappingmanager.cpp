@@ -1,5 +1,8 @@
 #include "mappingmanager.h"
 #include "path.h"
+#ifdef LITE_NATIVE_WORKER_JSON
+#include "backend/workerpreferences.h"
+#endif
 
 #include <QDir>
 
@@ -12,18 +15,38 @@
 
 MappingManager::MappingManager()
 {
-    QSettings settings;
+#ifdef LITE_NATIVE_WORKER_JSON
+    if (!WorkerPreferences::directory().empty()) {
+        try {
+            using namespace LegacyWorkerProfile;
+            const auto values = WorkerPreferences::load(WorkerPreferences::Section::ControllerMappings);
+            const int count = number(values, "size");
+            if (count < 0 || static_cast<size_t>(count) > values.size()) {
+                throw std::runtime_error("Invalid controller mapping count");
+            }
+            for (int i = 1; i <= count; ++i) {
+                const auto prefix = std::to_string(i) + '/';
+                SdlGamepadMapping mapping(QString::fromUtf8(value(values, prefix + SER_GUID)),
+                                          QString::fromUtf8(value(values, prefix + SER_MAPPING)));
+                addMapping(mapping);
+            }
+        } catch (const std::exception&) {
+            qWarning("Unable to read worker controller mappings");
+        }
+    } else
+#endif
+    {
+        QSettings settings;
 
-    // First load existing saved mappings. This ensures the user's
-    // hints can always override the old data.
-    int mappingCount = settings.beginReadArray(SER_GAMEPADMAPPING);
-    for (int i = 0; i < mappingCount; i++) {
-        settings.setArrayIndex(i);
+        const int mappingCount = settings.beginReadArray(SER_GAMEPADMAPPING);
+        for (int i = 0; i < mappingCount; i++) {
+            settings.setArrayIndex(i);
 
-        SdlGamepadMapping mapping(settings.value(SER_GUID).toString(), settings.value(SER_MAPPING).toString());
-        addMapping(mapping);
+            SdlGamepadMapping mapping(settings.value(SER_GUID).toString(), settings.value(SER_MAPPING).toString());
+            addMapping(mapping);
+        }
+        settings.endArray();
     }
-    settings.endArray();
 
     // Finally load mappings from SDL_HINT_GAMECONTROLLERCONFIG
     QStringList sdlMappings =
@@ -44,6 +67,26 @@ MappingManager::MappingManager()
 
 void MappingManager::save()
 {
+#ifdef LITE_NATIVE_WORKER_JSON
+    if (!WorkerPreferences::directory().empty()) {
+        try {
+            // Validate the existing file before replacing it with live mappings.
+            WorkerPreferences::load(WorkerPreferences::Section::ControllerMappings);
+            LegacyWorkerProfile::Values values;
+            values["size"] = std::to_string(m_Mappings.size());
+            int index = 0;
+            for (const auto& mapping : m_Mappings) {
+                const auto prefix = std::to_string(++index) + '/';
+                values[prefix + SER_GUID] = mapping.getGuid().toUtf8().toStdString();
+                values[prefix + SER_MAPPING] = mapping.getMapping().toUtf8().toStdString();
+            }
+            WorkerPreferences::save(WorkerPreferences::Section::ControllerMappings, values);
+        } catch (const std::exception&) {
+            qWarning("Unable to save worker controller mappings");
+        }
+        return;
+    }
+#endif
     QSettings settings;
 
     settings.remove(SER_GAMEPADMAPPING);

@@ -27,7 +27,8 @@ std::optional<std::string> WindowsProfileFile::read(const std::filesystem::path&
     File file(CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
                          nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (file.handle == INVALID_HANDLE_VALUE) {
-        if (GetLastError() == ERROR_FILE_NOT_FOUND) return std::nullopt;
+        const auto error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) return std::nullopt;
         throw std::runtime_error("Unable to open profile file");
     }
     LARGE_INTEGER size;

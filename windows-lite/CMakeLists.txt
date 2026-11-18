@@ -171,6 +171,14 @@ if(LITE_CLIPBOARD_JSON_SOURCE)
     target_compile_options(lite-worker-command-routing PRIVATE /W3 /WX)
     target_include_directories(lite-worker-command-routing PUBLIC "${LITE_SOURCE_ROOT}/app")
     target_include_directories(lite-worker-command-routing SYSTEM PRIVATE "${LITE_CLIPBOARD_JSON_SOURCE}/include")
+    add_library(lite-worker-profile STATIC
+        "${LITE_SOURCE_ROOT}/app/backend/legacyworkerprofile.cpp"
+        "${LITE_SOURCE_ROOT}/app/backend/windowsprofilefile.cpp"
+        "${LITE_SOURCE_ROOT}/app/backend/workerpreferences.cpp")
+    target_compile_features(lite-worker-profile PUBLIC cxx_std_17)
+    target_compile_options(lite-worker-profile PRIVATE /W3 /WX)
+    target_include_directories(lite-worker-profile PUBLIC "${LITE_SOURCE_ROOT}/app")
+    target_include_directories(lite-worker-profile SYSTEM PRIVATE "${LITE_CLIPBOARD_JSON_SOURCE}/include")
     add_library(lite-worker-loop STATIC "${LITE_SOURCE_ROOT}/app/backend/windowsworkerloop.cpp")
     target_compile_options(lite-worker-loop PRIVATE /W3 /WX)
     target_link_libraries(lite-worker-loop PUBLIC lite-worker-command-routing PRIVATE user32)

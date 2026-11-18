@@ -90,6 +90,9 @@ static QString getStartupApplicationDir(const char* argv0)
 #include "gui/appmodel.h"
 #include "backend/computermanager.h"
 #include "backend/gpuicorebridge.h"
+#ifdef LITE_NATIVE_WORKER_JSON
+#include "backend/workerpreferences.h"
+#endif
 #include "backend/systemproperties.h"
 #include "streaming/session.h"
 #ifdef HAS_QT_SDL_WAYLAND_BRIDGE
@@ -808,9 +811,13 @@ int main(int argc, char *argv[])
         const QString profile = qEnvironmentVariable("MOONLIGHT_GPUI_PROFILE");
         if (profile.isEmpty() || !QDir::isAbsolutePath(profile) || !QDir().mkpath(profile)) return 2;
         QCoreApplication::setApplicationName("MoonlightGPUI");
+#ifdef LITE_NATIVE_WORKER_JSON
+        WorkerPreferences::initialize(std::filesystem::path(profile.toStdWString()));
+#else
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, profile);
         QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, profile);
+#endif
         Path::initialize(true, profile);
     }
     else if (QFile(QDir(startupApplicationDir).filePath("portable.dat")).exists()) {

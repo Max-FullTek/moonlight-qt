@@ -16,9 +16,12 @@ def check(executable, profile, eof=False, seeded=False, platform="offscreen",
         settings = profile / "Moonlight Game Streaming Project" / "MoonlightGPUI.ini"
         settings.parent.mkdir()
         settings.write_text(
+            "[General]\npacketsize=1200\noverlaymenuposition=1\n"
+            'backgroundimageapi="https://example.invalid/a;b=c"\n'
             "[hosts]\nsize=1\n1\\hostname=CI Host\n1\\uuid=ci-offline-host\n"
             "1\\localaddress=127.0.0.1\n1\\localport=1\n"
             "1\\manualaddress=127.0.0.1\n1\\manualport=1\n"
+            r"1\mac=@ByteArray(\0\x1\x2\x3\x4\xff)" "\n"
             "1\\apps\\size=1\n1\\apps\\1\\id=42\n1\\apps\\1\\name=Desktop\n"
             "1\\apps\\1\\hidden=true\n1\\apps\\1\\directlaunch=true\n",
             encoding="utf-8")
@@ -156,8 +159,14 @@ def check(executable, profile, eof=False, seeded=False, platform="offscreen",
             if seeded:
                 saved = json.loads((profile / "hosts-v1.json").read_text(encoding="utf-8"))
                 assert saved["version"] == 1
+                preferences = json.loads((profile / "stream-settings-v1.json").read_text(encoding="utf-8"))
+                assert preferences["values"]["packetsize"] == "1200"
+                assert preferences["values"]["overlaymenuplacement"] == "4"
+                assert preferences["values"]["backgroundimageapi"] == "https://example.invalid/a;b=c"
+                assert "overlaymenuposition" not in preferences["values"]
                 if rename_only:
                     assert saved["hosts"][0]["name"] == "測試 Host 😀"
+                    assert saved["hosts"][0]["mac"] == "0001020304ff"
                 else:
                     assert saved["hosts"] == [], "Removed host was not persisted on exit"
                 legacy = configparser.ConfigParser(interpolation=None)
@@ -165,6 +174,7 @@ def check(executable, profile, eof=False, seeded=False, platform="offscreen",
                 current = configparser.ConfigParser(interpolation=None)
                 current.read(legacy_path, encoding="utf-8")
                 assert dict(current["hosts"]) == dict(legacy["hosts"]), "Legacy hosts changed during migration"
+                assert legacy_path.read_text(encoding="utf-8") == legacy_contents, "Legacy INI changed"
         finally:
             if process.poll() is None:
                 process.kill()  # Only this script's known, isolated test worker.

@@ -1,4 +1,5 @@
 #include "hostprofile.h"
+#include "legacyworkerprofile.h"
 #include "nvcomputer.h"
 #include "windowsprofilefile.h"
 
@@ -94,11 +95,10 @@ Json loadPairNames(const std::filesystem::path& path)
     const auto data = WindowsProfileFile::read(path, MaxPairNamesBytes);
     if (!data) {
         // Legacy import is read-only. Never mix a later INI update into JSON.
-        QSettings settings;
-        settings.beginGroup("Pairnames");
         auto names = Json::object();
-        for (const auto& key : settings.allKeys()) {
-            names[key.toUtf8().toStdString()] = settings.value(key).toString().toUtf8().toStdString();
+        constexpr std::string_view group = "Pairnames/";
+        for (const auto& [key, name] : LegacyWorkerProfile::read(path.parent_path())) {
+            if (key.compare(0, group.size(), group) == 0) names[key.substr(group.size())] = name;
         }
         return names;
     }
@@ -121,6 +121,66 @@ std::optional<std::vector<std::unique_ptr<NvComputer>>> HostProfile::read(const 
     std::vector<std::unique_ptr<NvComputer>> hosts;
     for (const auto& entry : profile.at("hosts").get_ref<const Json::array_t&>()) {
         hosts.push_back(decode(entry));
+    }
+    return hosts;
+}
+
+std::vector<std::unique_ptr<NvComputer>> HostProfile::importLegacy(const std::filesystem::path& directory)
+{
+    using namespace LegacyWorkerProfile;
+    const auto& values = LegacyWorkerProfile::read(directory);
+    std::string group = "hostsbackup/";
+    int count = number(values, group + "size");
+    if (count == 0) {
+        group = "hosts/";
+        count = number(values, group + "size");
+    }
+    if (count < 0 || static_cast<size_t>(count) > values.size()) {
+        throw std::runtime_error("Invalid legacy host count");
+    }
+    std::vector<std::unique_ptr<NvComputer>> hosts;
+    for (int i = 1; i <= count; ++i) {
+        const auto prefix = group + std::to_string(i) + '/';
+        const auto text = [&](const char* key) { return QString::fromUtf8(value(values, prefix + key)); };
+        const auto bytes = [&](const char* key) {
+            const auto data = value(values, prefix + key);
+            return QByteArray(data.data(), static_cast<qsizetype>(data.size()));
+        };
+        const auto boolean = [&](const char* key) {
+            return QVariant(text(key)).toBool();
+        };
+        const auto address = [&](const char* host, const char* port) {
+            return NvAddress(text(host), number(values, prefix + port, DEFAULT_HTTP_PORT));
+        };
+        auto host = std::make_unique<NvComputer>();
+        host->name = text("hostname");
+        host->uuid = text("uuid");
+        if (host->uuid.isEmpty()) throw std::runtime_error("Missing legacy host UUID");
+        host->hasCustomName = boolean("customname");
+        host->macAddress = bytes("mac");
+        host->localAddress = address("localaddress", "localport");
+        host->remoteAddress = address("remoteaddress", "remoteport");
+        host->ipv6Address = address("ipv6address", "ipv6port");
+        host->manualAddress = address("manualaddress", "manualport");
+        host->serverCert = QSslCertificate(bytes("srvcert"));
+        host->isNvidiaServerSoftware = boolean("nvidiasw");
+        const auto appGroup = prefix + "apps/";
+        const auto appCount = number(values, appGroup + "size");
+        if (appCount < 0 || static_cast<size_t>(appCount) > values.size()) {
+            throw std::runtime_error("Invalid legacy app count");
+        }
+        for (int j = 1; j <= appCount; ++j) {
+            const auto entry = appGroup + std::to_string(j) + '/';
+            NvApp app;
+            app.id = number(values, entry + "id");
+            app.name = QString::fromUtf8(value(values, entry + "name"));
+            app.hdrSupported = QVariant(QString::fromUtf8(value(values, entry + "hdr"))).toBool();
+            app.isAppCollectorGame = QVariant(QString::fromUtf8(value(values, entry + "appcollector"))).toBool();
+            app.hidden = QVariant(QString::fromUtf8(value(values, entry + "hidden"))).toBool();
+            app.directLaunch = QVariant(QString::fromUtf8(value(values, entry + "directlaunch"))).toBool();
+            host->appList.append(std::move(app));
+        }
+        hosts.push_back(std::move(host));
     }
     return hosts;
 }
