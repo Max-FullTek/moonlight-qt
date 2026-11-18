@@ -79,6 +79,11 @@ def main(worker, runtime, plugins, work, mode="new"):
         command = ["cargo", "+1.99.1", "test", "--release", "--locked", "--manifest-path",
                    str(root / "gpui-prototype/Cargo.toml"), "core::tests::rust_add_through_real_worker",
                    "--", "--exact", "--ignored", "--nocapture"]
+        # Native-worker-only changes can reuse a matching, already-built Rust
+        # test harness without making fixture deadlines include compilation.
+        if test_binary := os.environ.get("RUST_HOST_API_TEST_BINARY"):
+            command = [str(Path(test_binary).resolve()), "core::tests::rust_add_through_real_worker",
+                       "--exact", "--ignored", "--nocapture"]
         subprocess.run(command, env=env, check=True, timeout=45)
         requests = [item for item in seen if item[1] == "/serverinfo"]
         assert requests and not requests[0][2], seen

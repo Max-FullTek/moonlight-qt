@@ -6,6 +6,7 @@ launch probes the local decoder but never starts a stream.
 import http.server
 import json
 import os
+import queue
 from pathlib import Path
 import ssl
 import subprocess
@@ -15,7 +16,75 @@ import time
 from urllib.parse import parse_qs, urlsplit
 
 
+def check_legacy_pairing(worker, env, profile, pin_file, mode):
+    """Exercise PendingPairingTask and C++ polling, bypassing Rust's pair API."""
+    env = dict(env)
+    env["MOONLIGHT_GPUI_PROFILE"] = str(profile)
+    env.pop("MOONLIGHT_GPUI_RUST_MONITOR", None)
+    with (profile / "legacy-worker-stderr.log").open("wb") as log:
+        process = subprocess.Popen([str(worker), "--gpui-core"], env=env,
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=log, text=True, encoding="utf-8")
+        received = queue.Queue()
+
+        def reader():
+            try:
+                for line in process.stdout:
+                    received.put(json.loads(line))
+            except Exception as error:
+                received.put(error)
+            finally:
+                received.put(None)
+
+        threading.Thread(target=reader, daemon=True).start()
+
+        def event(name):
+            deadline = time.monotonic() + 20
+            while True:
+                value = received.get(timeout=max(0.01, deadline - time.monotonic()))
+                assert isinstance(value, dict), "Worker exited before completion"
+                assert value.get("protocol") == 1
+                if value["event"] == "hosts" and name != "hosts":
+                    assert time.monotonic() < deadline, "Expected operation completion"
+                    continue
+                assert value["event"] == name, value.get("event")
+                return value
+
+        def send(command):
+            process.stdin.write(json.dumps(command) + "\n")
+            process.stdin.flush()
+
+        try:
+            event("ready")
+            deadline = time.monotonic() + 20
+            while True:
+                hosts = event("hosts")["hosts"]
+                if any(host["id"] == "rust-display-host" and host["online"] for host in hosts):
+                    break
+                assert time.monotonic() < deadline, "C++ polling never published online state"
+            send({"command": "pair", "host": "rust-display-host"})
+            pin_file.write_text(event("pairing")["pin"], encoding="ascii")
+            if mode == "ok":
+                event("paired")
+            else:
+                assert event("error")["code"] == ("pair_pin_mismatch" if mode == "wrong-pin" else "pair_failed")
+            # Success and failure must both release the bridge's operation lock.
+            send({"command": "rename", "host": "rust-display-host", "name": "after-pair"})
+            event("host_renamed")
+            send({"command": "shutdown"})
+            assert process.wait(timeout=35) == 0
+        finally:
+            if process.poll() is None:
+                process.kill()  # Only this fixture's worker.
+                process.wait()
+            process.stdin.close()
+
+
 def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode="ok"):
+    legacy_pairing = mode.startswith("legacy-")
+    if legacy_pairing:
+        mode = mode.removeprefix("legacy-")
+        assert peer_executable and mode in ("ok", "wrong-pin", "final-reject")
     quit_mode = peer_executable == "quit"
     launch_mode = peer_executable == "launch-rejected"
     if quit_mode or launch_mode:
@@ -141,9 +210,12 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
                 "rust_quit_through_real_worker_context" if quit_mode else
                 "rust_pairing_through_real_worker_context" if peer_executable else
                 "rust_displays_through_real_worker_context")
-        subprocess.run(["cargo", "+1.99.1", "test", "--release", "--locked", "--manifest-path",
-                        str(root / "gpui-prototype/Cargo.toml"), f"core::tests::{test}",
-                        "--", "--exact", "--ignored", "--nocapture"], env=env, check=True, timeout=90)
+        if legacy_pairing:
+            check_legacy_pairing(worker, env, profile, pin_file, mode)
+        else:
+            subprocess.run(["cargo", "+1.99.1", "test", "--release", "--locked", "--manifest-path",
+                            str(root / "gpui-prototype/Cargo.toml"), f"core::tests::{test}",
+                            "--", "--exact", "--ignored", "--nocapture"], env=env, check=True, timeout=90)
         if peer_executable:
             pairs = [entry for entry in seen if entry[0] == "/pair"]
             assert len(pairs) == (3 if mode == "wrong-pin" else 5), seen
@@ -171,14 +243,15 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
             query = displays[0][1]
             assert query["uniqueid"] == ["fixture-client"] and query["clientname"] == ["fixture-client-name"], query
             assert len(query["uuid"][0]) == 32, query
-        log = (profile / "core-stderr.log").read_bytes()
+        log = (profile / ("legacy-worker-stderr.log" if legacy_pairing else "core-stderr.log")).read_bytes()
         assert b"/displays" not in log, "C++ still requested displays"
         assert b"PRIVATE KEY" not in log and b"BEGIN CERTIFICATE" not in log, "Identity appeared in diagnostics"
-        assert b"pair stage" not in log, "C++ still performed pairing"
+        if not legacy_pairing:
+            assert b"pair stage" not in log, "C++ still performed pairing"
         if quit_mode:
             assert b"Quit response:" not in log, "C++ still performed cancellation"
-        operation = "launch rejection and retry" if launch_mode else "session quit" if quit_mode else "pairing " + mode if peer_executable else "display query"
-        print(f"Real worker context, Rust {operation}, persistence and shutdown: passed")
+        operation = "legacy pairing " + mode if legacy_pairing else "launch rejection and retry" if launch_mode else "session quit" if quit_mode else "pairing " + mode if peer_executable else "display query"
+        print(f"Real worker context, {operation}, persistence and shutdown: passed")
     finally:
         for server in (tls, plain):
             server.shutdown()

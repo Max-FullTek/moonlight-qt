@@ -413,7 +413,9 @@ void ComputerManager::startPollingComputer(NvComputer* computer)
     if (!pollingEntry->isActive()) {
         PcMonitorThread* thread = new PcMonitorThread(computer);
         connect(thread, &PcMonitorThread::computerStateChanged,
-                this, &ComputerManager::handleComputerStateChanged);
+                this, [this](NvComputer* updated) {
+            dispatchHostCompletion([this, updated] { handleComputerStateChanged(updated); });
+        }, Qt::DirectConnection);
         pollingEntry->setActiveThread(thread);
         thread->start();
     }
@@ -542,11 +544,7 @@ public:
         auto completion = [manager = m_ComputerManager, computer = m_Computer, uuid] {
             manager->finishHostDeletion(computer, uuid);
         };
-        if (m_ComputerManager->m_HostDeletionDispatcher) {
-            m_ComputerManager->m_HostDeletionDispatcher(std::move(completion));
-        } else {
-            QMetaObject::invokeMethod(m_ComputerManager, std::move(completion), Qt::QueuedConnection);
-        }
+        m_ComputerManager->dispatchHostCompletion(std::move(completion));
     }
 
 private:
@@ -567,6 +565,15 @@ void ComputerManager::finishHostDeletion(NvComputer* computer, const QString& uu
 {
     m_DeletingHosts.remove(computer);
     emit hostDeleted(uuid);
+}
+
+void ComputerManager::dispatchHostCompletion(std::function<void()> completion)
+{
+    if (m_HostCompletionDispatcher) {
+        m_HostCompletionDispatcher(std::move(completion));
+    } else {
+        QMetaObject::invokeMethod(this, std::move(completion), Qt::QueuedConnection);
+    }
 }
 
 void ComputerManager::renameHost(NvComputer* computer, QString name)
@@ -615,7 +622,11 @@ public:
           m_Pin(pin)
     {
         connect(this, &PendingPairingTask::pairingCompleted,
-                computerManager, &ComputerManager::pairingCompleted);
+                computerManager, [computerManager](NvComputer* computer, QString error) {
+            computerManager->dispatchHostCompletion([computerManager, computer, error] {
+                emit computerManager->pairingCompleted(computer, error);
+            });
+        }, Qt::DirectConnection);
     }
 
 signals:
@@ -680,7 +691,11 @@ public:
         : m_Computer(computer)
     {
         connect(this, &PendingQuitTask::quitAppFailed,
-                computerManager, &ComputerManager::quitAppCompleted);
+                computerManager, [computerManager](QString error) {
+            computerManager->dispatchHostCompletion([computerManager, error] {
+                emit computerManager->quitAppCompleted(error);
+            });
+        }, Qt::DirectConnection);
     }
 
 signals:
@@ -786,9 +801,17 @@ public:
           m_AboutToQuit(false)
     {
         connect(this, &PendingAddTask::computerAddCompleted,
-                computerManager, &ComputerManager::computerAddCompleted);
+                computerManager, [computerManager](QVariant success, QVariant portBlocking) {
+            computerManager->dispatchHostCompletion([computerManager, success, portBlocking] {
+                emit computerManager->computerAddCompleted(success, portBlocking);
+            });
+        }, Qt::DirectConnection);
         connect(this, &PendingAddTask::computerStateChanged,
-                computerManager, &ComputerManager::handleComputerStateChanged);
+                computerManager, [computerManager](NvComputer* computer) {
+            computerManager->dispatchHostCompletion([computerManager, computer] {
+                computerManager->handleComputerStateChanged(computer);
+            });
+        }, Qt::DirectConnection);
         connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
                 this, &PendingAddTask::handleAboutToQuit);
     }

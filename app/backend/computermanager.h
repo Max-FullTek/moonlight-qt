@@ -201,6 +201,7 @@ class ComputerManager : public QObject
     friend class DeferredHostDeletionTask;
     friend class PendingAddTask;
     friend class PendingPairingTask;
+    friend class PendingQuitTask;
 
 public:
     explicit ComputerManager(StreamingPreferences* prefs, bool externalPolling = false);
@@ -230,11 +231,11 @@ public:
 
     void clientSideAttributeUpdated(NvComputer* computer);
 
-    // GPUI owner dispatch for host-deletion completion. The Qt client retains
-    // its queued callback until its own lifecycle is migrated.
-    void setHostDeletionDispatcher(std::function<void(std::function<void()>)> dispatcher)
+    // Install before starting host tasks. GPUI posts operation results to its
+    // native owner; the Qt client retains its queued completion delivery.
+    void setHostCompletionDispatcher(std::function<void(std::function<void()>)> dispatcher)
     {
-        m_HostDeletionDispatcher = std::move(dispatcher);
+        m_HostCompletionDispatcher = std::move(dispatcher);
     }
     void interruptPolling();
 
@@ -258,6 +259,7 @@ private slots:
 private:
     void saveHosts();
     void finishHostDeletion(NvComputer* computer, const QString& uuid);
+    void dispatchHostCompletion(std::function<void()> completion);
 
     void runDelayedFlush();
 
@@ -268,7 +270,7 @@ private:
     void startPollingComputer(NvComputer* computer);
 
     StreamingPreferences* m_Prefs;
-    std::function<void(std::function<void()>)> m_HostDeletionDispatcher;
+    std::function<void(std::function<void()>)> m_HostCompletionDispatcher;
     bool m_ExternalPolling;
     int m_PollingRef;
     QReadWriteLock m_Lock;

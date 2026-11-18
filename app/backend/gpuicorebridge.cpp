@@ -319,7 +319,7 @@ void GpuiCoreBridge::start() {
         return;
     }
 #endif
-    m_Manager->setHostDeletionDispatcher([this](std::function<void()> completion) {
+    m_Manager->setHostCompletionDispatcher([this](std::function<void()> completion) {
         postCompletion(std::move(completion));
     });
     if (m_RustMonitor) SessionApiRpc::broker().install([](uint64_t id,const std::string& payload) {
