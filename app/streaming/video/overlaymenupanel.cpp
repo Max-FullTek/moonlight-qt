@@ -125,16 +125,29 @@ OverlayMenuPanel::OverlayMenuPanel(QWindow* parent, OverlayWindowMode windowMode
     m_TitleFont.setWeight(QFont::DemiBold);
     m_TitleFont.setLetterSpacing(QFont::AbsoluteSpacing, 1.5);
 
-    // Reuse the same bundled Fluent 24 Regular assets as settings/toolbars.
-    // Keep QIcon instances alive so Qt can cache rasterizations for each DPI.
-    for (const QString &name : {QStringLiteral("tb-settings"), QStringLiteral("menu-position"),
+    // Keep QIcon instances alive so Qt can cache the icon sizes for each DPI.
+    const QStringList iconNames{QStringLiteral("tb-settings"), QStringLiteral("menu-position"),
              QStringLiteral("menu-bitrate"), QStringLiteral("menu-files"),
              QStringLiteral("cat-peripherals"), QStringLiteral("cat-display"),
              QStringLiteral("menu-microphone"), QStringLiteral("cat-gamepad"),
              QStringLiteral("menu-close"), QStringLiteral("menu-next"),
-             QStringLiteral("tb-back")}) {
+             QStringLiteral("tb-back")};
+#ifdef LITE_GPUI_WORKER
+    // The strip contains the bundled Fluent SVGs above rendered as 96px square tiles.
+    const QPixmap strip(QStringLiteral(":/res/fluent/lite-stream-menu.png"));
+    const int tile = strip.height();
+    if (tile > 0 && strip.width() == iconNames.size() * tile) {
+        for (qsizetype i = 0; i < iconNames.size(); ++i) {
+            m_MenuIcons.insert(iconNames[i], QIcon(strip.copy(static_cast<int>(i) * tile, 0, tile, tile)));
+        }
+    } else {
+        qWarning("Unable to load Windows Lite stream menu icons");
+    }
+#else
+    for (const auto& name : iconNames) {
         m_MenuIcons.insert(name, QIcon(QStringLiteral(":/res/fluent/%1.svg").arg(name)));
     }
+#endif
 
     // --- Animations ---
     m_OpacityAnim = new QPropertyAnimation(this, "opacity", this);

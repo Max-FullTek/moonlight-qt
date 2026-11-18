@@ -1,11 +1,13 @@
 #include <QGuiApplication>
+#include <QIcon>
 #ifndef LITE_GPUI_WORKER
 #include <QStyleHints>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
-#include <QIcon>
 #include <QLibraryInfo>
 #include <QQuickStyle>
+#else
+#include <QPixmap>
 #endif
 #include <QDir>
 #include <QMutex>
@@ -1396,6 +1398,11 @@ int main(int argc, char *argv[])
     // AVCaptureDevice before any CoreAudio usage, macOS caches the grant for
     // the whole app.
     checkAndRequestMicrophonePermission();
+#elif defined(LITE_GPUI_WORKER)
+    // Use the same embedded Windows icon as the SDL stream window.
+    if (const HICON icon = LoadIconW(GetModuleHandleW(nullptr), L"IDI_ICON1")) {
+        app.setWindowIcon(QIcon(QPixmap::fromImage(QImage::fromHICON(icon))));
+    }
 #else
     // Set the window icon except on macOS where we want to keep the
     // modified macOS 11 style rounded corner icon.

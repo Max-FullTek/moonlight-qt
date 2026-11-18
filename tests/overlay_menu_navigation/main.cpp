@@ -6,6 +6,26 @@
 #include <QWheelEvent>
 #include <QTest>
 
+class TestMenu : public OverlayMenuPanel {
+public:
+    bool hasLightIcon(const QRect& area, qreal scale)
+    {
+        QImage image(size() * scale, QImage::Format_ARGB32_Premultiplied);
+        image.setDevicePixelRatio(scale);
+        image.fill(Qt::transparent);
+        QPainter painter(&image);
+        paintOverlay(painter);
+        painter.end();
+        for (int y = qRound(area.top() * scale); y < qRound((area.bottom() + 1) * scale); ++y) {
+            for (int x = qRound(area.left() * scale); x < qRound((area.right() + 1) * scale); ++x) {
+                const QColor color = image.pixelColor(x, y);
+                if (color.red() > 150 && color.green() > 150 && color.blue() > 150) return true;
+            }
+        }
+        return false;
+    }
+};
+
 // Native preview of the production panel, for retained stream controls.
 class MenuPreview : public QRasterWindow {
 public:
@@ -35,10 +55,14 @@ private:
 int main(int argc, char **argv)
 {
     QGuiApplication app(argc, argv);
+#ifdef LITE_GPUI_WORKER
+    // The platform is already initialized. Verify rendering without any image or icon plugins.
+    QCoreApplication::setLibraryPaths({});
+#endif
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/Manrope-Regular.ttf"));
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/Manrope-SemiBold.ttf"));
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/DMMono-Regular.ttf"));
-    OverlayMenuPanel panel;
+    TestMenu panel;
     if (app.arguments().contains(QStringLiteral("--interactive"))) {
         MenuPreview preview(panel);
         preview.show();
@@ -50,10 +74,16 @@ int main(int argc, char **argv)
     panel.showAtCursor(0, 0, 1600, 1200, QPoint(400, 400), true);
     QTest::qWait(20);
     const int initialHeight = panel.height();
+    for (qreal scale : {1.0, 1.25, 2.0, 4.0}) {
+        if (!panel.hasLightIcon(QRect(panel.width() - 32, 16, 15, 15), scale)) {
+            qFatal("menu close icon missing at scale %.2f", scale);
+        }
+    }
     QTest::mouseClick(&panel, Qt::LeftButton, Qt::NoModifier,
                       QPoint(140, 8 + 32 + 4 + 1 * 38 + 19));
     QTest::qWait(700);
     if (!panel.isVisible()) qFatal("menu position submenu dismissed during interaction");
+    if (!panel.hasLightIcon(QRect(26, 16, 16, 15), 2.0)) qFatal("submenu back icon missing");
     panel.gamepadBack();
     QTest::qWait(700);
     if (!panel.isVisible() || panel.height() != initialHeight) qFatal("back lost active interaction");

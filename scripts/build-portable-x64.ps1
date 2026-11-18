@@ -113,6 +113,7 @@ Invoke-Checked $windeployqt @(
     '--no-opengl-sw', '--no-compiler-runtime', '--no-sql',
     '--no-system-d3d-compiler', '--no-system-dxc-compiler',
     '--skip-plugin-types', 'qmltooling,generic', '--no-ffmpeg',
+    '--exclude-plugins', 'qsvg,qsvgicon',
     (Join-Path $deploy 'Moonlight.exe')
 )
 $redistCandidates = @(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC/Redist/MSVC/*/x64/Microsoft.VC*.CRT')

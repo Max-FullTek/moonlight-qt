@@ -1,11 +1,12 @@
-QT += core gui svg
+QT += core gui
 lite-gpui-worker {
     !win32|!lite-native-http|!lite-native-worker-json: error("The Lite GPUI worker requires the native Windows HTTP and profile backends")
     DEFINES += LITE_GPUI_WORKER
     SOURCES += backend/hostcertificate.cpp
     HEADERS += backend/hostcertificate.h
+    RESOURCES += lite-overlay-icons.qrc
 } else {
-    QT += network quick quickcontrols2 gui-private
+    QT += network quick quickcontrols2 gui-private svg
 }
 win32:lite-no-microphone: DEFINES += LITE_NO_MICROPHONE
 !config_SL:!contains(DEFINES, LITE_NO_MICROPHONE): QT += multimedia
