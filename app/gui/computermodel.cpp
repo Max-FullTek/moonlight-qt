@@ -2,10 +2,10 @@
 #include "appmodel.h"
 #include "backend/nvcomputer.h"
 
+#include <shared_mutex>
+
 #include <QDebug>
-#include <QReadLocker>
 #include <QThreadPool>
-#include <QWriteLocker>
 
 ComputerModel::ComputerModel(QObject* object)
     : QAbstractListModel(object) {}
@@ -30,7 +30,7 @@ QVariant ComputerModel::data(const QModelIndex& index, int role) const
     Q_ASSERT(index.row() < m_Computers.count());
 
     NvComputer* computer = m_Computers[index.row()];
-    QReadLocker lock(&computer->lock);
+    std::shared_lock lock(computer->lock);
 
     switch (role) {
     case NameRole:

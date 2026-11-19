@@ -21,11 +21,11 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
-#include <QReadLocker>
 #include <QStringView>
-#include <QWriteLocker>
 #include <QTimer>
 #include <cstdio>
+#include <mutex>
+#include <shared_mutex>
 #include <thread>
 #include <utility>
 
@@ -424,7 +424,7 @@ void GpuiCoreBridge::publishHosts() {
     QJsonArray hosts;
     for (auto* host : m_Manager->getComputers()) {
         if (host == m_DeletingHost) continue;
-        QReadLocker lock(&host->lock);
+        std::shared_lock lock(host->lock);
         QJsonArray apps;
         for (const auto& app : host->appList) apps.append(QJsonObject{{"id", app.id}, {"name", app.name}, {"hidden", app.hidden}, {"direct_launch", app.directLaunch}});
         const auto address = host->manualAddress.isNull() ? host->activeAddress : host->manualAddress;
@@ -450,7 +450,7 @@ void GpuiCoreBridge::publishMonitorContexts() {
             QUrl url; url.setScheme("http"); url.setHost(address.address()); url.setPort(address.port());
             addresses.append(url.toString());
         }
-        QReadLocker lock(&host->lock);
+        std::shared_lock lock(host->lock);
         auto clientName=NvComputer::getPairname(host->uuid);
         if (clientName.isEmpty()) clientName=localClientHostname();
         const QJsonObject context{{"base_url",QString()},{"server_certificate",PairedCertificate::toOptionalPem(host->serverCert)},
@@ -495,9 +495,9 @@ void GpuiCoreBridge::applyMonitorUpdate(const QJsonObject& request) {
             app.id=item["id"].toInt(); app.name=item["name"].isNull()?QString():item["name"].toString();
             app.hdrSupported=item["hdr"].toBool(); app.isAppCollectorGame=item["collector"].toBool(); apps.append(app);
         }
-        if (!apps.isEmpty()) { QWriteLocker lock(&host->lock); changed=host->updateAppList(apps); }
+        if (!apps.isEmpty()) { std::unique_lock lock(host->lock); changed=host->updateAppList(apps); }
     } else if (update["online"].isBool() && !update["online"].toBool()) {
-        QWriteLocker lock(&host->lock);
+        std::unique_lock lock(host->lock);
         changed=host->state!=NvComputer::CS_OFFLINE;
         host->state=NvComputer::CS_OFFLINE;
     } else if (update["online"].toBool()) {
@@ -508,7 +508,7 @@ void GpuiCoreBridge::applyMonitorUpdate(const QJsonObject& request) {
         if (!integer(info,"https_port",1,65535) || !integer(info,"external_port",1,65535) || !integer(info,"local_port",0,65535) ||
                 !info["paired"].isBool() || !info["nvidia"].isBool() || !info["mac"].isArray() || !info["display_modes"].isArray()) return;
         NvComputer state;
-        { QReadLocker lock(&host->lock); state=*host; }
+        { std::shared_lock lock(host->lock); state=*host; }
         const QUrl address(update["address"].toString());
         state.name=info["name"].toString(); state.macAddress.clear();
         for (const auto& byte:info["mac"].toArray()) {
@@ -594,7 +594,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         if (error.isEmpty()) {
             // Rust verified /serverinfo after /cancel. Refresh only the field
             // that was verified; later normal polls retain profile ownership.
-            { QWriteLocker lock(&host->lock); host->currentGameId=0; }
+            { std::unique_lock lock(host->lock); host->currentGameId=0; }
             m_Manager->clientSideAttributeUpdated(host);
             send({{"event","app_quit"}});
         } else if (error=="not_owner") {
@@ -651,7 +651,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         m_RustPairingRequest=0;
         m_PairingHost.clear();
         if (state==0) {
-            { QWriteLocker lock(&host->lock); host->serverCert=certificate; }
+            { std::unique_lock lock(host->lock); host->serverCert=certificate; }
             m_Manager->clientSideAttributeUpdated(host);
             send({{"event","paired"}});
         } else if (request["error"].toString()=="timeout") fail("pair_timeout",tr("Pairing timed out."));
@@ -659,7 +659,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         else if (state==3) fail("pair_already_active",tr("Another pairing attempt is already in progress."));
         else {
             bool busy;
-            { QReadLocker lock(&host->lock); busy=host->currentGameId!=0; }
+            { std::shared_lock lock(host->lock); busy=host->currentGameId!=0; }
             fail("pair_failed",busy ? tr("You cannot pair while a previous session is still running on the host PC. Quit any running games or reboot the host PC, then try pairing again.") : tr("Pairing failed. Please try again."));
         }
         publishHosts();
@@ -683,7 +683,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         if (!integer(request, "request_id", 1, 2147483647)) {
             fail("invalid_context_request", tr("Invalid host API request identifier.")); return;
         }
-        QReadLocker lock(&host->lock);
+        std::shared_lock lock(host->lock);
         if (host->pairState != NvComputer::PS_PAIRED || host->state != NvComputer::CS_ONLINE ||
                 host->serverCert.isNull() || host->activeHttpsPort == 0) {
             fail("not_ready", tr("Host must be online and paired.")); return;
@@ -728,7 +728,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         return;
     }
     if (name == "quit") {
-        { QReadLocker lock(&host->lock);
+        { std::shared_lock lock(host->lock);
           if (host->pairState != NvComputer::PS_PAIRED || host->state != NvComputer::CS_ONLINE) {
               fail("not_ready", tr("Host must be online and paired.")); return;
           }
@@ -745,7 +745,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         QString uuid;
         bool useTrueUid;
         {
-            QReadLocker lock(&host->lock);
+            std::shared_lock lock(host->lock);
             if (host->pairState != NvComputer::PS_PAIRED || host->state != NvComputer::CS_ONLINE) {
                 fail("not_ready", tr("Host must be online and paired.")); return;
             }
@@ -774,7 +774,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
             fail("invalid_app_preferences", tr("Application preferences are invalid.")); return;
         }
         {
-            QWriteLocker lock(&host->lock);
+            std::unique_lock lock(host->lock);
             NvApp* selected = nullptr;
             for (auto& app : host->appList) if (app.id == request["app"].toInt()) selected = &app;
             if (!selected) { fail("app_not_found", tr("Application not found.")); return; }
@@ -794,7 +794,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         if (name=="pair_rust" && !integer(request,"request_id",1,2147483647)) {
             fail("invalid_pairing",tr("Invalid pairing request identifier.")); return;
         }
-        { QReadLocker lock(&host->lock);
+        { std::shared_lock lock(host->lock);
           if (host->pairState == NvComputer::PS_PAIRED) { send({{"event", "paired"}}); return; }
           if (host->state != NvComputer::CS_ONLINE) { fail("offline", tr("Host is offline.")); return; } }
         m_PairingHost = host->uuid;
@@ -802,7 +802,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         send({{"event", "pairing"}, {"host", host->uuid}, {"pin", pin}});
         if (name=="pair_rust") {
             m_RustPairingRequest=request["request_id"].toInt();
-            QReadLocker lock(&host->lock);
+            std::shared_lock lock(host->lock);
             QUrl https,http;
             https.setScheme("https"); https.setHost(host->activeAddress.address()); https.setPort(host->activeHttpsPort);
             http.setScheme("http"); http.setHost(host->activeAddress.address()); http.setPort(host->activeAddress.port());
@@ -821,7 +821,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
         return;
     }
     NvApp selected;
-    { QReadLocker lock(&host->lock);
+    { std::shared_lock lock(host->lock);
       if (host->pairState != NvComputer::PS_PAIRED || host->state != NvComputer::CS_ONLINE) {
           fail("not_ready", tr("Host must be online and paired.")); return;
       }

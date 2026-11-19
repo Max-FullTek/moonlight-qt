@@ -1,8 +1,8 @@
 #include "appmodel.h"
 #include "../backend/nvhttp.h"
 
-#include <QReadLocker>
-#include <QWriteLocker>
+#include <mutex>
+#include <shared_mutex>
 
 namespace {
 QString getAddressType(const NvAddress& address,
@@ -219,7 +219,7 @@ void AppModel::setAppHidden(int appIndex, bool hidden)
     int appId = m_VisibleApps.at(appIndex).id;
 
     {
-        QWriteLocker lock(&m_Computer->lock);
+        std::unique_lock lock(m_Computer->lock);
 
         for (NvApp& app : m_Computer->appList) {
             if (app.id == appId) {
@@ -238,7 +238,7 @@ void AppModel::setAppDirectLaunch(int appIndex, bool directLaunch)
     int appId = m_VisibleApps.at(appIndex).id;
 
     {
-        QWriteLocker lock(&m_Computer->lock);
+        std::unique_lock lock(m_Computer->lock);
 
         for (NvApp& app : m_Computer->appList) {
             if (directLaunch) {
@@ -279,7 +279,7 @@ QVariantList AppModel::buildConnectionAddressList(NvComputer* computer)
     NvAddress pinnedAddress;
 
     {
-        QReadLocker lock(&computer->lock);
+        std::shared_lock lock(computer->lock);
         localAddress = computer->localAddress;
         remoteAddress = computer->remoteAddress;
         manualAddress = computer->manualAddress;
@@ -377,7 +377,7 @@ QVariantMap AppModel::getActiveAddressInfo()
     NvAddress ipv6Address;
 
     {
-        QReadLocker lock(&m_Computer->lock);
+        std::shared_lock lock(m_Computer->lock);
         activeAddress = m_Computer->activeAddress;
         localAddress = m_Computer->localAddress;
         remoteAddress = m_Computer->remoteAddress;
@@ -458,7 +458,7 @@ void AppModel::forceSyncCurrentGame()
 
     int currentGameId;
     {
-        QReadLocker lock(&m_Computer->lock);
+        std::shared_lock lock(m_Computer->lock);
         currentGameId = m_Computer->currentGameId;
     }
 

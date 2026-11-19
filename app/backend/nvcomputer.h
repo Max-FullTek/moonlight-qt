@@ -3,16 +3,16 @@
 #include "nvhttp.h"
 #include "nvaddress.h"
 
-#include <QReadWriteLock>
+#include <shared_mutex>
 
-class CopySafeReadWriteLock : public QReadWriteLock
+class HostStateMutex : public std::shared_mutex
 {
 public:
-    CopySafeReadWriteLock() = default;
+    HostStateMutex() = default;
 
-    // Don't actually copy the QReadWriteLock
-    CopySafeReadWriteLock(const CopySafeReadWriteLock&) : QReadWriteLock() {}
-    CopySafeReadWriteLock& operator=(const CopySafeReadWriteLock &) { return *this; }
+    // Host snapshots have independent locks. Assignment keeps the destination lock.
+    HostStateMutex(const HostStateMutex&) : std::shared_mutex() {}
+    HostStateMutex& operator=(const HostStateMutex&) { return *this; }
 };
 
 class NvComputer
@@ -139,7 +139,7 @@ public:
     // Remember to update isEqualSerialized() when adding fields here!
 
     // Synchronization
-    mutable CopySafeReadWriteLock lock;
+    mutable HostStateMutex lock;
 
     // Static methods for pairname management
     static void savePairname(const QString& uuid, const QString& pairname);

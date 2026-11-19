@@ -123,11 +123,11 @@ IFFmpegDecoderHost* decoderHost()
 #include <QThreadPool>
 #include <QRunnable>
 #endif
-#include <QReadLocker>
 #if !defined(Q_OS_WIN32) && !defined(Q_OS_DARWIN)
 #include <QSvgRenderer>
 #include <QPainter>
 #include <QImage>
+#include <shared_mutex>
 #endif
 #include <QGuiApplication>
 #include <QCursor>
@@ -135,7 +135,6 @@ IFFmpegDecoderHost* decoderHost()
 #include <QScreen>
 #include "settings/mappingmanager.h"
 #include <QtGlobal>
-#include <QMutexLocker>
 #include <QUuid>
 #include <chrono>
 #include <QUrl>
@@ -2737,7 +2736,7 @@ void Session::startRuntimeBitrateWorker()
     QString uuid;
     HostCertificate certificate;
     {
-        QReadLocker locker(&m_Computer->lock);
+        std::shared_lock locker(m_Computer->lock);
         address = m_Computer->activeAddress;
         httpsPort = m_Computer->activeHttpsPort;
         uuid = m_Computer->uuid;
@@ -2955,7 +2954,7 @@ void Session::sendSunshineAbrFeedback()
     HostCertificate certificate;
     QString uuid;
     {
-        QReadLocker lock(&m_Computer->lock);
+        std::shared_lock lock(m_Computer->lock);
         address = m_Computer->activeAddress;
         httpsPort = m_Computer->activeHttpsPort;
         certificate = m_Computer->serverCert;
@@ -3303,7 +3302,7 @@ HostConnectionInfoSnapshot captureHostConnectionInfoSnapshot(NvComputer* compute
 {
     HostConnectionInfoSnapshot snapshot;
 
-    QReadLocker lock(&computer->lock);
+    std::shared_lock lock(computer->lock);
     snapshot.address = computer->activeAddress.address();
     snapshot.appVersion = computer->appVersion;
     snapshot.gfeVersion = computer->gfeVersion;
@@ -3346,7 +3345,7 @@ void updateHostConnectionInfoFromServerInfo(const QString& serverInfo,
 
     snapshot->currentGameId = NvHTTP::getCurrentGame(serverInfo);
 
-    QWriteLocker lock(&computer->lock);
+    std::unique_lock lock(computer->lock);
     computer->serverCodecModeSupport = snapshot->serverCodecModeSupport;
     computer->currentGameId = snapshot->currentGameId;
 
@@ -3364,7 +3363,7 @@ void updateHostConnectionInfoFromRust(const QJsonObject& info,NvComputer* comput
     if (!info["app_version"].toString().isEmpty()) snapshot->appVersion=info["app_version"].toString();
     if (!info["gfe_version"].toString().isEmpty()) snapshot->gfeVersion=info["gfe_version"].toString();
     snapshot->currentGameId=info["current_app"].toInt();
-    QWriteLocker lock(&computer->lock);
+    std::unique_lock lock(computer->lock);
     computer->serverCodecModeSupport=snapshot->serverCodecModeSupport;
     computer->currentGameId=snapshot->currentGameId;
     if (!snapshot->appVersion.isEmpty()) computer->appVersion=snapshot->appVersion;

@@ -12,7 +12,6 @@
 #include <qmdnsengine/resolver.h>
 #endif
 
-#include <QReadWriteLock>
 #include <QVariant>
 #ifdef LITE_GPUI_WORKER
 #include "windowstaskqueue.h"
@@ -23,6 +22,7 @@
 #include <atomic>
 #include <functional>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
 #include <utility>
 
@@ -227,7 +227,7 @@ private:
     bool m_ExternalPolling;
     const QString m_ProfileDirectory;
     int m_PollingRef;
-    QReadWriteLock m_Lock;
+    std::shared_mutex m_Lock;
     QMap<QString, NvComputer*> m_KnownHosts;
     QSet<NvComputer*> m_DeletingHosts; // Main-thread tombstones for queued polling events
     QMap<QString, ComputerPollingEntry*> m_PollEntries;

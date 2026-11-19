@@ -123,7 +123,7 @@ private:
             return false;
         }
 
-        QWriteLocker lock(&m_Computer->lock);
+        std::unique_lock lock(m_Computer->lock);
         changed = m_Computer->updateAppList(appList);
         return true;
     }
@@ -404,7 +404,7 @@ ComputerManager::~ComputerManager()
         Q_ASSERT(!m_NeedsDelayedFlush);
     }
 
-    QWriteLocker lock(&m_Lock);
+    std::unique_lock lock(m_Lock);
 
 #ifndef LITE_GPUI_WORKER
     // Delete machines that haven't been resolved yet
@@ -458,12 +458,12 @@ void ComputerManager::runDelayedFlush() {
             m_NeedsDelayedFlush = false;
 
             // Update the last serialized hosts map under the delayed flush mutex
-            QReadLocker hostsLock(&m_Lock);
+            std::shared_lock hostsLock(m_Lock);
             m_LastSerializedHosts.clear();
             for (const NvComputer* computer : std::as_const(m_KnownHosts)) {
                 // Copy the current state of the NvComputer to allow us to check later if we need
                 // to serialize it again when attribute updates occur.
-                QReadLocker computerLock(&computer->lock);
+                std::shared_lock computerLock(computer->lock);
                 m_LastSerializedHosts[computer->uuid] = *computer;
 #ifdef LITE_NATIVE_WORKER_JSON
                 if (!m_ProfileDirectory.isEmpty()) snapshot.push_back(*computer);
@@ -492,7 +492,7 @@ void ComputerManager::runDelayedFlush() {
             // First, write to the backup location
             settings.beginWriteArray(SER_HOSTS_BACKUP);
             {
-                QReadLocker lock(&m_Lock);
+                std::shared_lock lock(m_Lock);
                 int i = 0;
                 for (const NvComputer* computer : std::as_const(m_KnownHosts)) {
                     settings.setArrayIndex(i++);
@@ -505,7 +505,7 @@ void ComputerManager::runDelayedFlush() {
             settings.remove(SER_HOSTS);
             settings.beginWriteArray(SER_HOSTS);
             {
-                QReadLocker lock(&m_Lock);
+                std::shared_lock lock(m_Lock);
                 int i = 0;
                 for (const NvComputer* computer : std::as_const(m_KnownHosts)) {
                     settings.setArrayIndex(i++);
@@ -572,7 +572,7 @@ QHostAddress ComputerManager::getBestGlobalAddressV6(QVector<QHostAddress> &addr
 
 void ComputerManager::startPolling()
 {
-    QWriteLocker lock(&m_Lock);
+    std::unique_lock lock(m_Lock);
 
     if (++m_PollingRef > 1) {
         return;
@@ -680,7 +680,7 @@ void ComputerManager::saveHost(NvComputer *computer)
 {
     // If no serializable properties changed, don't bother saving hosts
     std::unique_lock lock(m_DelayedFlushMutex);
-    QReadLocker computerLock(&computer->lock);
+    std::shared_lock computerLock(computer->lock);
     if (!m_LastSerializedHosts.value(computer->uuid).isEqualSerialized(*computer)) {
         // Queue a request for a delayed flush to QSettings outside of the lock
         computerLock.unlock();
@@ -707,7 +707,7 @@ void ComputerManager::handleComputerStateChanged(NvComputer* computer)
 
 QVector<NvComputer*> ComputerManager::getComputers()
 {
-    QReadLocker lock(&m_Lock);
+    std::shared_lock lock(m_Lock);
 
     // Return a sorted host list
     auto hosts = QVector<NvComputer*>::fromList(m_KnownHosts.values());
@@ -732,7 +732,7 @@ public:
         // Only do the minimum amount of work while holding the writer lock.
         // We must release it before calling saveHosts().
         {
-            QWriteLocker lock(&m_ComputerManager->m_Lock);
+            std::unique_lock lock(m_ComputerManager->m_Lock);
 
             pollingEntry = m_ComputerManager->m_PollEntries.take(m_Computer->uuid);
 
@@ -801,7 +801,7 @@ void ComputerManager::dispatchHostCompletion(std::function<void()> completion)
 void ComputerManager::renameHost(NvComputer* computer, QString name)
 {
     {
-        QWriteLocker lock(&computer->lock);
+        std::unique_lock lock(computer->lock);
 
         computer->name = name;
         computer->hasCustomName = true;
@@ -840,7 +840,7 @@ bool ComputerManager::waitBeforeAddRetry()
 
 void ComputerManager::interruptPolling()
 {
-    QReadLocker lock(&m_Lock);
+    std::shared_lock lock(m_Lock);
 
     // Interrupt polling threads immediately, so they
     // avoid making additional requests while quitting
@@ -938,7 +938,7 @@ public:
             }
         } catch (const GfeHttpResponseException& e) {
             {
-                QWriteLocker lock(&m_Computer->lock);
+                std::unique_lock lock(m_Computer->lock);
                 m_Computer->pendingQuit = false;
             }
             if (e.getStatusCode() == 599) {
@@ -951,7 +951,7 @@ public:
             }
         } catch (const QtNetworkReplyException& e) {
             {
-                QWriteLocker lock(&m_Computer->lock);
+                std::unique_lock lock(m_Computer->lock);
                 m_Computer->pendingQuit = false;
             }
             reportFailure(e.toQString());
@@ -972,7 +972,7 @@ private:
 
 void ComputerManager::quitRunningApp(NvComputer* computer)
 {
-    QWriteLocker lock(&computer->lock);
+    std::unique_lock lock(computer->lock);
     computer->pendingQuit = true;
 
     submitHostTask([task = PendingQuitTask(this, computer)]() mutable { task.run(); });
@@ -980,7 +980,7 @@ void ComputerManager::quitRunningApp(NvComputer* computer)
 
 void ComputerManager::stopPollingAsync()
 {
-    QWriteLocker lock(&m_Lock);
+    std::unique_lock lock(m_Lock);
 
     Q_ASSERT(m_PollingRef > 0);
     if (--m_PollingRef > 0) {
@@ -1149,7 +1149,7 @@ public:
         // Check if we have a record of this host UUID to pull the pinned cert
         NvComputer* existingComputer;
         {
-            QReadLocker lock(&m_ComputerManager->m_Lock);
+            std::shared_lock lock(m_ComputerManager->m_Lock);
             existingComputer = m_ComputerManager->m_KnownHosts.value(newComputer->uuid);
             if (existingComputer != nullptr) {
                 http.setServerCert(existingComputer->serverCert);
@@ -1188,63 +1188,48 @@ public:
             newComputer->manualAddress = m_Address;
         }
 
+        NvComputer* updatedComputer = nullptr;
+        QString updatedName;
+        QString updatedAddress;
         {
-            // Check if this PC already exists using opportunistic read lock
-            m_ComputerManager->m_Lock.lockForRead();
-            NvComputer* existingComputer = m_ComputerManager->m_KnownHosts.value(newComputer->uuid);
+            auto& hosts = m_ComputerManager->m_KnownHosts;
+            auto& hostsMutex = m_ComputerManager->m_Lock;
+            std::shared_lock readLock(hostsMutex);
+            std::unique_lock writeLock(hostsMutex, std::defer_lock);
+            NvComputer* existingComputer = hosts.value(newComputer->uuid);
 
-            // If it doesn't already exist, convert to a write lock in preparation for updating.
-            //
-            // NB: ComputerManager's lock protects the host map itself, not the elements inside.
-            // Those are protected by their individual locks. Since we only mutate the map itself
-            // when the PC doesn't exist, we need the lock in write-mode for that case only.
+            // The map only needs exclusive access when adding a host. Recheck
+            // after releasing the read lock in case another task added it.
             if (existingComputer == nullptr) {
-                m_ComputerManager->m_Lock.unlock();
-                m_ComputerManager->m_Lock.lockForWrite();
-
-                // Since we had to unlock to lock for write, someone could have raced and added
-                // this PC before us. We have to check again whether it already exists.
-                existingComputer = m_ComputerManager->m_KnownHosts.value(newComputer->uuid);
+                readLock.unlock();
+                writeLock.lock();
+                existingComputer = hosts.value(newComputer->uuid);
             }
 
             if (existingComputer != nullptr) {
-                // Fold it into the existing PC
-                bool changed = existingComputer->update(*newComputer);
-                discovered.reset();
-
-                // Drop the lock before notifying
-                m_ComputerManager->m_Lock.unlock();
-
-                // For non-mDNS clients, let them know it succeeded
-                if (!m_Mdns) {
-                    reportResult(true, false);
-                }
-
-                // Tell our client if something changed
-                if (changed) {
-                    qInfo() << existingComputer->name << "is now at" << existingComputer->activeAddress.toString();
-                    notifyChange(existingComputer);
+                if (existingComputer->update(*newComputer)) {
+                    updatedComputer = existingComputer;
+                    std::shared_lock hostLock(existingComputer->lock);
+                    updatedName = existingComputer->name;
+                    updatedAddress = existingComputer->activeAddress.toString();
                 }
             }
             else {
-                // Store this in our active sets
-                m_ComputerManager->m_KnownHosts[newComputer->uuid] = newComputer;
+                hosts[newComputer->uuid] = newComputer;
                 discovered.release(); // Ownership passes to the host map.
-
-                // Start polling if enabled (write lock required)
                 m_ComputerManager->startPollingComputer(newComputer);
-
-                // Drop the lock before notifying
-                m_ComputerManager->m_Lock.unlock();
-
-                // For non-mDNS clients, let them know it succeeded
-                if (!m_Mdns) {
-                    reportResult(true, false);
-                }
-
-                // Tell our client about this new PC
-                notifyChange(newComputer);
+                updatedComputer = newComputer;
             }
+        }
+
+        if (!m_Mdns) {
+            reportResult(true, false);
+        }
+        if (updatedComputer != nullptr) {
+            if (discovered) {
+                qInfo() << updatedName << "is now at" << updatedAddress;
+            }
+            notifyChange(updatedComputer);
         }
     }
 

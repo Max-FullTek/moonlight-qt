@@ -7,6 +7,9 @@
 #include <QCoreApplication>
 #endif
 
+#include <mutex>
+#include <shared_mutex>
+
 #ifndef LITE_GPUI_WORKER
 #include <QUdpSocket>
 #include <QHostInfo>
@@ -85,7 +88,7 @@ NvComputer::NvComputer(QSettings& settings)
 
 void NvComputer::setRemoteAddress(QHostAddress address)
 {
-    QWriteLocker lock(&this->lock);
+    std::unique_lock lock(this->lock);
 
     Q_ASSERT(this->externalPort != 0);
 
@@ -94,7 +97,7 @@ void NvComputer::setRemoteAddress(QHostAddress address)
 
 void NvComputer::serialize(QSettings& settings, bool serializeApps) const
 {
-    QReadLocker lock(&this->lock);
+    std::shared_lock lock(this->lock);
 
     settings.setValue(SER_NAME, name);
     settings.setValue(SER_CUSTOMNAME, hasCustomName);
@@ -279,7 +282,7 @@ bool NvComputer::wake() const
     QByteArray wolPayload;
 
     {
-        QReadLocker readLocker(&lock);
+        std::shared_lock readLocker(lock);
 
         if (state == NvComputer::CS_ONLINE) {
             qWarning() << name << "is already online";
@@ -440,7 +443,7 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
     NvAddress copyOfActiveAddress;
 
     {
-        QReadLocker readLocker(&lock);
+        std::shared_lock readLocker(lock);
 
         if (activeAddress.isNull()) {
             return ReachabilityType::RI_UNKNOWN;
@@ -457,7 +460,7 @@ NvComputer::ReachabilityType NvComputer::getActiveAddressReachability() const
     }
 
     auto cacheResult = [this, &copyOfActiveAddress](ReachabilityType result) {
-        QWriteLocker writeLocker(&lock);
+        std::unique_lock writeLocker(lock);
         if (activeAddress == copyOfActiveAddress) {
             m_ActiveAddressReachabilityAddress = copyOfActiveAddress;
             m_ActiveAddressReachability = result;
@@ -599,7 +602,7 @@ bool NvComputer::updateAppList(QVector<NvApp> newAppList) {
 
 QVector<NvAddress> NvComputer::uniqueAddresses() const
 {
-    QReadLocker readLocker(&lock);
+    std::shared_lock readLocker(lock);
     QVector<NvAddress> uniqueAddressList;
 
     // Start with addresses correctly ordered
@@ -634,14 +637,14 @@ QVector<NvAddress> NvComputer::uniqueAddresses() const
 
 void NvComputer::pinAddress(const NvAddress& address)
 {
-    QWriteLocker writeLocker(&lock);
+    std::unique_lock writeLocker(lock);
     pinnedAddress = address;
     activeAddress = address;
 }
 
 bool NvComputer::resetToAutomaticAddress()
 {
-    QWriteLocker writeLocker(&lock);
+    std::unique_lock writeLocker(lock);
 
     pinnedAddress = NvAddress();
 
@@ -671,7 +674,7 @@ void NvComputer::markAddressTestSucceeded(const NvAddress& address)
         return;
     }
 
-    QWriteLocker lock(&this->lock);
+    std::unique_lock lock(this->lock);
     for (const NvAddress& testedAddress : std::as_const(m_TestedAddresses)) {
         if (testedAddress == address) {
             return;
@@ -687,7 +690,7 @@ bool NvComputer::hasAddressTestSucceeded(const NvAddress& address) const
         return false;
     }
 
-    QReadLocker lock(&this->lock);
+    std::shared_lock lock(this->lock);
     for (const NvAddress& testedAddress : std::as_const(m_TestedAddresses)) {
         if (testedAddress == address) {
             return true;
@@ -702,8 +705,8 @@ bool NvComputer::update(const NvComputer& that)
     bool changed = false;
 
     // Lock us for write and them for read
-    QWriteLocker thisLock(&this->lock);
-    QReadLocker thatLock(&that.lock);
+    std::unique_lock thisLock(this->lock);
+    std::shared_lock thatLock(that.lock);
 
     // UUID may not change or we're talking to a new PC
     Q_ASSERT(this->uuid == that.uuid);
