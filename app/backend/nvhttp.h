@@ -234,8 +234,10 @@ public:
     QVariantList
     getDisplays();
 
+#ifndef LITE_GPUI_WORKER
     QImage
     getBoxArt(int appId);
+#endif
 
     static
     QVector<NvDisplayMode>

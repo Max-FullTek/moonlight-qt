@@ -4069,10 +4069,12 @@ void Session::exec()
         SDL_DisableScreenSaver();
     }
 
+#ifndef LITE_GPUI_WORKER
     // Hide Qt's fake mouse cursor on EGLFS systems
     if (QGuiApplication::platformName() == "eglfs") {
         QGuiApplication::setOverrideCursor(QCursor(Qt::BlankCursor));
     }
+#endif
 
     // Set timer resolution to 1 ms on Windows for greater
     // sleep precision and more accurate callback timing.
@@ -5054,9 +5056,11 @@ DispatchDeferredCleanup:
     m_InputHandler->setCaptureActive(false);
     SDL_EnableScreenSaver();
     SDL_SetHint(SDL_HINT_TIMER_RESOLUTION, "0");
+#ifndef LITE_GPUI_WORKER
     if (QGuiApplication::platformName() == "eglfs") {
         QGuiApplication::restoreOverrideCursor();
     }
+#endif
 
     // Raise any keys that are still down
     m_InputHandler->raiseAllKeys();

@@ -11,18 +11,14 @@
 #include <QUuid>
 #ifndef LITE_GPUI_WORKER
 #include <QtNetwork/QNetworkReply>
-#endif
 #include <QEventLoop>
 #include <QTimer>
-#include <QXmlStreamReader>
-#ifndef LITE_GPUI_WORKER
 #include <QSslKey>
-#endif
 #include <QImageReader>
-#include <QtEndian>
-#ifndef LITE_GPUI_WORKER
 #include <QNetworkProxy>
 #endif
+#include <QXmlStreamReader>
+#include <QtEndian>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -623,6 +619,7 @@ NvHTTP::verifyResponseStatus(QString xml)
     throw GfeHttpResponseException(-1, "Malformed XML (missing root element)");
 }
 
+#ifndef LITE_GPUI_WORKER
 QImage
 NvHTTP::getBoxArt(int appId)
 {
@@ -638,6 +635,7 @@ NvHTTP::getBoxArt(int appId)
 
     return image;
 }
+#endif
 
 QByteArray
 NvHTTP::getXmlStringFromHex(QString xml,

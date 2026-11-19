@@ -2,23 +2,14 @@
 
 #include "computermanager.h"
 #include <QDir>
-#ifndef LITE_GPUI_WORKER
 #include <QImage>
 #include <QHash>
 #include <QMutex>
 #include <QThreadPool>
 #include <QRunnable>
-#endif
 
-class BoxArtManager
-#ifndef LITE_GPUI_WORKER
-    : public QObject
-#endif
+class BoxArtManager : public QObject
 {
-public:
-    static void deleteBoxArt(NvComputer* computer);
-
-#ifndef LITE_GPUI_WORKER
     Q_OBJECT
 
     friend class NetworkBoxArtLoadTask;
@@ -59,5 +50,4 @@ private:
     QThreadPool m_ThreadPool;
     QMutex m_PlaceholderCacheMutex;
     QHash<QString, bool> m_PlaceholderCache;
-#endif
 };

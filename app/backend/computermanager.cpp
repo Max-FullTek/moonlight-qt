@@ -1,8 +1,8 @@
 #include "computermanager.h"
-#include "boxartmanager.h"
 #include "nvcomputer.h"
 #include "nvhttp.h"
 #include "nvpairingmanager.h"
+#include "../path.h"
 #ifdef LITE_GPUI_WORKER
 #include "windowsreachability.h"
 #endif
@@ -21,6 +21,7 @@
 #include <QThreadPool>
 #endif
 #include <QCoreApplication>
+#include <QDir>
 #include <QRandomGenerator>
 #include <chrono>
 #include <memory>
@@ -751,7 +752,10 @@ public:
         delete pollingEntry;
 
         // Delete cached box art
-        BoxArtManager::deleteBoxArt(m_Computer);
+        QDir boxArtCache(Path::getBoxArtCacheDir());
+        if (boxArtCache.cd(uuid)) {
+            boxArtCache.removeRecursively();
+        }
 
         // Delete pairname mapping
         NvComputer::savePairname(m_Computer->uuid, QString());

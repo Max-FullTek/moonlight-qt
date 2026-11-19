@@ -3,6 +3,9 @@
 #include <QObject>
 #include <QJsonObject>
 #include <QHash>
+#ifdef LITE_GPUI_WORKER
+#include <QCoreApplication>
+#endif
 #include <deque>
 #include <functional>
 #include <memory>
@@ -28,7 +31,11 @@ class WindowsWorkerDispatch;
 // stdout is reserved for protocol events; diagnostics stay on stderr.
 class GpuiCoreBridge : public QObject
 {
+#ifdef LITE_GPUI_WORKER
+    Q_DECLARE_TR_FUNCTIONS(GpuiCoreBridge)
+#else
     Q_OBJECT
+#endif
 public:
     explicit GpuiCoreBridge(QObject* parent = nullptr);
     ~GpuiCoreBridge() override;

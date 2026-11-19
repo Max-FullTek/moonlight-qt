@@ -8,8 +8,10 @@ lite-gpui-worker {
 } else {
     QT += network quick quickcontrols2 gui-private svg
     SOURCES += backend/systemproperties.cpp
+    SOURCES += backend/boxartmanager.cpp
     HEADERS += backend/systemproperties.h backend/computermanager.h streaming/session.h
     HEADERS += backend/nvhttp.h settings/streamingpreferences.h
+    HEADERS += backend/gpuicorebridge.h backend/boxartmanager.h
 }
 win32:lite-no-microphone: DEFINES += LITE_NO_MICROPHONE
 !config_SL:!contains(DEFINES, LITE_NO_MICROPHONE): QT += multimedia
@@ -297,7 +299,6 @@ SOURCES += \
     backend/nvhttp.cpp \
     backend/nvpairingmanager.cpp \
     backend/computermanager.cpp \
-    backend/boxartmanager.cpp \
     backend/richpresencemanager.cpp \
     settings/compatfetcher.cpp \
     settings/devicelocalsettings.cpp \
@@ -334,7 +335,6 @@ SOURCES += \
 
 HEADERS += \
     logredaction.h \
-    backend/gpuicorebridge.h \
     backend/sessionapirpc.h \
     versionutils.h \
     nativeversion.h \
@@ -351,7 +351,6 @@ HEADERS += \
     backend/reachabilitypolicy.h \
     backend/hostrequesterror.h \
     backend/nvpairingmanager.h \
-    backend/boxartmanager.h \
     backend/richpresencemanager.h \
     streaming/input/cursorshapeclassifier.h \
     streaming/input/penhistory.h \

@@ -18,7 +18,9 @@
 #include <QFont>
 #include <QCursor>
 #include <QDateTime>
+#ifndef LITE_GPUI_WORKER
 #include <QTemporaryFile>
+#endif
 #include <QFontDatabase>
 #include <QLocale>
 #include <QFile>
@@ -952,6 +954,9 @@ int main(int argc, char *argv[])
     SSL_free(nullptr);
 #endif
 
+#ifdef LITE_GPUI_WORKER
+    QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+#else
     // We keep this at function scope to ensure it stays around while we're running,
     // because the Qt QPA will need to read it. Since the temporary file is only
     // created when open() is called, this doesn't do any harm for other platforms.
@@ -1010,6 +1015,7 @@ int main(int argc, char *argv[])
         SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
 #endif
     }
+#endif
 
     bool forceGles;
     if (!Utils::getEnvironmentVariableOverride("FORCE_QT_GLES", &forceGles)) {
@@ -1597,7 +1603,6 @@ int main(int argc, char *argv[])
 
 #ifndef LITE_GPUI_WORKER
     std::unique_ptr<QQmlApplicationEngine> engineStorage;
-#endif
     GpuiCoreBridge* gpuiBridge = nullptr;
     if (gpuiCoreMode) {
         app.setQuitOnLastWindowClosed(false);
@@ -1606,7 +1611,6 @@ int main(int argc, char *argv[])
         QTimer::singleShot(0, gpuiBridge, &GpuiCoreBridge::start);
 #endif
     }
-#ifndef LITE_GPUI_WORKER
     else {
         engineStorage = std::make_unique<QQmlApplicationEngine>();
         auto& engine = *engineStorage;
@@ -1698,8 +1702,11 @@ int main(int argc, char *argv[])
 #endif
 
 #if defined(LITE_GPUI_WORKER)
-    const int err = gpuiBridge->execNative();
-    delete gpuiBridge;
+    app.setQuitOnLastWindowClosed(false);
+    const int err = [] {
+        GpuiCoreBridge bridge;
+        return bridge.execNative();
+    }();
 #elif defined(Q_OS_WIN32) && defined(LITE_NATIVE_HTTP)
     const int err = gpuiCoreMode ? gpuiBridge->execNative() : app.exec();
 #else
