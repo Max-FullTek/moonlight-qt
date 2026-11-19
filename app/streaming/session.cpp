@@ -115,8 +115,6 @@ IFFmpegDecoderHost* decoderHost()
 #include <openssl/rand.h>
 
 #include <QtEndian>
-#include <QCoreApplication>
-#include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
 #ifndef LITE_GPUI_WORKER
@@ -127,7 +125,6 @@ IFFmpegDecoderHost* decoderHost()
 #include <QSvgRenderer>
 #include <QPainter>
 #include <QImage>
-#include <shared_mutex>
 #endif
 #include <QGuiApplication>
 #include <QCursor>
@@ -139,6 +136,7 @@ IFFmpegDecoderHost* decoderHost()
 #include <chrono>
 #include <QUrl>
 
+#include <shared_mutex>
 #include <utility>
 #include <vector>
 
@@ -159,6 +157,7 @@ void stopControllerRumbleAtConnectionBoundary(SdlInputHandler* inputHandler)
     }
 }
 
+#ifndef LITE_GPUI_WORKER
 QRect qtWindowCreationGeometryForSdl(QWindow* window)
 {
     if (!window) {
@@ -190,6 +189,7 @@ QRect qtWindowCreationGeometryForSdl(QWindow* window)
                  qMax(1, qRound(client.height() * scale)));
 #endif
 }
+#endif
 
 enum class SdlDisplayMatchPolicy
 {
@@ -405,7 +405,7 @@ std::optional<StreamingPreferences::OverlayMenuPosition> menuPlacementForAction(
     }
 }
 
-#ifdef Q_OS_WIN32
+#if defined(Q_OS_WIN32) && !defined(LITE_GPUI_WORKER)
 bool qtWindowNativeMonitorBounds(QWindow* window, QRect& bounds)
 {
     WindowsDisplayGeometry::Monitor monitor;
@@ -448,8 +448,13 @@ void Session::clStageStarting(int stage)
 {
     auto* session = s_ActiveSession;
     const char* name = LiGetStageName(stage);
-    if (session->m_WorkerEvents) session->m_WorkerEvents->stageStarting(name);
-    else emit session->stageStarting(QString::fromLocal8Bit(name));
+    if (session->m_WorkerEvents) {
+        session->m_WorkerEvents->stageStarting(name);
+        return;
+    }
+#ifndef LITE_GPUI_WORKER
+    emit session->stageStarting(QString::fromLocal8Bit(name));
+#endif
 }
 
 void Session::clStageFailed(int stage, int errorCode)
@@ -465,22 +470,28 @@ void Session::clStageFailed(int stage, int errorCode)
     const char* name = LiGetStageName(stage);
     if (session->m_WorkerEvents) {
         session->m_WorkerEvents->stageFailed(name, errorCode);
-    } else {
-        char failingPorts[128];
-        LiStringifyPortFlags(LiGetPortFlagsFromStage(stage), ", ", failingPorts, sizeof(failingPorts));
-        emit session->stageFailed(QString::fromLocal8Bit(name), errorCode, QString(failingPorts));
+        return;
     }
+#ifndef LITE_GPUI_WORKER
+    char failingPorts[128];
+    LiStringifyPortFlags(LiGetPortFlagsFromStage(stage), ", ", failingPorts, sizeof(failingPorts));
+    emit session->stageFailed(QString::fromLocal8Bit(name), errorCode, QString(failingPorts));
+#endif
 }
 
 void Session::reportLaunchError(QString message)
 {
-    if (m_WorkerEvents) m_WorkerEvents->launchFailed(message.toUtf8().toStdString());
-    else emit displayLaunchError(std::move(message));
+    if (m_WorkerEvents) {
+        m_WorkerEvents->launchFailed(message.toUtf8().toStdString());
+        return;
+    }
+#ifndef LITE_GPUI_WORKER
+    emit displayLaunchError(std::move(message));
+#endif
 }
 
 void Session::clConnectionTerminated(int errorCode)
 {
-    unsigned int portFlags = LiGetPortFlagsFromTerminationErrorCode(errorCode);
     s_ActiveSession->m_PortTestResults = ML_TEST_RESULT_INCONCLUSIVE;
 
     // Decide whether this looks like a transient network interruption that we
@@ -1002,7 +1013,10 @@ Session::Session(NvComputer* computer, NvApp& app, StreamingPreferences* prefere
                      !WMUtils::isRunningDesktopEnvironment()),
       m_Computer(computer), m_App(app), m_LaunchDisplayName(std::move(launchDisplayName)),
       m_LaunchUseVdd(launchUseVdd), m_Window(nullptr), m_VideoDecoder(nullptr),
-      m_DecoderLock(SDL_CreateMutex()), m_QtWindow(nullptr),
+      m_DecoderLock(SDL_CreateMutex()),
+#ifndef LITE_GPUI_WORKER
+      m_QtWindow(nullptr),
+#endif
       m_WaylandStreamWindow(nullptr), m_WaylandOverlayShortcutPressed(false),
       m_UnexpectedTermination(true), // Failure prior to streaming is unexpected
       m_InputHandler(nullptr), m_MouseEmulationRefCount(0), m_FlushingWindowEventsRef(0),
@@ -1051,10 +1065,15 @@ bool Session::initialize(QQuickWindow* qtWindow)
 {
     return initializeWindow(qtWindow);
 }
-#endif
 
 bool Session::initializeWindow(QWindow* qtWindow)
+#else
+bool Session::initializeForWorker()
+#endif
 {
+#ifdef LITE_GPUI_WORKER
+    Q_ASSERT(m_WorkerEvents && m_LifecycleDispatcher);
+#else
     m_QtWindow = qtWindow;
 #ifdef Q_OS_WIN32
     // Capture this on the Qt thread. The launch request is assembled later on
@@ -1062,6 +1081,7 @@ bool Session::initializeWindow(QWindow* qtWindow)
     if (m_QtWindow != nullptr && m_QtWindow->screen() != nullptr) {
         m_ClientDisplayName = m_QtWindow->screen()->name().toStdWString();
     }
+#endif
 #endif
 
     // SDL reads this hint when the video subsystem initializes. Configure it for
@@ -1463,7 +1483,9 @@ void Session::emitLaunchWarning(QString text)
     if (m_Preferences->configurationWarnings) {
         // Queue this launch warning to be displayed after validation
         m_LaunchWarnings.append(text);
+#ifndef LITE_GPUI_WORKER
         emit launchWarningsChanged();
+#endif
     }
 }
 
@@ -1765,15 +1787,17 @@ void Session::finishConnectionCleanup()
 {
     // Only quit the running app if our session terminated gracefully.
     const bool shouldQuit = !m_UnexpectedTermination && m_Preferences->quitAppAfter;
+#ifndef LITE_GPUI_WORKER
     if (!m_WorkerEvents) {
         if (shouldQuit) emit quitStarting();
         else emit sessionFinished(m_PortTestResults);
     }
+#endif
 
     // The decoder can only use the connection APIs before LiStopConnection().
     SDL_assert(m_VideoDecoder == nullptr);
 
-#ifndef LITE_NO_MICROPHONE
+#if !defined(LITE_NO_MICROPHONE) && !defined(LITE_GPUI_WORKER)
     // GPUI stops capture on the owner thread before dispatching cleanup.
     if (!m_WorkerEvents) {
         QMetaObject::invokeMethod(this, &Session::stopMicrophone, Qt::BlockingQueuedConnection);
@@ -1803,7 +1827,9 @@ void Session::finishConnectionCleanup()
         } catch (const QtNetworkReplyException& error) {
             if (m_WorkerEvents) m_WorkerEvents->hostQuitFailed(error.toQString().toUtf8().toStdString());
         }
+#ifndef LITE_GPUI_WORKER
         if (!m_WorkerEvents) emit sessionFinished(m_PortTestResults);
+#endif
     }
 }
 
@@ -1818,11 +1844,15 @@ void Session::releaseActiveSession()
 
 void Session::dispatchLifecycleCompletion(std::function<void()> completion)
 {
+#ifdef LITE_GPUI_WORKER
+    m_LifecycleDispatcher(std::move(completion));
+#else
     if (m_LifecycleDispatcher) {
         m_LifecycleDispatcher(std::move(completion));
     } else {
         QMetaObject::invokeMethod(this, std::move(completion), Qt::QueuedConnection);
     }
+#endif
 }
 
 void Session::dispatchConnectionCleanup()
@@ -1864,6 +1894,7 @@ void Session::getWindowDimensions(int& x, int& y,
         displayIndex = SDL_GetWindowDisplayIndex(m_Window);
         SDL_assert(displayIndex >= 0);
     }
+#ifndef LITE_GPUI_WORKER
     // Create our window on the same display that Qt's UI
     // was being displayed on.
     else {
@@ -1927,6 +1958,7 @@ void Session::getWindowDimensions(int& x, int& y,
             }
         }
     }
+#endif
 
     SDL_Rect usableBounds;
     if (SDL_GetDisplayUsableBounds(displayIndex, &usableBounds) == 0) {
@@ -3054,9 +3086,11 @@ void Session::handleSdlUserEvent(const SDL_UserEvent& event)
         if (m_CoreCommandHandler) {
             m_CoreCommandHandler();
         }
+#ifndef LITE_GPUI_WORKER
         if (!m_WorkerEvents) {
             QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         }
+#endif
         break;
     case SDL_CODE_FLUSH_CURSOR_VISIBILITY:
         if (m_InputHandler != nullptr) {
@@ -3607,8 +3641,14 @@ bool Session::startConnectionAsync()
         }
     }
 
-    if (m_WorkerEvents) m_WorkerEvents->started();
-    else emit connectionStarted();
+    if (m_WorkerEvents) {
+        m_WorkerEvents->started();
+    }
+#ifndef LITE_GPUI_WORKER
+    else {
+        emit connectionStarted();
+    }
+#endif
     startSunshineAbr();
 
 #ifndef LITE_NO_MICROPHONE
@@ -3752,6 +3792,7 @@ void Session::interrupt()
 
 
 
+#ifndef LITE_GPUI_WORKER
 // 加载页退场淡幕的时长上限，比 StreamSegue.qml 里那条 340ms 动画留一点余量。
 // 两边要一起改。
 static const int k_StreamEnterVeilMs = 380;
@@ -3759,6 +3800,7 @@ static const int k_StreamEnterVeilMs = 380;
 // 等全屏切换完成的兜底超时。macOS 的全屏动画约 0.5~0.7s，取个宽松上限；
 // 万一平台不发 SIZE_CHANGED，也不能让界面窗口一直留着。
 static const Uint32 k_FullScreenEntryTimeoutMs = 1200;
+#endif
 
 void Session::exec()
 {
@@ -3785,6 +3827,7 @@ void Session::exec()
         m_ClipboardHelper->updateHostContext();
     }
 
+#ifndef LITE_GPUI_WORKER
     // Pump the Qt event loop one last time before we create our SDL window
     // This is sometimes necessary for the QML code to process any signals
     // we've emitted from the async connection thread.
@@ -3792,10 +3835,12 @@ void Session::exec()
         QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         QCoreApplication::sendPostedEvents();
     }
+#endif
 
     int x, y, width, height;
     getWindowDimensions(x, y, width, height);
 
+#ifndef LITE_GPUI_WORKER
     // 全屏会话：让串流窗口从 Qt 界面窗口所在的位置和尺寸起步。
     //
     // getWindowDimensions() 给的是「屏幕居中 + 串流分辨率」，那是退出全屏之后
@@ -3831,6 +3876,7 @@ void Session::exec()
             SDL_Delay(4);
         }
     }
+#endif
 
 #ifdef STEAM_LINK
     // We need a little delay before creating the window or we will trigger some kind
@@ -3851,6 +3897,7 @@ void Session::exec()
     // We always want a resizable window with High DPI enabled
     Uint32 defaultWindowFlags = SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE;
 
+#ifndef LITE_GPUI_WORKER
     // If we're starting in windowed mode and the Moonlight GUI is maximized or
     // minimized, match that with the streaming window.
     if (!m_IsFullScreen && m_QtWindow != nullptr) {
@@ -3872,6 +3919,7 @@ void Session::exec()
         }
 #endif
     }
+#endif
 
     // We use only the computer name on macOS to match Apple conventions where the
     // app name is featured in the menu bar and the document name is in the title bar.
@@ -3958,19 +4006,15 @@ void Session::exec()
     // for if/when we enter full-screen mode.
     updateOptimalWindowDisplayMode();
 
-    // Enter full screen if requested
-    bool awaitingFullScreenEntry = false;
-    if (m_IsFullScreen && m_WaylandStreamWindow == nullptr) {
-        if (SDL_SetWindowFullscreen(m_Window, m_FullScreenFlag) == 0) {
-            awaitingFullScreenEntry = true;
-        }
-        else {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "SDL_SetWindowFullscreen() failed: %s",
-                        SDL_GetError());
-        }
+    const bool enterFullScreen = m_IsFullScreen && m_WaylandStreamWindow == nullptr;
+    const bool fullScreenFailed = enterFullScreen && SDL_SetWindowFullscreen(m_Window, m_FullScreenFlag) != 0;
+    if (fullScreenFailed) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "SDL_SetWindowFullscreen() failed: %s",
+                    SDL_GetError());
     }
 
+#ifndef LITE_GPUI_WORKER
     // 串流窗口就位之后才隐藏界面窗口。
     //
     // 以前这件事在 QML 的退场动画末尾做（hideForStreaming），时机太早：macOS 上
@@ -3986,7 +4030,7 @@ void Session::exec()
     // 信号和定时器只在串流覆盖层可见时才会被 pump。
     Uint32 qtWindowHideDeadline = 0;
     if (m_QtWindow != nullptr) {
-        if (awaitingFullScreenEntry) {
+        if (enterFullScreen && !fullScreenFailed) {
             qtWindowHideDeadline = SDL_GetTicks() + k_FullScreenEntryTimeoutMs;
         }
         else {
@@ -3996,6 +4040,7 @@ void Session::exec()
             m_QtWindow->setVisible(false);
         }
     }
+#endif
 
     bool needsFirstEnterCapture = false;
     bool needsPostDecoderCreationCapture = false;
@@ -4231,12 +4276,16 @@ void Session::exec()
         lastSdrWhiteCheckTicks = now;
 
         const int displayIndex = SDL_GetWindowDisplayIndex(m_Window);
+#ifdef LITE_GPUI_WORKER
+        const auto displayName = WindowsDisplayBrightness::displayDeviceName(displayIndex);
+#else
         std::wstring displayName;
         if (m_GpuiClientDisplay >= 0) {
             displayName = WindowsDisplayBrightness::displayDeviceName(displayIndex);
         } else if (QScreen* clientScreen = qtScreenForSdlDisplay(displayIndex, SdlDisplayMatchPolicy::ExactOnly)) {
             displayName = clientScreen->name().toStdWString();
         }
+#endif
         const float nits = WindowsDisplayBrightness::querySdrWhiteNits(displayName, false);
         if (nits < 50.0f || qAbs(nits - m_LastClientSdrWhiteNits) < 0.5f) {
             return;
@@ -4255,6 +4304,7 @@ void Session::exec()
     };
 #endif
 
+#ifndef LITE_GPUI_WORKER
     // 见上面 qtWindowHideDeadline 处的注释：串流窗口真的落定了（或者等超时了）
     // 再把界面窗口藏掉。
     auto hideGuiWindowWhenSettled = [&](bool settled) {
@@ -4266,10 +4316,13 @@ void Session::exec()
             qtWindowHideDeadline = 0;
         }
     };
+#endif
 
     SDL_Event event;
     for (;;) {
+#ifndef LITE_GPUI_WORKER
         hideGuiWindowWhenSettled(false);
+#endif
         processSunshineAbrFeedback();
 #ifdef Q_OS_WIN32
         processClientSdrWhiteUpdate();
@@ -4408,8 +4461,10 @@ void Session::exec()
             case SDL_WINDOWEVENT_SHOWN:
             case SDL_WINDOWEVENT_MOVED:
             case SDL_WINDOWEVENT_SIZE_CHANGED:
+#ifndef LITE_GPUI_WORKER
                 // Cocoa 在全屏切换结束之后才发这个事件，拿它当「窗口已落定」的信号
                 hideGuiWindowWhenSettled(true);
+#endif
                 syncQtOverlayWindowsWithSdlWindowState();
                 // 远端光标的尺寸是按窗口的 backing 比例算的（见 getRemoteCursorScale()），
                 // 换屏、改分辨率、改缩放都会让它失效。挂在这一组事件上而不是只挂
@@ -5025,6 +5080,7 @@ DispatchDeferredCleanup:
     m_VideoDecoder = nullptr;
     SDL_UnlockMutex(m_DecoderLock);
 
+#ifndef LITE_GPUI_WORKER
     // Propagate state changes from the SDL window back to the Qt window
     //
     // NB: We're making a conscious decision not to propagate the maximized
@@ -5048,6 +5104,7 @@ DispatchDeferredCleanup:
         }
 #endif
     }
+#endif
 
     // This must be called after the decoder is deleted, because
     // the renderer may want to interact with the window

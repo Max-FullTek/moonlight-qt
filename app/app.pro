@@ -8,7 +8,7 @@ lite-gpui-worker {
 } else {
     QT += network quick quickcontrols2 gui-private svg
     SOURCES += backend/systemproperties.cpp
-    HEADERS += backend/systemproperties.h
+    HEADERS += backend/systemproperties.h streaming/session.h
 }
 win32:lite-no-microphone: DEFINES += LITE_NO_MICROPHONE
 !config_SL:!contains(DEFINES, LITE_NO_MICROPHONE): QT += multimedia
@@ -363,7 +363,6 @@ HEADERS += \
     streaming/input/gamepadsensorrate.h \
     streaming/input/keyboardstate.h \
     streaming/input/touchpadcontacts.h \
-    streaming/session.h \
     streaming/supportedvideoformats.h \
     streaming/clipboardhelperclient.h \
     streaming/sessionevents.h \

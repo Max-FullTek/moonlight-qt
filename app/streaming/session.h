@@ -2,8 +2,9 @@
 
 #include <QPoint>
 #include <QJsonArray>
-#include <QWindow>
-#ifndef LITE_GPUI_WORKER
+#ifdef LITE_GPUI_WORKER
+#include <QCoreApplication>
+#else
 #include <QQuickWindow>
 #endif
 
@@ -44,9 +45,17 @@ class MacQtEventPumpInputGuard;
 class StylusReplayTest;
 #endif
 
-class Session : public QObject, public IInputHost
+class Session :
+#ifndef LITE_GPUI_WORKER
+    public QObject,
+#endif
+    public IInputHost
 {
+#ifdef LITE_GPUI_WORKER
+    Q_DECLARE_TR_FUNCTIONS(Session)
+#else
     Q_OBJECT
+#endif
 
     friend class SdlInputHandler;
 
@@ -72,13 +81,17 @@ public:
     {
         m_LifecycleDispatcher = std::move(dispatcher);
     }
-#ifndef LITE_GPUI_WORKER
+#ifdef LITE_GPUI_WORKER
+    bool initializeForWorker();
+    void start();
+    void interrupt();
+#else
     Q_INVOKABLE bool initialize(QQuickWindow* qtWindow);
-#endif
     bool initializeForWorker() { return initializeWindow(nullptr); }
     Q_INVOKABLE void start();
     Q_INVOKABLE void interrupt();
     Q_PROPERTY(QStringList launchWarnings MEMBER m_LaunchWarnings NOTIFY launchWarningsChanged);
+#endif
 
     static
     void getDecoderInfo(SDL_Window* window,
@@ -107,6 +120,7 @@ public:
     bool usesQtWaylandStreamWindow() const;
     void minimizeStreamingWindow() override;
 
+#ifndef LITE_GPUI_WORKER
 signals:
     void stageStarting(QString stage);
 
@@ -124,6 +138,7 @@ signals:
     void readyForDeletion();
 
     void launchWarningsChanged();
+#endif
 
 private:
     int m_GpuiClientDisplay = -1;
@@ -146,7 +161,9 @@ private:
         bool valid = false;
     };
 
+#ifndef LITE_GPUI_WORKER
     bool initializeWindow(QWindow* qtWindow);
+#endif
     void exec();
     void dispatchConnectionCleanup();
     void finishConnectionCleanup();
@@ -324,7 +341,9 @@ private:
     SDL_mutex* m_DecoderLock;
     bool m_AudioDisabled;
     Uint32 m_FullScreenFlag;
+#ifndef LITE_GPUI_WORKER
     QWindow* m_QtWindow;
+#endif
     QWindow* m_WaylandStreamWindow;
     WaylandWindowSnapshot m_WaylandWindowSnapshot;
     bool m_WaylandOverlayShortcutPressed;
