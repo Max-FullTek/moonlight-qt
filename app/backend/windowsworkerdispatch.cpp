@@ -1,8 +1,11 @@
 #include "windowsworkerdispatch.h"
 
 #include <windows.h>
+#include <array>
 #include <cassert>
+#include <cstdio>
 #include <deque>
+#include <exception>
 #include <mutex>
 #include <utility>
 
@@ -11,6 +14,11 @@ struct WindowsWorkerDispatch::Window {
     static constexpr UINT WakeMessage = WM_APP;
     static constexpr UINT LifecycleMessage = WM_APP + 1;
     static constexpr UINT CompletionMessage = WM_APP + 2;
+    static constexpr UINT RetryPostMessage = WM_APP + 3;
+    static constexpr UINT_PTR RetryTimer = 1;
+    static constexpr std::array<UINT, 2> RetriableMessages{WakeMessage, CompletionMessage};
+    std::array<size_t, RetriableMessages.size()> pendingPosts{};
+    bool retryTimerActive = false;
     std::mutex completionMutex;
     std::deque<std::function<void()>> completions;
     std::mutex lifecycleMutex;
@@ -39,6 +47,48 @@ struct WindowsWorkerDispatch::Window {
         }
     }
 
+    bool post(UINT message) const
+    {
+        if (!window) return false;
+        if (PostMessageW(window, message, 0, 0)) return true;
+        // A sent notification can reach the owner when its posted queue is
+        // full. It only arms a timer, even when called on the owner thread.
+        return GetLastError() == ERROR_NOT_ENOUGH_QUOTA &&
+                SendNotifyMessageW(window, RetryPostMessage, message, 0) != 0;
+    }
+
+    void scheduleRetry(UINT message)
+    {
+        for (size_t i = 0; i < RetriableMessages.size(); ++i) {
+            if (message != RetriableMessages[i]) continue;
+            ++pendingPosts[i];
+            if (!retryTimerActive) {
+                if (!SetTimer(window, RetryTimer, USER_TIMER_MINIMUM, nullptr)) {
+                    std::fputs("Unable to schedule a Windows worker wake retry\n", stderr);
+                    std::terminate();
+                }
+                retryTimerActive = true;
+            }
+            return;
+        }
+    }
+
+    void retryPendingPosts()
+    {
+        for (size_t i = 0; i < RetriableMessages.size(); ++i) {
+            while (pendingPosts[i] > 0) {
+                if (!PostMessageW(window, RetriableMessages[i], 0, 0)) {
+                    if (GetLastError() == ERROR_NOT_ENOUGH_QUOTA) return;
+                    std::fputs("Unable to retry a Windows worker wake\n", stderr);
+                    std::terminate();
+                }
+                --pendingPosts[i];
+            }
+        }
+        KillTimer(window, RetryTimer);
+        retryTimerActive = false;
+    }
+
     // The launch completion consumes its slot before entering the stream loop.
     // Cleanup can then publish the next completion using the same slot.
     bool postLifecycle(std::function<void()> completion)
@@ -65,7 +115,7 @@ struct WindowsWorkerDispatch::Window {
     {
         std::lock_guard lock(completionMutex);
         completions.push_back(std::move(completion));
-        if (window && PostMessageW(window, CompletionMessage, 0, 0)) return true;
+        if (post(CompletionMessage)) return true;
         completion = std::move(completions.back());
         completions.pop_back();
         return false;
@@ -92,12 +142,15 @@ struct WindowsWorkerDispatch::Window {
             SetWindowLongPtrW(window, GWLP_USERDATA,
                               reinterpret_cast<LONG_PTR>(creation->lpCreateParams));
         }
-        else if (message == WakeMessage || message == LifecycleMessage || message == CompletionMessage) {
+        else if (message == WakeMessage || message == LifecycleMessage || message == CompletionMessage ||
+                 message == RetryPostMessage || (message == WM_TIMER && wParam == RetryTimer)) {
             auto* dispatcher = reinterpret_cast<Window*>(GetWindowLongPtrW(window, GWLP_USERDATA));
             if (dispatcher != nullptr) {
                 if (message == WakeMessage) dispatcher->drainInput();
                 else if (message == LifecycleMessage) dispatcher->finishLifecycle();
-                else dispatcher->finishCompletion();
+                else if (message == CompletionMessage) dispatcher->finishCompletion();
+                else if (message == RetryPostMessage) dispatcher->scheduleRetry(static_cast<UINT>(wParam));
+                else dispatcher->retryPendingPosts();
             }
             return 0;
         }
@@ -119,7 +172,7 @@ bool WindowsWorkerDispatch::active() const
 
 bool WindowsWorkerDispatch::postInput() const
 {
-    return active() && PostMessageW(m_Window->window, Window::WakeMessage, 0, 0) != 0;
+    return m_Window->post(Window::WakeMessage);
 }
 
 bool WindowsWorkerDispatch::postLifecycle(std::function<void()> completion)

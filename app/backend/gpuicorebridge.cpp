@@ -204,7 +204,12 @@ bool applySettings(const QJsonObject& value, StreamingPreferences* prefs) {
 }
 }
 
-GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent) {
+#ifdef LITE_GPUI_WORKER
+GpuiCoreBridge::GpuiCoreBridge()
+#else
+GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent)
+#endif
+{
     auto* prefs = StreamingPreferences::get();
     prefs->enableMdns = false;
     prefs->richPresence = false;
@@ -296,11 +301,16 @@ int GpuiCoreBridge::execNative()
 
 void GpuiCoreBridge::postCompletion(std::function<void()> completion)
 {
+#ifdef LITE_GPUI_WORKER
+    if (!m_InputWakeWindow->postCompletion(std::move(completion))) {
+        qFatal("Unable to dispatch a Windows Lite worker completion");
+    }
+#else
 #ifdef Q_OS_WIN32
     if (m_InputWakeWindow && m_InputWakeWindow->postCompletion(std::move(completion))) return;
 #endif
-    // Transitional failure/non-Windows path while the Qt entry still exists.
     QMetaObject::invokeMethod(this, std::move(completion), Qt::QueuedConnection);
+#endif
 }
 
 void GpuiCoreBridge::send(QJsonObject event) {
@@ -323,7 +333,11 @@ void GpuiCoreBridge::enqueueInput(Input input)
             return;
         }
     }
-#ifdef Q_OS_WIN32
+#ifdef LITE_GPUI_WORKER
+    if (!m_InputWakeWindow->postInput()) {
+        qFatal("Unable to dispatch a Windows Lite worker command");
+    }
+#elif defined(Q_OS_WIN32)
     if (!m_InputWakeWindow->postInput()) {
         QMetaObject::invokeMethod(this, &GpuiCoreBridge::drainInput, Qt::QueuedConnection);
     }
@@ -569,10 +583,14 @@ void GpuiCoreBridge::finishShutdown()
     // Host deletion must retire its tombstone and Session must be destroyed
     // before the owner loop stops dispatching completions.
     if (m_ShuttingDown && !m_Session && !m_DeletingHost) {
+#ifdef LITE_GPUI_WORKER
+        WindowsWorkerDispatch::exitOwnerLoop();
+#else
 #ifdef Q_OS_WIN32
         if (m_NativeOwner) { WindowsWorkerDispatch::exitOwnerLoop(); return; }
 #endif
         QCoreApplication::quit();
+#endif
     }
 }
 

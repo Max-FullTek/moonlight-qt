@@ -75,6 +75,27 @@ int main()
     expected.push_back(100);
     if (!postedCleanup || !deferred || events != expected) return 5;
 
+    // Saturate this process's Win32 posted queue. Both an owner-thread
+    // completion and a producer's pipe wake and completion must still defer.
+    events.clear();
+    size_t postedMessages = 0;
+    while (PostThreadMessageW(owner, WM_APP + 100, 0, 0)) {
+        if (++postedMessages == 65536) return 10;
+    }
+    if (GetLastError() != ERROR_NOT_ENOUGH_QUOTA || postedMessages == 0) return 11;
+    if (!dispatch.postCompletion([&] { record(201); }) || !events.empty()) return 12;
+    std::thread saturatedProducer([&] {
+        posted = dispatch.postInput() && dispatch.postCompletion([&] { record(202); });
+    });
+    saturatedProducer.join();
+    if (!posted || !events.empty()) return 13;
+    const auto deadline = GetTickCount64() + 5000;
+    while (events.size() < 3 && GetTickCount64() < deadline) {
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&message);
+        if (events.size() < 3) Sleep(1);
+    }
+    if (events != std::vector<int>{1, 201, 202}) return 14;
+
     // The production GPUI entry uses this pump, without QApplication::exec().
     events.clear();
     std::thread exitProducer([&] {

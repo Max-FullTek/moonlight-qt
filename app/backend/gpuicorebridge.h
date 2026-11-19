@@ -1,10 +1,11 @@
 #pragma once
 
-#include <QObject>
 #include <QJsonObject>
 #include <QHash>
 #ifdef LITE_GPUI_WORKER
 #include <QCoreApplication>
+#else
+#include <QObject>
 #endif
 #include <deque>
 #include <functional>
@@ -29,7 +30,10 @@ class WindowsWorkerDispatch;
 // completed directly on the pipe reader without a Qt/main-thread dependency.
 // SDL or a Windows message wakes the owner thread to drain other commands.
 // stdout is reserved for protocol events; diagnostics stay on stderr.
-class GpuiCoreBridge : public QObject
+class GpuiCoreBridge
+#ifndef LITE_GPUI_WORKER
+    : public QObject
+#endif
 {
 #ifdef LITE_GPUI_WORKER
     Q_DECLARE_TR_FUNCTIONS(GpuiCoreBridge)
@@ -37,8 +41,13 @@ class GpuiCoreBridge : public QObject
     Q_OBJECT
 #endif
 public:
+#ifdef LITE_GPUI_WORKER
+    GpuiCoreBridge();
+    ~GpuiCoreBridge();
+#else
     explicit GpuiCoreBridge(QObject* parent = nullptr);
     ~GpuiCoreBridge() override;
+#endif
     void start();
 #ifdef Q_OS_WIN32
     int execNative();
