@@ -1,6 +1,17 @@
 #include "boxartmanager.h"
 #include "../path.h"
 
+void BoxArtManager::deleteBoxArt(NvComputer* computer)
+{
+    QDir dir(Path::getBoxArtCacheDir());
+
+    // Delete everything in this computer's box art directory
+    if (dir.cd(computer->uuid)) {
+        dir.removeRecursively();
+    }
+}
+
+#ifndef LITE_GPUI_WORKER
 #include <QImageReader>
 #include <QImageWriter>
 #include <QMutexLocker>
@@ -119,16 +130,6 @@ QUrl BoxArtManager::loadBoxArt(NvComputer* computer, NvApp& app)
     return QUrl("qrc:/res/no_app_image.png");
 }
 
-void BoxArtManager::deleteBoxArt(NvComputer* computer)
-{
-    QDir dir(Path::getBoxArtCacheDir());
-
-    // Delete everything in this computer's box art directory
-    if (dir.cd(computer->uuid)) {
-        dir.removeRecursively();
-    }
-}
-
 void BoxArtManager::handleBoxArtLoadComplete(NvComputer* computer, NvApp app, QUrl image)
 {
     if (!image.isEmpty()) {
@@ -169,3 +170,4 @@ QUrl BoxArtManager::loadBoxArtFromNetwork(NvComputer* computer, const NvApp& app
 }
 
 #include "boxartmanager.moc"
+#endif

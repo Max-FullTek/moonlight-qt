@@ -1,12 +1,32 @@
 #include "backend/windowsworkerdispatch.h"
+#include "backend/windowstaskqueue.h"
 
 #include <windows.h>
+#include <future>
 #include <thread>
 #include <vector>
 
 int main()
 {
     const auto owner = GetCurrentThreadId();
+    std::vector<int> jobs;
+    {
+        WindowsTaskQueue queue;
+        std::promise<void> release;
+        const auto ready = release.get_future();
+        queue.submit([&] {
+            ready.wait();
+            jobs.push_back(GetCurrentThreadId() == owner ? -1 : 1);
+        });
+        queue.submit([&] { jobs.push_back(2); });
+        queue.submit([&] { jobs.push_back(3); });
+        release.set_value();
+        queue.wait();
+        if (jobs != std::vector<int>{1, 2, 3}) return 8;
+        queue.submit([&] { jobs.push_back(4); });
+    }
+    if (jobs != std::vector<int>{1, 2, 3, 4}) return 9;
+
     std::vector<int> events;
     const auto record = [&](int event) {
         events.push_back(GetCurrentThreadId() == owner ? event : -event);

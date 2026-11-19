@@ -205,7 +205,9 @@ if(LITE_ENABLE_NATIVE_HTTP AND TARGET lite-clipboard-ipc)
         lite-clipboard-listener lite-clipboard-png lite-windows-http-transfer)
 endif()
 
-add_library(lite-worker-dispatch STATIC "${LITE_SOURCE_ROOT}/app/backend/windowsworkerdispatch.cpp")
+add_library(lite-worker-dispatch STATIC
+    "${LITE_SOURCE_ROOT}/app/backend/windowsworkerdispatch.cpp"
+    "${LITE_SOURCE_ROOT}/app/backend/windowstaskqueue.cpp")
 
 add_library(lite-clipboard-process STATIC "${LITE_SOURCE_ROOT}/app/streaming/windowsclipboardprocess.cpp")
 target_compile_features(lite-clipboard-process PUBLIC cxx_std_17)

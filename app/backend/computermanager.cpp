@@ -14,7 +14,9 @@
 #include <QtEndian>
 
 #include <QThread>
+#ifndef LITE_GPUI_WORKER
 #include <QThreadPool>
+#endif
 #include <QCoreApplication>
 #include <QRandomGenerator>
 #include <memory>
@@ -249,6 +251,10 @@ void ComputerManager::loadLegacyHosts()
 
 ComputerManager::~ComputerManager()
 {
+#ifdef LITE_GPUI_WORKER
+    beginShutdown();
+    m_HostTasks.wait();
+#endif
     // Stop the delayed flush thread before acquiring the lock in write mode
     // to avoid deadlocking with a flush that needs the lock in read mode.
     {
@@ -581,7 +587,7 @@ QVector<NvComputer*> ComputerManager::getComputers()
     return hosts;
 }
 
-class DeferredHostDeletionTask : public QRunnable
+class DeferredHostDeletionTask
 {
 public:
     DeferredHostDeletionTask(ComputerManager* cm, NvComputer* computer)
@@ -635,13 +641,22 @@ void ComputerManager::deleteHost(NvComputer* computer)
     m_DeletingHosts.insert(computer);
     // Punt to a worker thread to avoid stalling the
     // UI while waiting for the polling thread to die
-    QThreadPool::globalInstance()->start(new DeferredHostDeletionTask(this, computer));
+    submitHostTask([task = DeferredHostDeletionTask(this, computer)]() mutable { task.run(); });
 }
 
 void ComputerManager::finishHostDeletion(NvComputer* computer, const QString& uuid)
 {
     m_DeletingHosts.remove(computer);
     emit hostDeleted(uuid);
+}
+
+void ComputerManager::submitHostTask(std::function<void()> task)
+{
+#ifdef LITE_GPUI_WORKER
+    m_HostTasks.submit(std::move(task));
+#else
+    QThreadPool::globalInstance()->start(QRunnable::create(std::move(task)));
+#endif
 }
 
 void ComputerManager::dispatchHostCompletion(std::function<void()> completion)
@@ -704,9 +719,9 @@ void ComputerManager::interruptPolling()
     }
 }
 
-class PendingPairingTask : public QObject, public QRunnable
+class PendingPairingTask
 {
-    Q_OBJECT
+    Q_DECLARE_TR_FUNCTIONS(PendingPairingTask)
 
 public:
     PendingPairingTask(ComputerManager* computerManager, NvComputer* computer, QString pin)
@@ -714,18 +729,8 @@ public:
           m_Computer(computer),
           m_Pin(pin)
     {
-        connect(this, &PendingPairingTask::pairingCompleted,
-                computerManager, [computerManager](NvComputer* computer, QString error) {
-            computerManager->dispatchHostCompletion([computerManager, computer, error] {
-                emit computerManager->pairingCompleted(computer, error);
-            });
-        }, Qt::DirectConnection);
     }
 
-signals:
-    void pairingCompleted(NvComputer* computer, QString error);
-
-private:
     void run()
     {
         NvPairingManager pairingManager(m_Computer);
@@ -735,31 +740,39 @@ private:
            switch (result)
            {
            case NvPairingManager::PairState::PIN_WRONG:
-               emit pairingCompleted(m_Computer, tr("The PIN from the PC didn't match. Please try again."));
+               reportResult(tr("The PIN from the PC didn't match. Please try again."));
                break;
            case NvPairingManager::PairState::FAILED:
                if (m_Computer->currentGameId != 0) {
-                   emit pairingCompleted(m_Computer, tr("You cannot pair while a previous session is still running on the host PC. Quit any running games or reboot the host PC, then try pairing again."));
+                   reportResult(tr("You cannot pair while a previous session is still running on the host PC. Quit any running games or reboot the host PC, then try pairing again."));
                }
                else {
-                   emit pairingCompleted(m_Computer, tr("Pairing failed. Please try again."));
+                   reportResult(tr("Pairing failed. Please try again."));
                }
                break;
            case NvPairingManager::PairState::ALREADY_IN_PROGRESS:
-               emit pairingCompleted(m_Computer, tr("Another pairing attempt is already in progress."));
+               reportResult(tr("Another pairing attempt is already in progress."));
                break;
            case NvPairingManager::PairState::PAIRED:
                // Persist the newly pinned server certificate for this host
                m_ComputerManager->saveHost(m_Computer);
 
-               emit pairingCompleted(m_Computer, nullptr);
+               reportResult(nullptr);
                break;
            }
         } catch (const GfeHttpResponseException& e) {
-            emit pairingCompleted(m_Computer, tr("GeForce Experience returned error: %1").arg(e.toQString()));
+            reportResult(tr("GeForce Experience returned error: %1").arg(e.toQString()));
         } catch (const QtNetworkReplyException& e) {
-            emit pairingCompleted(m_Computer, e.toQString());
+            reportResult(e.toQString());
         }
+    }
+
+private:
+    void reportResult(QString error)
+    {
+        m_ComputerManager->dispatchHostCompletion([manager = m_ComputerManager, computer = m_Computer, error] {
+            emit manager->pairingCompleted(computer, error);
+        });
     }
 
     ComputerManager* m_ComputerManager;
@@ -771,30 +784,20 @@ void ComputerManager::pairHost(NvComputer* computer, QString pin)
 {
     // Punt to a worker thread to avoid stalling the
     // UI while waiting for pairing to complete
-    PendingPairingTask* pairing = new PendingPairingTask(this, computer, pin);
-    QThreadPool::globalInstance()->start(pairing);
+    submitHostTask([task = PendingPairingTask(this, computer, std::move(pin))]() mutable { task.run(); });
 }
 
-class PendingQuitTask : public QObject, public QRunnable
+class PendingQuitTask
 {
-    Q_OBJECT
+    Q_DECLARE_TR_FUNCTIONS(PendingQuitTask)
 
 public:
     PendingQuitTask(ComputerManager* computerManager, NvComputer* computer)
-        : m_Computer(computer)
+        : m_ComputerManager(computerManager),
+          m_Computer(computer)
     {
-        connect(this, &PendingQuitTask::quitAppFailed,
-                computerManager, [computerManager](QString error) {
-            computerManager->dispatchHostCompletion([computerManager, error] {
-                emit computerManager->quitAppCompleted(error);
-            });
-        }, Qt::DirectConnection);
     }
 
-signals:
-    void quitAppFailed(QString error);
-
-private:
     void run()
     {
         NvHTTP http(m_Computer);
@@ -810,21 +813,30 @@ private:
             }
             if (e.getStatusCode() == 599) {
                 // 599 is a special code we make a custom message for
-                emit quitAppFailed(tr("The running game wasn't started by this PC. "
+                reportFailure(tr("The running game wasn't started by this PC. "
                                       "You must quit the game on the host PC manually or use the device that originally started the game."));
             }
             else {
-                emit quitAppFailed(e.toQString());
+                reportFailure(e.toQString());
             }
         } catch (const QtNetworkReplyException& e) {
             {
                 QWriteLocker lock(&m_Computer->lock);
                 m_Computer->pendingQuit = false;
             }
-            emit quitAppFailed(e.toQString());
+            reportFailure(e.toQString());
         }
     }
 
+private:
+    void reportFailure(QString error)
+    {
+        m_ComputerManager->dispatchHostCompletion([manager = m_ComputerManager, error] {
+            emit manager->quitAppCompleted(error);
+        });
+    }
+
+    ComputerManager* m_ComputerManager;
     NvComputer* m_Computer;
 };
 
@@ -833,8 +845,7 @@ void ComputerManager::quitRunningApp(NvComputer* computer)
     QWriteLocker lock(&computer->lock);
     computer->pendingQuit = true;
 
-    PendingQuitTask* quit = new PendingQuitTask(this, computer);
-    QThreadPool::globalInstance()->start(quit);
+    submitHostTask([task = PendingQuitTask(this, computer)]() mutable { task.run(); });
 }
 
 void ComputerManager::stopPollingAsync()
@@ -886,9 +897,9 @@ void ComputerManager::addNewHostManually(QString address)
     }
 }
 
-class PendingAddTask : public QObject, public QRunnable
+class PendingAddTask
 {
-    Q_OBJECT
+    Q_DECLARE_TR_FUNCTIONS(PendingAddTask)
 
 public:
     PendingAddTask(ComputerManager* computerManager, QString name, NvAddress address, NvAddress mdnsIpv6Address, bool mdns)
@@ -898,26 +909,23 @@ public:
           m_MdnsIpv6Address(mdnsIpv6Address),
           m_Mdns(mdns)
     {
-        connect(this, &PendingAddTask::computerAddCompleted,
-                computerManager, [computerManager](QVariant success, QVariant portBlocking) {
-            computerManager->dispatchHostCompletion([computerManager, success, portBlocking] {
-                emit computerManager->computerAddCompleted(success, portBlocking);
-            });
-        }, Qt::DirectConnection);
-        connect(this, &PendingAddTask::computerStateChanged,
-                computerManager, [computerManager](NvComputer* computer) {
-            computerManager->dispatchHostCompletion([computerManager, computer] {
-                computerManager->handleComputerStateChanged(computer);
-            });
-        }, Qt::DirectConnection);
     }
 
-signals:
-    void computerAddCompleted(QVariant success, QVariant detectedPortBlocking);
-
-    void computerStateChanged(NvComputer* computer);
-
 private:
+    void reportResult(bool success, bool portBlocking)
+    {
+        m_ComputerManager->dispatchHostCompletion([manager = m_ComputerManager, success, portBlocking] {
+            emit manager->computerAddCompleted(success, portBlocking);
+        });
+    }
+
+    void notifyChange(NvComputer* computer)
+    {
+        m_ComputerManager->dispatchHostCompletion([manager = m_ComputerManager, computer] {
+            manager->handleComputerStateChanged(computer);
+        });
+    }
+
     QString fetchServerInfo(NvHTTP& http)
     {
         QString serverInfo;
@@ -951,7 +959,7 @@ private:
             if (!m_Mdns) {
                 const unsigned int portTestResult = ML_TEST_RESULT_INCONCLUSIVE;
 
-                emit computerAddCompleted(false, portTestResult != 0 && portTestResult != ML_TEST_RESULT_INCONCLUSIVE);
+                reportResult(false, portTestResult != 0 && portTestResult != ML_TEST_RESULT_INCONCLUSIVE);
             }
             return QString();
         }
@@ -968,11 +976,12 @@ private:
             return std::make_unique<NvComputer>(http, http.hostInformation());
         }
         catch (...) {
-            if (!m_Mdns) emit computerAddCompleted(false, false);
+            if (!m_Mdns) reportResult(false, false);
             return nullptr;
         }
     }
 
+public:
     void run()
     {
         // Use the placeholder UID for the initial poll, then we'll switch to the real one if it's not GFE
@@ -1078,13 +1087,13 @@ private:
 
                 // For non-mDNS clients, let them know it succeeded
                 if (!m_Mdns) {
-                    emit computerAddCompleted(true, false);
+                    reportResult(true, false);
                 }
 
                 // Tell our client if something changed
                 if (changed) {
                     qInfo() << existingComputer->name << "is now at" << existingComputer->activeAddress.toString();
-                    emit computerStateChanged(existingComputer);
+                    notifyChange(existingComputer);
                 }
             }
             else {
@@ -1100,15 +1109,16 @@ private:
 
                 // For non-mDNS clients, let them know it succeeded
                 if (!m_Mdns) {
-                    emit computerAddCompleted(true, false);
+                    reportResult(true, false);
                 }
 
                 // Tell our client about this new PC
-                emit computerStateChanged(newComputer);
+                notifyChange(newComputer);
             }
         }
     }
 
+private:
     ComputerManager* m_ComputerManager;
     QString m_Name;
     NvAddress m_Address;
@@ -1120,8 +1130,9 @@ void ComputerManager::addNewHost(NvAddress address, bool mdns, QString name, NvA
 {
     // Punt to a worker thread to avoid stalling the
     // UI while waiting for serverinfo query to complete
-    PendingAddTask* addTask = new PendingAddTask(this, name, address, mdnsIpv6Address, mdns);
-    QThreadPool::globalInstance()->start(addTask);
+    submitHostTask([task = PendingAddTask(this, name, address, mdnsIpv6Address, mdns)]() mutable {
+        task.run();
+    });
 }
 
 QString ComputerManager::generatePinString()

@@ -24,7 +24,6 @@
 #include <QReadLocker>
 #include <QStringView>
 #include <QWriteLocker>
-#include <QThreadPool>
 #include <QTimer>
 #include <cstdio>
 #include <thread>
@@ -248,6 +247,9 @@ GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent) {
 GpuiCoreBridge::~GpuiCoreBridge()
 {
     SessionApiRpc::broker().close();
+#ifdef LITE_GPUI_WORKER
+    m_Manager->beginShutdown();
+#endif
     if (m_NativeOwner) NvHTTP::closeNativeOwner();
     if (m_Reader.joinable()) {
 #ifdef Q_OS_WIN32
@@ -256,6 +258,13 @@ GpuiCoreBridge::~GpuiCoreBridge()
 #endif
         m_Reader.join();
     }
+#ifdef LITE_GPUI_WORKER
+    // Jobs and polling can still post completions. Destroy their owners
+    // while the bridge and its Windows completion target are both alive.
+    m_Manager->m_HostTasks.wait();
+    m_Session.reset();
+    delete m_Manager;
+#endif
 }
 
 #ifdef Q_OS_WIN32
@@ -747,16 +756,15 @@ void GpuiCoreBridge::command(const QByteArray& line) {
             useTrueUid = !host->isNvidiaServerSoftware;
         }
         m_AddPending = true;
-        // The existing application shutdown waits for this pool. Snapshot the
-        // connection under the host lock; the HTTP worker owns no host pointer.
-        QThreadPool::globalInstance()->start(QRunnable::create([this, address, httpsPort, certificate, uuid, useTrueUid] {
+        // Snapshot the connection under the host lock; the task owns no host pointer.
+        m_Manager->submitHostTask([this, address, httpsPort, certificate, uuid, useTrueUid] {
             NvHTTP http(address, httpsPort, certificate, useTrueUid, nullptr, uuid);
             const auto displays = QJsonArray::fromVariantList(http.getDisplays());
             postCompletion([this, uuid, displays] {
                 m_AddPending = false;
                 send({{"event", "displays"}, {"host", uuid}, {"displays", displays}});
             });
-        }));
+        });
         return;
     }
     if (name == "app_preferences") {

@@ -2,8 +2,8 @@ QT += core gui
 lite-gpui-worker {
     !win32|!lite-native-http|!lite-native-worker-json: error("The Lite GPUI worker requires the native Windows HTTP and profile backends")
     DEFINES += LITE_GPUI_WORKER
-    SOURCES += backend/hostcertificate.cpp
-    HEADERS += backend/hostcertificate.h
+    SOURCES += backend/hostcertificate.cpp backend/windowstaskqueue.cpp
+    HEADERS += backend/hostcertificate.h backend/windowstaskqueue.h
     RESOURCES += lite-overlay-icons.qrc
 } else {
     QT += network quick quickcontrols2 gui-private svg

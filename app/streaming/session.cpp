@@ -119,8 +119,10 @@ IFFmpegDecoderHost* decoderHost()
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
+#ifndef LITE_GPUI_WORKER
 #include <QThreadPool>
 #include <QRunnable>
+#endif
 #include <QReadLocker>
 #if !defined(Q_OS_WIN32) && !defined(Q_OS_DARWIN)
 #include <QSvgRenderer>
@@ -1827,6 +1829,7 @@ void Session::dispatchLifecycleCompletion(std::function<void()> completion)
 void Session::dispatchConnectionCleanup()
 {
     m_RuntimeBitrateClosing = true;
+#ifndef LITE_GPUI_WORKER
     if (!m_WorkerEvents) {
         QThreadPool::globalInstance()->start(QRunnable::create([this] {
             finishConnectionCleanup();
@@ -1838,6 +1841,7 @@ void Session::dispatchConnectionCleanup()
         }));
         return;
     }
+#endif
 
 #ifndef LITE_NO_MICROPHONE
     stopMicrophone();

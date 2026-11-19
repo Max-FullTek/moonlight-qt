@@ -5,7 +5,6 @@
 
 #include <QThread>
 #include <QReadWriteLock>
-#include <QRunnable>
 
 class CopySafeReadWriteLock : public QReadWriteLock
 {

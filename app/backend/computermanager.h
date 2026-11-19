@@ -15,7 +15,9 @@
 #include <QThread>
 #include <QReadWriteLock>
 #include <QVariant>
-#include <QRunnable>
+#ifdef LITE_GPUI_WORKER
+#include "windowstaskqueue.h"
+#endif
 #include <QTimer>
 #include <QSet>
 #include <condition_variable>
@@ -203,6 +205,7 @@ class ComputerManager : public QObject
 {
     Q_OBJECT
 
+    friend class GpuiCoreBridge;
     friend class DeferredHostDeletionTask;
     friend class PendingAddTask;
     friend class PendingPairingTask;
@@ -268,6 +271,7 @@ private slots:
 private:
     void saveHosts();
     void finishHostDeletion(NvComputer* computer, const QString& uuid);
+    void submitHostTask(std::function<void()> task);
     void dispatchHostCompletion(std::function<void()> completion);
     bool waitBeforeAddRetry();
 
@@ -285,6 +289,9 @@ private:
     void startPollingComputer(NvComputer* computer);
 
     StreamingPreferences* m_Prefs;
+#ifdef LITE_GPUI_WORKER
+    WindowsTaskQueue m_HostTasks;
+#endif
     std::function<void(std::function<void()>)> m_HostCompletionDispatcher;
     std::atomic_bool m_Stopping{false};
     std::mutex m_AddRetryMutex;

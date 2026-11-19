@@ -10,7 +10,6 @@
 #include <QPixmap>
 #endif
 #include <QDir>
-#include <QMutex>
 #include <QtDebug>
 #ifndef LITE_GPUI_WORKER
 #include <QNetworkProxyFactory>
@@ -28,10 +27,15 @@
 #ifndef LITE_GPUI_WORKER
 #include <QSettings>
 #endif
+#ifdef LITE_GPUI_WORKER
+#include "backend/windowstaskqueue.h"
+#else
 #include <QThreadPool>
+#endif
 #include <QTextStream>
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <QStandardPaths>
 #include "logredaction.h"
 
@@ -175,8 +179,12 @@ void StreamUtils::exitAsyncLoggingMode()
 
 static std::chrono::steady_clock::time_point s_LoggerStart;
 static QTextStream s_LoggerStream(stderr);
+static std::mutex s_SyncLoggerMutex;
+#ifdef LITE_GPUI_WORKER
+static WindowsTaskQueue s_LoggerThread;
+#else
 static QThreadPool s_LoggerThread;
-static QMutex s_SyncLoggerMutex;
+#endif
 static bool s_SuppressVerboseOutput;
 #ifdef LOG_TO_FILE
 // Max log file size of 10 MB
@@ -189,28 +197,13 @@ static QFile* s_LoggerFile;
 extern "C" bool g_DisableDrmHooks;
 #endif
 
-class LoggerTask : public QRunnable
+static void writeLogMessage(const QString& message)
 {
-public:
-    LoggerTask(const QString& msg) : m_Msg(msg)
-    {
-        setAutoDelete(true);
-    }
-
-    void run() override
-    {
-        // QTextStream is not thread-safe, so we must lock. This will generally
-        // only contend in synchronous logging mode or during a transition
-        // between synchronous and asynchronous. Asynchronous won't contend in
-        // the common case because we only have a single logging thread.
-        QMutexLocker locker(&s_SyncLoggerMutex);
-        s_LoggerStream << m_Msg;
-        s_LoggerStream.flush();
-    }
-
-private:
-    QString m_Msg;
-};
+    // A synchronous producer may overlap the tail of the asynchronous queue.
+    std::lock_guard lock(s_SyncLoggerMutex);
+    s_LoggerStream << message;
+    s_LoggerStream.flush();
+}
 
 void logToLoggerStream(QString& message)
 {
@@ -240,11 +233,16 @@ void logToLoggerStream(QString& message)
 
     if (g_AsyncLoggingEnabled) {
         // Queue the log message to be written asynchronously
-        s_LoggerThread.start(new LoggerTask(message));
+        const auto write = [message] { writeLogMessage(message); };
+#ifdef LITE_GPUI_WORKER
+        s_LoggerThread.submit(write);
+#else
+        s_LoggerThread.start(QRunnable::create(write));
+#endif
     }
     else {
         // Log the message immediately
-        LoggerTask(message).run();
+        writeLogMessage(message);
     }
 }
 
@@ -903,8 +901,9 @@ int main(int argc, char *argv[])
                                oldConErr);
 #endif
 
-    // Serialize log messages on a single thread
+#ifndef LITE_GPUI_WORKER
     s_LoggerThread.setMaxThreadCount(1);
+#endif
     s_LoggerStart = std::chrono::steady_clock::now();
 
     // Register our logger with all libraries
@@ -1700,15 +1699,18 @@ int main(int argc, char *argv[])
 
 #if defined(LITE_GPUI_WORKER)
     const int err = gpuiBridge->execNative();
+    delete gpuiBridge;
 #elif defined(Q_OS_WIN32) && defined(LITE_NATIVE_HTTP)
     const int err = gpuiCoreMode ? gpuiBridge->execNative() : app.exec();
 #else
     int err = app.exec();
 #endif
 
+#ifndef LITE_GPUI_WORKER
     // Give worker tasks time to properly exit. Fixes PendingQuitTask
     // sometimes freezing and blocking process exit.
     QThreadPool::globalInstance()->waitForDone(30000);
+#endif
 
     // Restore the default logger for all libraries before shutting down ours
 #if SDL_VERSION_ATLEAST(3, 0, 0)
@@ -1725,7 +1727,11 @@ int main(int argc, char *argv[])
     Q_ASSERT(g_AsyncLoggingEnabled == 0);
 
     // Wait for pending log messages to be printed
+#ifdef LITE_GPUI_WORKER
+    s_LoggerThread.wait();
+#else
     s_LoggerThread.waitForDone();
+#endif
 
 #ifdef Q_OS_WIN32
     // Without an explicit flush, console redirection for the list command
