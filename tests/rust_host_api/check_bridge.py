@@ -8,6 +8,7 @@ import json
 import os
 import queue
 from pathlib import Path
+import re
 import ssl
 import subprocess
 import sys
@@ -86,7 +87,9 @@ def check_direct_worker(worker, env, profile, pin_file, mode, launch_started):
                 assert process.wait(timeout=5) == 0
                 return
             send({"command": "pair", "host": "rust-display-host"})
-            pin_file.write_text(event("pairing")["pin"], encoding="ascii")
+            pin = event("pairing")["pin"]
+            assert re.fullmatch(r"[0-9]{4}", pin), "Expected a four-digit pairing PIN"
+            pin_file.write_text(pin, encoding="ascii")
             if mode == "cancel":
                 deadline = time.monotonic() + 10
                 while not pin_file.with_suffix(".started").exists():
@@ -276,7 +279,13 @@ def main(worker, runtime_directory, qt_plugins, work, peer_executable=None, mode
             pairs = [entry for entry in seen if entry[0] == "/pair"]
             assert len(pairs) == (3 if mode == "wrong-pin" else 5), seen
             assert pairs[1][1]["clientname"] == ["測試主機"], pairs[1]
-            assert len({entry[1]["uuid"][0] for entry in pairs}) == len(pairs), "Request nonce reused"
+            nonces = [entry[1]["uuid"][0] for entry in pairs]
+            if legacy_pairing:
+                assert all(re.fullmatch(r"[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}", nonce)
+                           for nonce in nonces), "Expected a lowercase UUID v4 without separators"
+            else:
+                assert all(re.fullmatch(r"[0-9a-f]{32}", nonce) for nonce in nonces)
+            assert len(set(nonces)) == len(pairs), "Request nonce reused"
             saved = json.loads((profile / "hosts-v1.json").read_text(encoding="utf-8"))
             names = json.loads((profile / "pair-names-v1.json").read_text(encoding="utf-8"))
             cert = saved["hosts"][0]["server_certificate"]

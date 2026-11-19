@@ -16,14 +16,16 @@
 #ifdef LITE_GPUI_WORKER
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <openssl/rand.h>
 #else
+#include <QRandomGenerator>
 #include <QThread>
 #include <QThreadPool>
 #endif
 #include <QCoreApplication>
 #include <QDir>
-#include <QRandomGenerator>
 #include <chrono>
+#include <cstdint>
 #include <memory>
 
 #ifndef LITE_GPUI_WORKER
@@ -1300,5 +1302,17 @@ void ComputerManager::addNewHost(NvAddress address, bool mdns, QString name, NvA
 
 QString ComputerManager::generatePinString()
 {
+#ifdef LITE_GPUI_WORKER
+    constexpr unsigned pinCount = 10000;
+    constexpr unsigned limit = (65536 / pinCount) * pinCount;
+    uint16_t sample;
+    do {
+        if (RAND_bytes(reinterpret_cast<unsigned char*>(&sample), sizeof(sample)) != 1) {
+            qFatal("Unable to generate a GameStream pairing PIN");
+        }
+    } while (sample >= limit);
+    return QString::asprintf("%04u", sample % pinCount);
+#else
     return QString::asprintf("%04u", QRandomGenerator::system()->bounded(10000));
+#endif
 }

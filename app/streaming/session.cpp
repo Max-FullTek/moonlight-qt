@@ -132,7 +132,6 @@ IFFmpegDecoderHost* decoderHost()
 #include <QScreen>
 #include "settings/mappingmanager.h"
 #include <QtGlobal>
-#include <QUuid>
 #include <chrono>
 #include <QUrl>
 

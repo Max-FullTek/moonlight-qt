@@ -18,7 +18,6 @@
 
 #include <QCoreApplication>
 #include "clienthostname.h"
-#include <QUuid>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
@@ -728,7 +727,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
                   {"client_certificate", QString::fromLatin1(IdentityManager::get()->getCertificate())},
                   {"client_key", QString::fromLatin1(IdentityManager::get()->getPrivateKey())},
                   {"unique_id", host->isNvidiaServerSoftware ? QStringLiteral("0123456789ABCDEF") : IdentityManager::get()->getUniqueId()},
-                  {"client_name", clientName}, {"nonce", QString::fromLatin1(QUuid::createUuid().toRfc4122().toHex())}}}});
+                  {"client_name", clientName}, {"nonce", NvHTTP::createRequestNonce()}}}});
         return;
     }
     if (name == "rename") {
@@ -832,7 +831,7 @@ void GpuiCoreBridge::command(const QByteArray& line) {
                         {"client_certificate",QString::fromLatin1(IdentityManager::get()->getCertificate())},
                         {"client_key",QString::fromLatin1(IdentityManager::get()->getPrivateKey())},
                         {"unique_id",host->isNvidiaServerSoftware ? QStringLiteral("0123456789ABCDEF") : IdentityManager::get()->getUniqueId()},
-                        {"client_name",clientName},{"nonce",QString::fromLatin1(QUuid::createUuid().toRfc4122().toHex())}}}}}});
+                        {"client_name",clientName},{"nonce",NvHTTP::createRequestNonce()}}}}}});
             return;
         }
         m_Manager->pairHost(host, pin);

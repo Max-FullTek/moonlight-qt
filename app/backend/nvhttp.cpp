@@ -8,8 +8,10 @@
 
 #include "clienthostname.h"
 #include <QDebug>
+#ifdef LITE_GPUI_WORKER
+#include <openssl/rand.h>
+#else
 #include <QUuid>
-#ifndef LITE_GPUI_WORKER
 #include <QtNetwork/QNetworkReply>
 #include <QEventLoop>
 #include <QTimer>
@@ -45,6 +47,24 @@ void NvHTTP::closeNativeOwner()
 {
 #ifdef LITE_NATIVE_HTTP
     if (s_NativeRequests) s_NativeRequests->close();
+#endif
+}
+
+QString NvHTTP::createRequestNonce()
+{
+#ifdef LITE_GPUI_WORKER
+    unsigned char bytes[16];
+    if (RAND_bytes(bytes, sizeof(bytes)) != 1) {
+        qFatal("Unable to generate a GameStream request nonce");
+    }
+
+    // Preserve the RFC 4122 version 4 UUID and the variant in its wire form.
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const auto wireBytes = QByteArray::fromRawData(reinterpret_cast<const char*>(bytes), sizeof(bytes));
+    return QString::fromLatin1(wireBytes.toHex());
+#else
+    return QString::fromLatin1(QUuid::createUuid().toRfc4122().toHex());
 #endif
 }
 
@@ -815,7 +835,7 @@ NvHTTP::openConnection(QUrl baseUrl,
 
     // Use a placeholder UID for GFE allow them to quit games for each other.
     url.setQuery("uniqueid=" + (m_UseTrueUid ? IdentityManager::get()->getUniqueId() : "0123456789ABCDEF") +
-                 "&uuid=" + QUuid::createUuid().toRfc4122().toHex() +
+                 "&uuid=" + createRequestNonce() +
                  "&clientname=" + clientname +
                  (!arguments.isNull() ? ("&" + arguments) : ""));
 
