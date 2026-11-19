@@ -55,7 +55,11 @@ private:
     void finishSession(Session* session);
     void postCompletion(std::function<void()> completion);
     NvComputer* findHost(const QString& uuid);
+#ifdef LITE_GPUI_WORKER
+    std::unique_ptr<ComputerManager> m_Manager;
+#else
     ComputerManager* m_Manager;
+#endif
     bool m_RustMonitor = false;
     int m_NextMonitorGeneration = 1;
     QHash<QString, QJsonObject> m_MonitorContexts;

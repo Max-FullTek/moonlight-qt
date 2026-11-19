@@ -14,6 +14,7 @@
 #include <QDebug>
 #include "streaming/session.h"
 #include "settings/streamingpreferences.h"
+#include "settings/compatfetcher.h"
 
 #include <QCoreApplication>
 #include "clienthostname.h"
@@ -211,29 +212,28 @@ GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent) {
     prefs->detectNetworkBlocking = false;
     prefs->quitAppAfter = false;
     m_RustMonitor = qEnvironmentVariable("MOONLIGHT_GPUI_RUST_MONITOR") == "1";
-    m_Manager = new ComputerManager(prefs, m_RustMonitor, qEnvironmentVariable("MOONLIGHT_GPUI_PROFILE"));
-    m_Manager->setParent(this);
-    connect(m_Manager, &ComputerManager::hostDeleted, this, [this](const QString& uuid) {
+
+    const auto deleted = [this](const QString& uuid) {
         m_DeletingHost = nullptr;
         send({{"event", "host_removed"}, {"host", uuid}});
         publishHosts();
         finishShutdown();
-    });
-    connect(m_Manager, &ComputerManager::quitAppCompleted, this, [this](QVariant error) {
+    };
+    const auto quitCompleted = [this](const QString& error) {
         if (!m_QuitPending) return;
         m_QuitPending = false;
-        if (error.isNull() || error.toString().isEmpty()) send({{"event", "app_quit"}});
-        else fail("quit_failed", error.toString());
+        if (error.isEmpty()) send({{"event", "app_quit"}});
+        else fail("quit_failed", error);
         publishHosts();
-    });
-    connect(m_Manager, &ComputerManager::computerStateChanged, this, [this] { publishHosts(); });
-    connect(m_Manager, &ComputerManager::computerAddCompleted, this, [this](QVariant success, QVariant) {
+    };
+    const auto stateChanged = [this] { publishHosts(); };
+    const auto addCompleted = [this](bool success) {
         m_AddPending = false;
-        if (!success.toBool()) fail("add_failed", tr("Unable to connect to the specified host."));
+        if (!success) fail("add_failed", tr("Unable to connect to the specified host."));
         else send({{"event", "added"}});
         publishHosts();
-    });
-    connect(m_Manager, &ComputerManager::pairingCompleted, this, [this](NvComputer*, QString error) {
+    };
+    const auto pairingCompleted = [this](const QString& error) {
         m_PairingHost.clear();
         if (error.isEmpty()) send({{"event", "paired"}});
         else {
@@ -241,7 +241,25 @@ GpuiCoreBridge::GpuiCoreBridge(QObject* parent) : QObject(parent) {
             fail(code, error);
         }
         publishHosts();
+    };
+#ifdef LITE_GPUI_WORKER
+    m_Manager = std::make_unique<ComputerManager>(prefs, m_RustMonitor, qEnvironmentVariable("MOONLIGHT_GPUI_PROFILE"));
+    m_Manager->m_HostEvents = {deleted, quitCompleted, stateChanged, addCompleted, pairingCompleted};
+#else
+    m_Manager = new ComputerManager(prefs, m_RustMonitor, qEnvironmentVariable("MOONLIGHT_GPUI_PROFILE"));
+    m_Manager->setParent(this);
+    connect(m_Manager, &ComputerManager::hostDeleted, this, deleted);
+    connect(m_Manager, &ComputerManager::quitAppCompleted, this, [quitCompleted](const QVariant& error) {
+        quitCompleted(error.toString());
     });
+    connect(m_Manager, &ComputerManager::computerStateChanged, this, stateChanged);
+    connect(m_Manager, &ComputerManager::computerAddCompleted, this, [addCompleted](const QVariant& success) {
+        addCompleted(success.toBool());
+    });
+    connect(m_Manager, &ComputerManager::pairingCompleted, this, [pairingCompleted](NvComputer*, const QString& error) {
+        pairingCompleted(error);
+    });
+#endif
 }
 
 GpuiCoreBridge::~GpuiCoreBridge()
@@ -263,7 +281,7 @@ GpuiCoreBridge::~GpuiCoreBridge()
     // while the bridge and its Windows completion target are both alive.
     m_Manager->m_HostTasks.wait();
     m_Session.reset();
-    delete m_Manager;
+    m_Manager.reset();
 #endif
 }
 

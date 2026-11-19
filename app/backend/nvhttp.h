@@ -14,6 +14,7 @@
 #ifndef LITE_GPUI_WORKER
 #include <QNetworkAccessManager>
 #else
+#include <QCoreApplication>
 class QNetworkAccessManager;
 #endif
 #include <QJsonObject>
@@ -109,9 +110,17 @@ private:
     QByteArray m_ErrorText;
 };
 
-class NvHTTP : public QObject
+class NvHTTP
+#ifndef LITE_GPUI_WORKER
+    : public QObject
+#endif
 {
+#ifdef LITE_GPUI_WORKER
+    Q_DECLARE_TR_FUNCTIONS(NvHTTP)
+    Q_DISABLE_COPY(NvHTTP)
+#else
     Q_OBJECT
+#endif
 
 public:
     // Set once before GPUI tasks start; Qt clients keep their existing owner.

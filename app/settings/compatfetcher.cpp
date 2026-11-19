@@ -12,8 +12,6 @@
 #define COMPAT_VERSION "v1"
 #define COMPAT_KEY "latestsupportedversion-"
 
-CompatFetcher::CompatFetcher(QObject *parent) : QObject(parent) {}
-
 bool CompatFetcher::isGfeVersionSupported(QString gfeVersion)
 {
     if (gfeVersion.trimmed().isEmpty()) {

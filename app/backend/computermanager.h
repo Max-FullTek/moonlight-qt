@@ -2,7 +2,6 @@
 
 #include "nvcomputer.h"
 #include "settings/streamingpreferences.h"
-#include "settings/compatfetcher.h"
 
 #ifndef LITE_GPUI_WORKER
 #include <qmdnsengine/server.h>
@@ -129,9 +128,14 @@ private:
 
 class ComputerPollingEntry;
 
-class ComputerManager : public QObject
+class ComputerManager
+#ifndef LITE_GPUI_WORKER
+    : public QObject
+#endif
 {
+#ifndef LITE_GPUI_WORKER
     Q_OBJECT
+#endif
 
     friend class GpuiCoreBridge;
     friend class DeferredHostDeletionTask;
@@ -145,11 +149,17 @@ public:
 
     virtual ~ComputerManager();
 
+#ifdef LITE_GPUI_WORKER
+    void startPolling();
+    void stopPollingAsync();
+    void addNewHostManually(QString address);
+#else
     Q_INVOKABLE void startPolling();
 
     Q_INVOKABLE void stopPollingAsync();
 
     Q_INVOKABLE void addNewHostManually(QString address);
+#endif
 
     void addNewHost(NvAddress address, bool mdns, QString name = QString(), NvAddress mdnsIpv6Address = NvAddress());
 
@@ -177,6 +187,7 @@ public:
     void interruptPolling();
     void beginShutdown();
 
+#ifndef LITE_GPUI_WORKER
 signals:
     void computerStateChanged(NvComputer* computer);
 
@@ -189,14 +200,14 @@ signals:
 
 private slots:
     void handleAboutToQuit();
-
-    void handleComputerStateChanged(NvComputer* computer);
-
-#ifndef LITE_GPUI_WORKER
     void handleMdnsServiceResolved(MdnsPendingComputer* computer, QVector<QHostAddress>& addresses);
 #endif
 
 private:
+    void handleComputerStateChanged(NvComputer* computer);
+    void notifyPairingCompleted(NvComputer* computer, const QString& error);
+    void notifyAddCompleted(bool success, bool portBlocking);
+    void notifyQuitCompleted(const QString& error = {});
     void saveHosts();
     void finishHostDeletion(NvComputer* computer, const QString& uuid);
     void submitHostTask(std::function<void()> task);
@@ -218,6 +229,14 @@ private:
 
     StreamingPreferences* m_Prefs;
 #ifdef LITE_GPUI_WORKER
+    struct HostEvents {
+        std::function<void(const QString&)> deleted;
+        std::function<void(const QString&)> quitCompleted;
+        std::function<void()> stateChanged;
+        std::function<void(bool)> addCompleted;
+        std::function<void(const QString&)> pairingCompleted;
+    };
+    HostEvents m_HostEvents;
     WindowsTaskQueue m_HostTasks;
 #endif
     std::function<void(std::function<void()>)> m_HostCompletionDispatcher;
@@ -237,7 +256,6 @@ private:
     QMdnsEngine::Browser* m_MdnsBrowser;
     QVector<MdnsPendingComputer*> m_PendingResolution;
 #endif
-    CompatFetcher m_CompatFetcher;
     std::thread m_DelayedFlushThread;
     std::mutex m_DelayedFlushMutex; // Lock ordering: Must never be acquired while holding NvComputer lock
     std::condition_variable m_DelayedFlushCondition;

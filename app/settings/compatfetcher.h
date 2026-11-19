@@ -1,14 +1,10 @@
 #pragma once
 
-#include <QObject>
+#include <QString>
 
-class CompatFetcher : public QObject
+class CompatFetcher
 {
-    Q_OBJECT
-
 public:
-    explicit CompatFetcher(QObject *parent = nullptr);
-
     static bool isGfeVersionSupported(QString gfeVersion);
 
 };

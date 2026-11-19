@@ -8,7 +8,8 @@ lite-gpui-worker {
 } else {
     QT += network quick quickcontrols2 gui-private svg
     SOURCES += backend/systemproperties.cpp
-    HEADERS += backend/systemproperties.h streaming/session.h
+    HEADERS += backend/systemproperties.h backend/computermanager.h streaming/session.h
+    HEADERS += backend/nvhttp.h settings/streamingpreferences.h
 }
 win32:lite-no-microphone: DEFINES += LITE_NO_MICROPHONE
 !config_SL:!contains(DEFINES, LITE_NO_MICROPHONE): QT += multimedia
@@ -349,12 +350,9 @@ HEADERS += \
     backend/nvcomputer.h \
     backend/reachabilitypolicy.h \
     backend/hostrequesterror.h \
-    backend/nvhttp.h \
     backend/nvpairingmanager.h \
-    backend/computermanager.h \
     backend/boxartmanager.h \
     backend/richpresencemanager.h \
-    settings/streamingpreferences.h \
     streaming/input/cursorshapeclassifier.h \
     streaming/input/penhistory.h \
     streaming/input/input.h \

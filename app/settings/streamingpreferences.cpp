@@ -542,9 +542,12 @@ void StreamingPreferences::setOverlayMenuPosition(OverlayMenuPosition position)
     }
 
     overlayMenuPosition = position;
+#ifndef LITE_GPUI_WORKER
     emit overlayMenuPositionChanged();
+#endif
 }
 
+#ifndef LITE_GPUI_WORKER
 StreamingPreferences::BackgroundSource StreamingPreferences::backgroundSource() const
 {
     return m_BackgroundSource;
@@ -661,6 +664,7 @@ void StreamingPreferences::resetBackgroundConfiguration()
         emit backgroundConfigurationChanged();
     }
 }
+#endif
 
 bool StreamingPreferences::retranslate()
 {

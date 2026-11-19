@@ -1,29 +1,35 @@
 #pragma once
 
-#include <QObject>
 #include <QRect>
 #ifndef LITE_GPUI_WORKER
+#include <QObject>
 class QQmlEngine;
 #endif
 #include <QString>
 #include "streaming/video/videodecoderoptions.h"
 #include "streaming/input/inputoptions.h"
 
-class StreamingPreferences : public QObject
+class StreamingPreferences
+#ifndef LITE_GPUI_WORKER
+    : public QObject
+#endif
 {
+#ifndef LITE_GPUI_WORKER
     Q_OBJECT
+#endif
 
 public:
 #ifdef LITE_GPUI_WORKER
     static StreamingPreferences* get();
+    static int getDefaultBitrate(int width, int height, int fps, bool yuv444);
+    void save();
 #else
     static StreamingPreferences* get(QQmlEngine *qmlEngine = nullptr);
-#endif
-
     Q_INVOKABLE static int
     getDefaultBitrate(int width, int height, int fps, bool yuv444);
 
     Q_INVOKABLE void save();
+#endif
 
     void reload();
 
@@ -34,7 +40,6 @@ public:
         AC_71_SURROUND,
         AC_714_SURROUND
     };
-    Q_ENUM(AudioConfig)
 
     enum VideoCodecConfig
     {
@@ -44,7 +49,6 @@ public:
         VCC_FORCE_HEVC_HDR_DEPRECATED, // Kept for backwards compatibility
         VCC_FORCE_AV1
     };
-    Q_ENUM(VideoCodecConfig)
 
     enum VideoDecoderSelection
     {
@@ -52,7 +56,6 @@ public:
         VDS_FORCE_HARDWARE = VideoDecoderOptions::Hardware,
         VDS_FORCE_SOFTWARE = VideoDecoderOptions::Software
     };
-    Q_ENUM(VideoDecoderSelection)
 
     // Mac only (for now)
     enum RendererSelection
@@ -63,7 +66,6 @@ public:
         RS_METAL = VideoDecoderOptions::Metal,
         RS_AVSBDL = VideoDecoderOptions::AvSampleBuffer
     };
-    Q_ENUM(RendererSelection)
 
     enum WindowMode
     {
@@ -71,7 +73,6 @@ public:
         WM_FULLSCREEN_DESKTOP,
         WM_WINDOWED
     };
-    Q_ENUM(WindowMode)
 
     enum UIDisplayMode
     {
@@ -79,7 +80,6 @@ public:
         UI_MAXIMIZED,
         UI_FULLSCREEN
     };
-    Q_ENUM(UIDisplayMode)
 
     enum BackgroundSource
     {
@@ -89,7 +89,6 @@ public:
         BGS_LOCAL,
         BGS_NONE,
     };
-    Q_ENUM(BackgroundSource)
 
     // New entries must go at the end of the enum
     // to avoid renumbering existing entries (which
@@ -129,7 +128,6 @@ public:
         LANG_EO,
         LANG_TA,
     };
-    Q_ENUM(Language);
 
     enum CaptureSysKeysMode
     {
@@ -137,7 +135,6 @@ public:
         CSK_FULLSCREEN = InputOptions::CSK_FULLSCREEN,
         CSK_ALWAYS = InputOptions::CSK_ALWAYS,
     };
-    Q_ENUM(CaptureSysKeysMode);
 
     enum OverlayMenuPosition
     {
@@ -147,10 +144,10 @@ public:
         OMP_RIGHT_EDGE = 3, // Show on right edge
         OMP_LEFT_EDGE = 4,  // Show on left edge
     };
-    Q_ENUM(OverlayMenuPosition);
 
     void setOverlayMenuPosition(OverlayMenuPosition position);
 
+#ifndef LITE_GPUI_WORKER
     BackgroundSource backgroundSource() const;
     void setBackgroundSource(BackgroundSource source);
     QString backgroundImageApi() const;
@@ -162,13 +159,13 @@ public:
     bool backgroundSetupCompleted() const;
     void setBackgroundSetupCompleted(bool completed);
     Q_INVOKABLE void resetBackgroundConfiguration();
+#endif
 
     enum HdrMode
     {
         HDR_PQ  = 1,   // HDR10/PQ (SMPTE ST 2084) - default
         HDR_HLG = 2,   // HLG (Hybrid Log-Gamma, ARIB STD-B67)
     };
-    Q_ENUM(HdrMode);
 
     enum HdrBrightnessMode
     {
@@ -176,14 +173,12 @@ public:
         HBM_AUTO = 1,
         HBM_MANUAL = 2,
     };
-    Q_ENUM(HdrBrightnessMode);
 
     enum DualSenseHapticsMode
     {
         DSHM_PHYSICAL = 0,
         DSHM_EMULATED = 1,
     };
-    Q_ENUM(DualSenseHapticsMode);
 
     enum GamepadQuitCombo
     {
@@ -196,7 +191,6 @@ public:
         GQC_L1_R1_X_Y = InputOptions::GQC_L1_R1_X_Y,      // L1 + R1 + X + Y (no Select/Start at all)
         GQC_L1_R1_A_B = InputOptions::GQC_L1_R1_A_B,      // L1 + R1 + A + B (no Select/Start at all)
     };
-    Q_ENUM(GamepadQuitCombo);
 
     enum ScreenCombinationMode
     {
@@ -207,6 +201,24 @@ public:
         SCM_ENSURE_ONLY_DISPLAY = 3,
         SCM_ENSURE_SECONDARY = 4,
     };
+
+#ifdef LITE_GPUI_WORKER
+    bool retranslate();
+#else
+    Q_ENUM(AudioConfig)
+    Q_ENUM(VideoCodecConfig)
+    Q_ENUM(VideoDecoderSelection)
+    Q_ENUM(RendererSelection)
+    Q_ENUM(WindowMode)
+    Q_ENUM(UIDisplayMode)
+    Q_ENUM(BackgroundSource)
+    Q_ENUM(Language);
+    Q_ENUM(CaptureSysKeysMode);
+    Q_ENUM(OverlayMenuPosition);
+    Q_ENUM(HdrMode);
+    Q_ENUM(HdrBrightnessMode);
+    Q_ENUM(DualSenseHapticsMode);
+    Q_ENUM(GamepadQuitCombo);
     Q_ENUM(ScreenCombinationMode);
 
     Q_PROPERTY(int width MEMBER width NOTIFY displayModeChanged)
@@ -281,6 +293,7 @@ public:
     Q_PROPERTY(bool autoUpdateCheck MEMBER autoUpdateCheck NOTIFY autoUpdateCheckChanged)
 
     Q_INVOKABLE bool retranslate();
+#endif
 
     // Directly accessible members for preferences
     int width;
@@ -352,6 +365,7 @@ public:
     bool autoUpdateCheck;
     RendererSelection rendererSelection;
 
+#ifndef LITE_GPUI_WORKER
 signals:
     void displayModeChanged();
     void bitrateChanged();
@@ -417,9 +431,11 @@ signals:
     void overlayMenuPositionChanged();
     void autoUpdateCheckChanged();
     void rendererSelectionChanged();
+#endif
 
 private:
 #ifdef LITE_GPUI_WORKER
+    Q_DISABLE_COPY(StreamingPreferences)
     StreamingPreferences();
 #else
     explicit StreamingPreferences(QQmlEngine *qmlEngine);

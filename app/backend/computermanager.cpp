@@ -317,7 +317,6 @@ ComputerManager::ComputerManager(StreamingPreferences* prefs, bool externalPolli
 #ifndef LITE_GPUI_WORKER
       m_MdnsBrowser(nullptr),
 #endif
-      m_CompatFetcher(nullptr),
       m_NeedsDelayedFlush(false)
 {
 #ifdef LITE_NATIVE_WORKER_JSON
@@ -353,7 +352,9 @@ ComputerManager::ComputerManager(StreamingPreferences* prefs, bool externalPolli
 #ifdef LITE_NATIVE_WORKER_JSON
     if (imported && !m_KnownHosts.isEmpty()) saveHosts();
 #endif
+#ifndef LITE_GPUI_WORKER
     connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, this, &ComputerManager::handleAboutToQuit);
+#endif
 }
 
 #ifndef LITE_GPUI_WORKER
@@ -694,11 +695,15 @@ void ComputerManager::handleComputerStateChanged(NvComputer* computer)
     // A poll signal may already be queued when asynchronous deletion begins.
     // Do not dereference its pointer after ownership passes to the deletion task.
     if (m_DeletingHosts.contains(computer)) return;
+#ifdef LITE_GPUI_WORKER
+    m_HostEvents.stateChanged();
+#else
     emit computerStateChanged(computer);
+#endif
 
     if (computer->pendingQuit && computer->currentGameId == 0) {
         computer->pendingQuit = false;
-        emit quitAppCompleted(QVariant());
+        notifyQuitCompleted();
     }
 
     // Save updates to this host
@@ -777,7 +782,40 @@ void ComputerManager::deleteHost(NvComputer* computer)
 void ComputerManager::finishHostDeletion(NvComputer* computer, const QString& uuid)
 {
     m_DeletingHosts.remove(computer);
+#ifdef LITE_GPUI_WORKER
+    m_HostEvents.deleted(uuid);
+#else
     emit hostDeleted(uuid);
+#endif
+}
+
+void ComputerManager::notifyPairingCompleted(NvComputer* computer, const QString& error)
+{
+#ifdef LITE_GPUI_WORKER
+    Q_UNUSED(computer);
+    m_HostEvents.pairingCompleted(error);
+#else
+    emit pairingCompleted(computer, error);
+#endif
+}
+
+void ComputerManager::notifyAddCompleted(bool success, bool portBlocking)
+{
+#ifdef LITE_GPUI_WORKER
+    Q_UNUSED(portBlocking);
+    m_HostEvents.addCompleted(success);
+#else
+    emit computerAddCompleted(success, portBlocking);
+#endif
+}
+
+void ComputerManager::notifyQuitCompleted(const QString& error)
+{
+#ifdef LITE_GPUI_WORKER
+    m_HostEvents.quitCompleted(error);
+#else
+    emit quitAppCompleted(error.isNull() ? QVariant() : QVariant(error));
+#endif
 }
 
 void ComputerManager::submitHostTask(std::function<void()> task)
@@ -791,11 +829,15 @@ void ComputerManager::submitHostTask(std::function<void()> task)
 
 void ComputerManager::dispatchHostCompletion(std::function<void()> completion)
 {
+#ifdef LITE_GPUI_WORKER
+    m_HostCompletionDispatcher(std::move(completion));
+#else
     if (m_HostCompletionDispatcher) {
         m_HostCompletionDispatcher(std::move(completion));
     } else {
         QMetaObject::invokeMethod(this, std::move(completion), Qt::QueuedConnection);
     }
+#endif
 }
 
 void ComputerManager::renameHost(NvComputer* computer, QString name)
@@ -817,10 +859,12 @@ void ComputerManager::clientSideAttributeUpdated(NvComputer* computer)
     handleComputerStateChanged(computer);
 }
 
+#ifndef LITE_GPUI_WORKER
 void ComputerManager::handleAboutToQuit()
 {
     beginShutdown();
 }
+#endif
 
 void ComputerManager::beginShutdown()
 {
@@ -901,7 +945,7 @@ private:
     void reportResult(QString error)
     {
         m_ComputerManager->dispatchHostCompletion([manager = m_ComputerManager, computer = m_Computer, error] {
-            emit manager->pairingCompleted(computer, error);
+            manager->notifyPairingCompleted(computer, error);
         });
     }
 
@@ -962,7 +1006,7 @@ private:
     void reportFailure(QString error)
     {
         m_ComputerManager->dispatchHostCompletion([manager = m_ComputerManager, error] {
-            emit manager->quitAppCompleted(error);
+            manager->notifyQuitCompleted(error);
         });
     }
 
@@ -1023,7 +1067,7 @@ void ComputerManager::addNewHostManually(QString address)
         addNewHost(NvAddress(address, DEFAULT_HTTP_PORT), false);
     }
     else {
-        emit computerAddCompleted(false, false);
+        notifyAddCompleted(false, false);
     }
 }
 
@@ -1045,7 +1089,7 @@ private:
     void reportResult(bool success, bool portBlocking)
     {
         m_ComputerManager->dispatchHostCompletion([manager = m_ComputerManager, success, portBlocking] {
-            emit manager->computerAddCompleted(success, portBlocking);
+            manager->notifyAddCompleted(success, portBlocking);
         });
     }
 
