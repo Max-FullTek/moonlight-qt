@@ -3,7 +3,6 @@
 #include "nvhttp.h"
 #include "nvaddress.h"
 
-#include <QThread>
 #include <QReadWriteLock>
 
 class CopySafeReadWriteLock : public QReadWriteLock

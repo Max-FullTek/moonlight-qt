@@ -7,6 +7,8 @@ lite-gpui-worker {
     RESOURCES += lite-overlay-icons.qrc
 } else {
     QT += network quick quickcontrols2 gui-private svg
+    SOURCES += backend/systemproperties.cpp
+    HEADERS += backend/systemproperties.h
 }
 win32:lite-no-microphone: DEFINES += LITE_NO_MICROPHONE
 !config_SL:!contains(DEFINES, LITE_NO_MICROPHONE): QT += multimedia
@@ -326,7 +328,6 @@ SOURCES += \
     streaming/video/overlaybuttonposition.cpp \
     streaming/video/overlaymenubutton.cpp \
     streaming/video/overlaytoast.cpp \
-    backend/systemproperties.cpp \
     wm.cpp \
     streaming/video/videoenhancement.cpp
 
@@ -394,7 +395,6 @@ HEADERS += \
     streaming/video/overlaymenubutton.h \
     streaming/video/overlaytoasteventstate.h \
     streaming/video/overlaytoast.h \
-    backend/systemproperties.h \
     uifont.h
 
 # Conditional files for non-Steam Link builds

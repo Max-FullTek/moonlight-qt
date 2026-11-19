@@ -13,12 +13,16 @@
 #include <Limelight.h>
 #include <QtEndian>
 
+#ifdef LITE_GPUI_WORKER
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
 #include <QThread>
-#ifndef LITE_GPUI_WORKER
 #include <QThreadPool>
 #endif
 #include <QCoreApplication>
 #include <QRandomGenerator>
+#include <chrono>
 #include <memory>
 
 #ifndef LITE_GPUI_WORKER
@@ -27,19 +31,57 @@
 #define SER_HOSTS_BACKUP "hostsbackup"
 #endif
 
-class PcMonitorThread : public QThread
+class PcMonitorThread
+#ifndef LITE_GPUI_WORKER
+    : public QThread
+#endif
 {
-    Q_OBJECT
-
 #define TRIES_BEFORE_OFFLINING 2
 #define POLLS_PER_APPLIST_FETCH 10
 
 public:
-    PcMonitorThread(NvComputer* computer)
-        : m_Computer(computer)
+    PcMonitorThread(NvComputer* computer, std::function<void(NvComputer*)> notify)
+        : m_Computer(computer), m_Notify(std::move(notify))
     {
+#ifndef LITE_GPUI_WORKER
         setObjectName("Polling thread for " + computer->name);
+#endif
     }
+
+#ifdef LITE_GPUI_WORKER
+    void start()
+    {
+        m_Thread = std::thread([this] {
+            SetThreadDescription(GetCurrentThread(), L"Moonlight host polling");
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+#ifdef THREAD_POWER_THROTTLING_CURRENT_VERSION
+            THREAD_POWER_THROTTLING_STATE power = {
+                THREAD_POWER_THROTTLING_CURRENT_VERSION,
+                THREAD_POWER_THROTTLING_EXECUTION_SPEED,
+                THREAD_POWER_THROTTLING_EXECUTION_SPEED
+            };
+            SetThreadInformation(GetCurrentThread(), ThreadPowerThrottling, &power, sizeof(power));
+#endif
+            run();
+            m_Finished.store(true);
+        });
+    }
+
+    void requestInterruption()
+    {
+        {
+            std::lock_guard lock(m_WakeMutex);
+            m_Interrupted.store(true);
+        }
+        m_Wake.notify_one();
+    }
+
+    bool isFinished() const { return m_Finished.load(); }
+    void wait()
+    {
+        if (m_Thread.joinable()) m_Thread.join();
+    }
+#endif
 
 private:
     bool tryPollComputer(QNetworkAccessManager* nam, NvAddress address, bool& changed)
@@ -86,13 +128,20 @@ private:
         return true;
     }
 
+#ifdef LITE_GPUI_WORKER
+    bool isInterruptionRequested() const { return m_Interrupted.load(); }
+    void run()
+#else
     void run() override
+#endif
     {
+#ifndef LITE_GPUI_WORKER
         // Reduce the power and performance impact of our
         // computer status polling while it's running.
         setPriority(QThread::LowPriority);
 #if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
         setServiceLevel(QThread::QualityOfService::Eco);
+#endif
 #endif
 
         // Share the QNetworkAccessManager to conserve resources when polling.
@@ -147,7 +196,7 @@ private:
                 // Notify prior to the app list poll since it may take a while, and we don't
                 // want to delay onlining of a machine, especially if we already have a cached list.
                 if (stateChanged) {
-                    emit computerStateChanged(m_Computer);
+                    m_Notify(m_Computer);
                     stateChanged = false;
                 }
 
@@ -158,23 +207,106 @@ private:
 
             if (stateChanged) {
                 // Tell anyone listening that we've changed state
-                emit computerStateChanged(m_Computer);
+                m_Notify(m_Computer);
             }
 
+#ifdef LITE_GPUI_WORKER
+            std::unique_lock lock(m_WakeMutex);
+            m_Wake.wait_for(lock, std::chrono::seconds(3), [this] { return isInterruptionRequested(); });
+#else
             // Wait a bit to poll again, but do it in 100 ms chunks
             // so we can be interrupted reasonably quickly.
             // FIXME: QWaitCondition would be better.
             for (int i = 0; i < 30 && !isInterruptionRequested(); i++) {
                 QThread::msleep(100);
             }
+#endif
         }
     }
 
-signals:
-   void computerStateChanged(NvComputer* computer);
+    NvComputer* m_Computer;
+    std::function<void(NvComputer*)> m_Notify;
+#ifdef LITE_GPUI_WORKER
+    std::mutex m_WakeMutex;
+    std::condition_variable m_Wake;
+    std::atomic_bool m_Interrupted{false};
+    std::atomic_bool m_Finished{false};
+    std::thread m_Thread;
+#endif
+};
+
+class ComputerPollingEntry
+{
+public:
+    ComputerPollingEntry()
+        : m_ActiveThread(nullptr)
+    {
+
+    }
+
+    virtual ~ComputerPollingEntry()
+    {
+        interrupt();
+
+        // interrupt() should have taken care of this
+        Q_ASSERT(m_ActiveThread == nullptr);
+
+        for (PcMonitorThread* thread : std::as_const(m_InactiveList)) {
+            thread->wait();
+            delete thread;
+        }
+    }
+
+    bool isActive()
+    {
+        cleanInactiveList();
+
+        return m_ActiveThread != nullptr;
+    }
+
+    void setActiveThread(PcMonitorThread* thread)
+    {
+        cleanInactiveList();
+
+        Q_ASSERT(!isActive());
+        m_ActiveThread = thread;
+    }
+
+    void interrupt()
+    {
+        cleanInactiveList();
+
+        if (m_ActiveThread != nullptr) {
+            // Interrupt the active thread
+            m_ActiveThread->requestInterruption();
+
+            // Place it on the inactive list awaiting death
+            m_InactiveList.append(m_ActiveThread);
+
+            m_ActiveThread = nullptr;
+        }
+    }
 
 private:
-    NvComputer* m_Computer;
+    void cleanInactiveList()
+    {
+        QMutableListIterator<PcMonitorThread*> i(m_InactiveList);
+
+        // Reap any threads that have finished
+        while (i.hasNext()) {
+            i.next();
+
+            PcMonitorThread* thread = i.value();
+            if (thread->isFinished()) {
+                thread->wait();
+                delete thread;
+                i.remove();
+            }
+        }
+    }
+
+    PcMonitorThread* m_ActiveThread;
+    QList<PcMonitorThread*> m_InactiveList;
 };
 
 ComputerManager::ComputerManager(StreamingPreferences* prefs, bool externalPolling, QString profileDirectory)
@@ -492,13 +624,11 @@ void ComputerManager::startPollingComputer(NvComputer* computer)
     }
 
     if (!pollingEntry->isActive()) {
-        PcMonitorThread* thread = new PcMonitorThread(computer);
-        connect(thread, &PcMonitorThread::computerStateChanged,
-                this, [this](NvComputer* updated) {
+        auto thread = std::make_unique<PcMonitorThread>(computer, [this](NvComputer* updated) {
             dispatchHostCompletion([this, updated] { handleComputerStateChanged(updated); });
-        }, Qt::DirectConnection);
-        pollingEntry->setActiveThread(thread);
+        });
         thread->start();
+        pollingEntry->setActiveThread(thread.release());
     }
 }
 
@@ -1139,5 +1269,3 @@ QString ComputerManager::generatePinString()
 {
     return QString::asprintf("%04u", QRandomGenerator::system()->bounded(10000));
 }
-
-#include "computermanager.moc"

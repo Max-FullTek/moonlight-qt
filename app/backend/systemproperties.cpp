@@ -4,6 +4,7 @@
 
 #include <QGuiApplication>
 #include <QLibraryInfo>
+#include <QThread>
 
 #include "streaming/session.h"
 #include "streaming/streamutils.h"
