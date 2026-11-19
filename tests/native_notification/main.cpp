@@ -20,17 +20,19 @@ void check(HRESULT result, const char* what) {
 int main(int argc, char** argv) {
     try {
         const std::string_view mode = argc == 2 ? argv[1] : "";
-        const bool fullscreen = mode == "--fullscreen" || mode == "--hdr";
+        const bool exclusive = mode == "--exclusive";
+        const bool fullscreen = exclusive || mode == "--fullscreen" || mode == "--hdr";
         const bool hdr = mode == "--hdr";
         const bool visible = mode == "--visible" || fullscreen;
         if (argc > 2 || (argc == 2 && !visible)) {
-            throw std::runtime_error("Usage: native_notification [--visible | --fullscreen | --hdr]");
+            throw std::runtime_error("Usage: native_notification [--visible | --fullscreen | --exclusive | --hdr]");
         }
         SDL_SetMainReady();
         SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
         if (SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
         struct SdlLifetime { ~SdlLifetime() { SDL_Quit(); } } sdlLifetime;
-        const Uint32 flags = fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP :
+        const Uint32 flags = exclusive ? SDL_WINDOW_FULLSCREEN :
+                             fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP :
                              visible ? SDL_WINDOW_SHOWN : SDL_WINDOW_HIDDEN;
         const std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> windowOwner{
             SDL_CreateWindow("Native notification capability probe", SDL_WINDOWPOS_CENTERED,
@@ -69,11 +71,12 @@ int main(int argc, char** argv) {
                 check(swap->GetContainingOutput(&output), "probe output");
                 check(output.As(&output6), "probe HDR output interface");
                 check(output6->GetDesc1(&display), "probe active output configuration");
-                const bool fullscreenActive = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN_DESKTOP) ==
-                                              SDL_WINDOW_FULLSCREEN_DESKTOP;
-                std::printf("fullscreen=%d dpi=%u output_colorspace=%u\n", fullscreenActive,
+                const Uint32 fullscreenFlags = SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN_DESKTOP;
+                std::printf("fullscreen_flags=%#x dpi=%u output_colorspace=%u\n", fullscreenFlags,
                             GetDpiForWindow(hwnd), static_cast<unsigned>(display.ColorSpace));
-                if (fullscreen && !fullscreenActive) throw std::runtime_error("Fullscreen mode unavailable");
+                if (fullscreen && fullscreenFlags != flags) {
+                    throw std::runtime_error("Requested SDL fullscreen mode unavailable");
+                }
                 if (hdr) {
                     constexpr auto colorSpace = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
                     if (display.ColorSpace != colorSpace) {
