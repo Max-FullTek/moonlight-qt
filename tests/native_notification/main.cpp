@@ -7,6 +7,8 @@
 #include <d2d1_1.h>
 #include <dwrite.h>
 #include <wrl/client.h>
+#include <charconv>
+#include <chrono>
 #include <cstdio>
 #include <memory>
 #include <stdexcept>
@@ -19,13 +21,23 @@ void check(HRESULT result, const char* what) {
 }
 int main(int argc, char** argv) {
     try {
-        const std::string_view mode = argc == 2 ? argv[1] : "";
+        const std::string_view mode = argc > 1 ? argv[1] : "";
         const bool exclusive = mode == "--exclusive";
         const bool fullscreen = exclusive || mode == "--fullscreen" || mode == "--hdr";
         const bool hdr = mode == "--hdr";
         const bool visible = mode == "--visible" || fullscreen;
-        if (argc > 2 || (argc == 2 && !visible)) {
-            throw std::runtime_error("Usage: native_notification [--visible | --fullscreen | --exclusive | --hdr]");
+        int displayIndex = 0;
+        if (argc != 1 && (!visible || (argc != 2 && argc != 4))) {
+            throw std::runtime_error("Usage: native_notification [--visible | --fullscreen | --exclusive | --hdr] [--display INDEX]");
+        }
+        if (argc == 4) {
+            const std::string_view value = argv[3];
+            const auto end = value.data() + value.size();
+            const auto parsed = std::from_chars(value.data(), end, displayIndex);
+            if (std::string_view(argv[2]) != "--display" ||
+                    parsed.ec != std::errc{} || parsed.ptr != end || displayIndex < 0) {
+                throw std::runtime_error("Expected a non-negative display index after --display");
+            }
         }
         SDL_SetMainReady();
         SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
@@ -34,9 +46,14 @@ int main(int argc, char** argv) {
         const Uint32 flags = exclusive ? SDL_WINDOW_FULLSCREEN :
                              fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP :
                              visible ? SDL_WINDOW_SHOWN : SDL_WINDOW_HIDDEN;
+        const int displayCount = SDL_GetNumVideoDisplays();
+        if (displayIndex >= displayCount) {
+            throw std::runtime_error("Requested display index is unavailable");
+        }
+        const int position = static_cast<int>(SDL_WINDOWPOS_CENTERED_DISPLAY(displayIndex));
         const std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> windowOwner{
-            SDL_CreateWindow("Native notification capability probe", SDL_WINDOWPOS_CENTERED,
-                             SDL_WINDOWPOS_CENTERED, 800, 450, flags), SDL_DestroyWindow};
+            SDL_CreateWindow("Native notification capability probe", position, position,
+                             800, 450, flags), SDL_DestroyWindow};
         SDL_Window* window = windowOwner.get();
         if (!window) throw std::runtime_error(SDL_GetError());
         SDL_SysWMinfo info = {};
@@ -72,7 +89,12 @@ int main(int argc, char** argv) {
                 check(output.As(&output6), "probe HDR output interface");
                 check(output6->GetDesc1(&display), "probe active output configuration");
                 const Uint32 fullscreenFlags = SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN_DESKTOP;
-                std::printf("fullscreen_flags=%#x dpi=%u output_colorspace=%u\n", fullscreenFlags,
+                const int actualDisplay = SDL_GetWindowDisplayIndex(window);
+                if (actualDisplay != displayIndex) {
+                    throw std::runtime_error("SDL opened the probe on a different display");
+                }
+                std::printf("display=%d/%d fullscreen_flags=%#x dpi=%u output_colorspace=%u\n",
+                            actualDisplay, displayCount, fullscreenFlags,
                             GetDpiForWindow(hwnd), static_cast<unsigned>(display.ColorSpace));
                 if (fullscreen && fullscreenFlags != flags) {
                     throw std::runtime_error("Requested SDL fullscreen mode unavailable");
@@ -106,31 +128,52 @@ int main(int argc, char** argv) {
             int phase = -1;
             bool quit = false;
             unsigned framesPresented = 0;
+            using Clock = std::chrono::steady_clock;
+            auto firstPresent = Clock::time_point{};
+            auto lastPresent = Clock::time_point{};
+            auto longestFrame = Clock::duration::zero();
+            const char* const presentationPhases[] = {
+                "baseline", "visible", "hidden"
+            };
+            const int firstShowPhase = fullscreen ? 1 : 0;
             while (!quit) {
                 Uint32 elapsed = SDL_GetTicks() - start;
                 int current = static_cast<int>(elapsed / interval);
-                if (current >= 5) break;
+                if (current >= firstShowPhase + 5) break;
                 if (current != phase) {
-                    if (fullscreen && (phase == 0 || phase == 1)) {
-                        if (framesPresented == 0) throw std::runtime_error("No frames presented during fullscreen phase");
-                        std::printf("notification_%s: frames_presented=%u\n", phase == 0 ? "visible" : "hidden",
-                                    framesPresented);
+                    if (fullscreen && phase >= 0 && phase <= 2) {
+                        if (framesPresented < 2) throw std::runtime_error("Too few frames presented during fullscreen phase");
+                        using Milliseconds = std::chrono::duration<double, std::milli>;
+                        const double meanMs = Milliseconds(lastPresent - firstPresent).count() / (framesPresented - 1);
+                        std::printf("notification_%s: frames_presented=%u mean_interval_ms=%.3f max_interval_ms=%.3f\n",
+                                    presentationPhases[phase], framesPresented,
+                                    meanMs, Milliseconds(longestFrame).count());
                     }
                     framesPresented = 0;
+                    longestFrame = Clock::duration::zero();
                     const HWND before = GetForegroundWindow();
-                    if (current == 0) check(notification.show(L"重新連線中…（還剩 60 秒）", 60000), "show Chinese");
-                    if (current == 1) check(notification.hide(), "hide");
-                    if (current == 2) {
+                    const int notificationPhase = current - firstShowPhase;
+                    if (notificationPhase == 0) {
+                        const auto showStart = Clock::now();
+                        check(notification.show(L"重新連線中…（還剩 60 秒）", 60000), "show Chinese");
+                        std::printf("first_show_call_ms=%.3f\n",
+                                    std::chrono::duration<double, std::milli>(Clock::now() - showStart).count());
+                    }
+                    if (notificationPhase == 1) check(notification.hide(), "hide");
+                    if (notificationPhase == 2) {
                         view.Reset(); frame.Reset(); swap.Reset(); context.Reset(); video.Reset();
                         factory.Reset(); adapter.Reset(); dxgi.Reset();
+                        const auto showStart = Clock::now();
                         check(notification.show(L"解碼裝置已釋放，通知仍可更新", 60000), "reshow without video device");
+                        std::printf("reshow_call_ms=%.3f\n",
+                                    std::chrono::duration<double, std::milli>(Clock::now() - showStart).count());
                     }
-                    if (current == 3) check(notification.show(L"已重新連線，即將隱藏通知", static_cast<int>(interval / 2)), "replace message");
-                    if (current == 4) {
+                    if (notificationPhase == 3) check(notification.show(L"已重新連線，即將隱藏通知", static_cast<int>(interval / 2)), "replace message");
+                    if (notificationPhase == 4) {
                         check(notification.advance(), "expire notification");
                         if (notification.visible() || notification.nextEventDelayMs() != -1) throw std::runtime_error("expired notification remains visible");
                     }
-                    if (current == 2 && !fullscreen) {
+                    if (notificationPhase == 2 && !fullscreen) {
                         SDL_SetWindowSize(window, 600, 320);
                         check(notification.refresh(), "refresh resized notification");
                     }
@@ -144,6 +187,10 @@ int main(int argc, char** argv) {
                     const auto result = swap->Present(1, 0);
                     check(result, "sustained video present");
                     if (result == DXGI_STATUS_OCCLUDED) throw std::runtime_error("Fullscreen probe is occluded");
+                    const auto now = Clock::now();
+                    if (framesPresented == 0) firstPresent = now;
+                    else if (now - lastPresent > longestFrame) longestFrame = now - lastPresent;
+                    lastPresent = now;
                     ++framesPresented;
                 }
                 SDL_Event event;
@@ -155,7 +202,7 @@ int main(int argc, char** argv) {
                     if (event.type == SDL_QUIT || (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE)) quit = true;
                 }
             }
-            if (fullscreen && phase != 4) throw std::runtime_error("Fullscreen probe stopped early");
+            if (fullscreen && phase != firstShowPhase + 4) throw std::runtime_error("Fullscreen probe stopped early");
         }
         {
             NativeNotification replacement(window);

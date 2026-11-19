@@ -199,11 +199,10 @@ void HostProfile::save(const std::filesystem::path& path, const std::vector<NvCo
     WindowsProfileFile::replace(path, data);
 }
 
-QString HostProfile::pairName(const QString& directory, const QString& uuid)
+QString HostProfile::pairName(const std::filesystem::path& directory, const QString& uuid)
 {
     std::lock_guard lock(pairNamesMutex);
-    const auto path = std::filesystem::path(directory.toStdWString()) / L"pair-names-v1.json";
-    if (!cachedPairNames) cachedPairNames = loadPairNames(path);
+    if (!cachedPairNames) cachedPairNames = loadPairNames(directory / L"pair-names-v1.json");
     const auto& names = *cachedPairNames;
     const auto key = uuid.toUtf8().toStdString();
     const auto entry = names.find(key);
@@ -211,10 +210,10 @@ QString HostProfile::pairName(const QString& directory, const QString& uuid)
     return QString::fromStdString(entry->get_ref<const std::string&>());
 }
 
-void HostProfile::setPairName(const QString& directory, const QString& uuid, const QString& name)
+void HostProfile::setPairName(const std::filesystem::path& directory, const QString& uuid, const QString& name)
 {
     std::lock_guard lock(pairNamesMutex);
-    const auto path = std::filesystem::path(directory.toStdWString()) / L"pair-names-v1.json";
+    const auto path = directory / L"pair-names-v1.json";
     if (!cachedPairNames) cachedPairNames = loadPairNames(path);
     auto names = *cachedPairNames;
     names[uuid.toUtf8().toStdString()] = name.toUtf8().toStdString();

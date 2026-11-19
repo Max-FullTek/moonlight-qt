@@ -4,7 +4,7 @@
 #include "settings/compatfetcher.h"
 #ifdef LITE_NATIVE_WORKER_JSON
 #include "hostprofile.h"
-#include <QCoreApplication>
+#include "workerpreferences.h"
 #endif
 
 #include <mutex>
@@ -787,9 +787,10 @@ bool NvComputer::update(const NvComputer& that)
 void NvComputer::savePairname(const QString& uuid, const QString& pairname)
 {
 #ifdef LITE_NATIVE_WORKER_JSON
-    if (QCoreApplication::applicationName() == QStringLiteral("MoonlightGPUI")) {
+    const auto& directory = WorkerPreferences::directory();
+    if (!directory.empty()) {
         try {
-            HostProfile::setPairName(qEnvironmentVariable("MOONLIGHT_GPUI_PROFILE"), uuid, pairname);
+            HostProfile::setPairName(directory, uuid, pairname);
         } catch (const std::exception&) {
             qWarning("Unable to save the GPUI pair name");
         }
@@ -807,9 +808,10 @@ void NvComputer::savePairname(const QString& uuid, const QString& pairname)
 QString NvComputer::getPairname(const QString& uuid)
 {
 #ifdef LITE_NATIVE_WORKER_JSON
-    if (QCoreApplication::applicationName() == QStringLiteral("MoonlightGPUI")) {
+    const auto& directory = WorkerPreferences::directory();
+    if (!directory.empty()) {
         try {
-            return HostProfile::pairName(qEnvironmentVariable("MOONLIGHT_GPUI_PROFILE"), uuid);
+            return HostProfile::pairName(directory, uuid);
         } catch (const std::exception&) {
             qWarning("Unable to read the GPUI pair name");
             return {};
